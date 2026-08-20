@@ -32,7 +32,7 @@ async function remainingToBottom(page: Page): Promise<number> {
   return page.getByTestId('scrollport').evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight)
 }
 
-test('one million logical messages keep DOM bounded, tail-follow correctly, and preserve a semantic prepend anchor', async ({ page }) => {
+test('one million logical messages keep DOM bounded, roll a growing live tail, respect reader escape, and preserve prepend anchor', async ({ page }) => {
   const consoleErrors: string[] = []
   page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text()) })
 
@@ -45,15 +45,25 @@ test('one million logical messages keep DOM bounded, tail-follow correctly, and 
   expect(active).toBeLessThan(10_000)
   expect(active).toBeGreaterThan(2048)
 
-  await expect.poll(async () => numeric(await page.getByTestId('stream-ticks').textContent())).toBeGreaterThan(5)
+  // Accelerate model ingress so one assistant response crosses the bounded
+  // RenderUnit rollover threshold. The logical message remains one assistant
+  // message while the physical renderer grows by multiple independently-sized rows.
+  await page.getByTestId('stream-rate').selectOption('60')
+  await page.getByTestId('stream-start').click()
+  await expect.poll(async () => numeric(await page.getByTestId('live-chunks').textContent()), { timeout: 12_000 }).toBeGreaterThan(1)
+  await expect.poll(async () => numeric(await page.getByTestId('stream-ticks').textContent())).toBeGreaterThan(30)
   await expect(page.locator('[data-live-unit="true"]').last()).toBeVisible()
-  expect(await remainingToBottom(page)).toBeLessThan(160)
+  expect(await remainingToBottom(page)).toBeLessThan(180)
+  expect(await page.locator('[data-render-unit]').count()).toBeLessThan(180)
 
+  // Upward reader intent must synchronously escape follow mode. Streaming continues,
+  // but no subsequent ResizeObserver/programmatic scroll event may steal the viewport.
   const publishesBeforeEscape = numeric(await page.getByTestId('stream-ticks').textContent())
   await page.getByTestId('scrollport').hover()
   await page.mouse.wheel(0, -1200)
+  await expect(page.getByTestId('follow-state')).toHaveText('tail paused')
   await expect.poll(() => remainingToBottom(page)).toBeGreaterThan(400)
-  await expect.poll(async () => numeric(await page.getByTestId('stream-ticks').textContent())).toBeGreaterThan(publishesBeforeEscape + 4)
+  await expect.poll(async () => numeric(await page.getByTestId('stream-ticks').textContent())).toBeGreaterThan(publishesBeforeEscape + 8)
   expect(await remainingToBottom(page)).toBeGreaterThan(300)
 
   await page.getByRole('button', { name: 'Pause' }).click()
@@ -69,6 +79,9 @@ test('one million logical messages keep DOM bounded, tail-follow correctly, and 
   await page.getByTestId('prepend-button').click()
   await expect.poll(async () => await page.getByTestId('segment-range').textContent()).not.toBe(beforeSegment)
 
+  // This is the dynamic-height reverse-history acceptance gate. The same semantic
+  // RenderUnit must stay at the same viewport coordinate while 512 messages are
+  // inserted before it and the opposite side of the hot window is evicted.
   await expect.poll(async () => {
     const anchor = anchorBefore
     if (!anchor) return Number.POSITIVE_INFINITY
