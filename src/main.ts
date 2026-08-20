@@ -3,5 +3,6 @@ import App from './App.vue'
 import './styles.css'
 import './agent-renderers.css'
 import './virtua-layout.css'
+import './architecture.css'
 
 createApp(App).mount('#app')
