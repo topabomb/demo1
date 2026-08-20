@@ -25,9 +25,6 @@ const composerShellRef = ref<HTMLElement | null>(null)
 const order = shallowRef<string[]>([...props.runtime.projection.order])
 const composerText = ref(props.runtime.draftText)
 const shifting = ref(false)
-
-// Conversation structure and session UI state are separate channels. Node/order
-// changes stay fine-grained; one state notification publishes one immutable snapshot.
 const uiState = shallowRef<SessionUiSnapshot>(props.runtime.uiSnapshot)
 let lastStreamTick = uiState.value.streamRenderTicks
 let userScrollIntentUntil = 0
@@ -92,7 +89,6 @@ function remainingToBottom(): number {
   return Math.max(0, list.scrollSize - list.scrollOffset - list.viewportSize)
 }
 
-/** The reader is the last logical message currently visible in the viewport. */
 function updateReader(offset = listRef.value?.scrollOffset ?? 0): void {
   const list = listRef.value
   if (!list || order.value.length === 0) return
@@ -126,12 +122,6 @@ async function restoreListAnchor(anchor: LayoutAnchor): Promise<void> {
   await settleFrames(2)
 }
 
-/**
- * `scrollToIndex(last, end)` can stop on an estimate while dynamic rows/viewport
- * size are still being measured. For a true logical tail, converge a few frames
- * against Virtua's own measured scrollSize/viewportSize instead of maintaining
- * parallel item-height math in application code.
- */
 async function pinMeasuredEnd(maxFrames = 6): Promise<void> {
   for (let attempt = 0; attempt < maxFrames; attempt += 1) {
     await nextTick()
@@ -246,45 +236,72 @@ function findMessageUnitIndex(target: number, preferLast = false): number {
   return found
 }
 
-async function scrollToLogical(target: number, align: 'start' | 'center' | 'end' = 'center'): Promise<void> {
-  for (let attempt = 0; attempt < 6; attempt += 1) {
-    const list = listRef.value
-    if (!list) {
-      await settleFrames(1)
-      continue
-    }
-    const index = findMessageUnitIndex(target, align === 'end')
-    if (index < 0) {
-      await settleFrames(1)
-      continue
-    }
-    list.scrollToIndex(index, { align })
-    await settleFrames(2)
-    if (scrollStageRef.value?.querySelector(`[data-message-index="${target}"]`)) break
-  }
-  lastScrollOffset = listRef.value?.scrollOffset ?? 0
-  updateReader()
+function targetIsMounted(target: number): boolean {
+  return Boolean(scrollStageRef.value?.querySelector(`[data-message-index="${target}"]`))
 }
 
-/** Browsing history never cancels an asynchronous Agent run. */
+/**
+ * Imperative navigation is verified after several frames. A global jump changes
+ * the VList key/epoch, so a scroll issued against the old handle may briefly work
+ * and then be overwritten by the newly mounted virtualizer. We only finish after
+ * the target remains mounted across the remount/measurement boundary.
+ */
+async function scrollToLogical(target: number, align: 'start' | 'center' | 'end' = 'center'): Promise<void> {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    await settleFrames(1)
+    const list = listRef.value
+    if (!list) continue
+    const index = findMessageUnitIndex(target, align === 'end')
+    if (index < 0) continue
+
+    list.scrollToIndex(index, { align })
+    await settleFrames(2)
+    if (!targetIsMounted(target)) continue
+
+    // Ensure a late epoch remount or ResizeObserver correction does not undo it.
+    await settleFrames(2)
+    if (targetIsMounted(target)) {
+      lastScrollOffset = listRef.value?.scrollOffset ?? 0
+      updateReader(lastScrollOffset)
+      return
+    }
+  }
+
+  lastScrollOffset = listRef.value?.scrollOffset ?? 0
+  updateReader(lastScrollOffset)
+}
+
+async function waitForJumpEpoch(previousEpoch: number, previousHandle: VListHandle | null, target: number): Promise<void> {
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    await settleFrames(1)
+    const epochReady = uiState.value.virtualEpoch > previousEpoch && uiState.value.virtualEpoch === props.runtime.virtualEpoch
+    const orderReady = findMessageUnitIndex(target) >= 0
+    const handleReady = Boolean(listRef.value) && (listRef.value !== previousHandle || attempt >= 4)
+    if (epochReady && orderReady && handleReady) return
+  }
+}
+
 async function jumpToMessage(raw = props.runtime.jumpInput): Promise<void> {
   const target = Math.max(0, Math.min(props.runtime.logicalCount - 1, Math.floor(Number(raw) || 0)))
   clearUserIntent()
+  const previousEpoch = uiState.value.virtualEpoch
+  const previousHandle = listRef.value
   props.runtime.jump(target)
-  await settleFrames(3)
+  await waitForJumpEpoch(previousEpoch, previousHandle, target)
   await scrollToLogical(target)
 }
 
-/** Latest is navigation only: it never starts/stops the underlying Agent run. */
 async function jumpToLatest(): Promise<void> {
   clearUserIntent()
   const last = props.runtime.logicalCount - 1
   const streamRunning = props.stream.running
 
   if (props.runtime.range.end !== props.runtime.logicalCount) {
+    const previousEpoch = uiState.value.virtualEpoch
+    const previousHandle = listRef.value
     props.runtime.jump(last)
     props.runtime.refreshProjection()
-    await settleFrames(3)
+    await waitForJumpEpoch(previousEpoch, previousHandle, last)
   } else {
     props.runtime.refreshProjection()
     await settleFrames(1)
@@ -335,7 +352,6 @@ function sendComposer(): void {
   if (props.runtime.status === 'running') props.stream.start(true)
 }
 
-/** Reconcile viewport geometry after the composer changes height. */
 function scheduleViewportResizeReconcile(): void {
   if (viewportResizeFrame) cancelAnimationFrame(viewportResizeFrame)
   viewportResizeFrame = requestAnimationFrame(async () => {
@@ -420,8 +436,6 @@ onMounted(() => {
     }
   })
 
-  // Establish restored composer height first, restore semantic viewport second,
-  // then observe future layout changes. This avoids mount-time geometry races.
   resizeComposer()
   void restoreSnapshot().then(attachViewportObserver)
 })
