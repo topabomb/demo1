@@ -1,14 +1,15 @@
 import type { RenderUnit } from '../core/types'
+import type { ConversationExecutionController } from './contracts'
 import type { ConversationSessionRuntime } from './session-runtime'
 
 const LIVE_CHUNK_LIMIT = 6500
 
 /**
- * Synthetic model stream owned by the session scope, not by a Vue component.
- * A running session may continue receiving deltas while another Recent session
- * is active, matching real Agent runtimes/DSH session behavior.
+ * Reference implementation of the session-scoped execution contract.
+ * It is deliberately framework-free: a running session may continue receiving
+ * deltas while another Recent session is active or while its reader is in history.
  */
-export class SyntheticStreamController {
+export class SyntheticStreamController implements ConversationExecutionController {
   #runtime: ConversationSessionRuntime
   #timer: ReturnType<typeof setInterval> | null = null
   #framePending = false
