@@ -1,3 +1,7 @@
+.conversation-shell {
+  overflow: hidden;
+}
+
 .scroll-stage {
   position: relative;
   min-width: 0;
@@ -17,6 +21,19 @@
 .scroll-stage .conversation-meta-strip {
   z-index: 8;
   pointer-events: none;
+}
+
+.composer-shell {
+  position: relative;
+  z-index: 10;
+}
+
+.composer-box textarea {
+  min-height: 56px;
+  height: 56px;
+  max-height: 180px;
+  resize: none;
+  overflow-y: hidden;
 }
 
 .jump-latest {
