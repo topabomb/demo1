@@ -14,16 +14,25 @@
   height: 100%;
 }
 
-/* Virtua measures the item wrapper. Keep all visual geometry inside that
- * border box so ResizeObserver and the browser see exactly the same height. */
+/* Virtua owns this measured item wrapper. Do not put vertical padding/margin on
+ * it: the library's measurement path and CSS decoration can otherwise disagree.
+ * All visual row spacing lives inside .node-seat and is therefore part of the
+ * measured content height. */
 .virtua-row {
   display: flow-root;
   min-width: 0;
-  padding: 7px max(17px, calc((100% - 860px) / 2));
+  padding: 0;
+  margin: 0;
   overflow: visible;
 }
 
-.virtua-row > * {
+.node-seat {
+  width: 100%;
+  min-width: 0;
+  padding: 7px max(17px, calc((100% - 860px) / 2));
+}
+
+.node-seat > * {
   margin-block: 0;
 }
 
