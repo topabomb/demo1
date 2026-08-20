@@ -20,5 +20,7 @@ onBeforeUnmount(() => unsubscribe?.())
 </script>
 
 <template>
-  <RenderUnitView v-if="unit" :unit="unit" />
+  <div v-if="unit" class="node-seat">
+    <RenderUnitView :unit="unit" />
+  </div>
 </template>
