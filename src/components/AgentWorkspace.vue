@@ -18,7 +18,7 @@ interface ViewportHandle {
   setStreamRate(rate: number): void
 }
 
-const { workspace, activeSession, activeRevision, workspaceRevision } = useWorkspaceRuntime()
+const { workspace, activeSession, activeUiState, workspaceRevision } = useWorkspaceRuntime()
 const viewportRef = ref<ViewportHandle | null>(null)
 const diagnosticsOpen = ref(true)
 const { fps, frameP95, longTasks, heapMb } = usePerformanceMetrics()
@@ -28,17 +28,21 @@ const hotSessionIds = computed(() => {
   void workspaceRevision.value
   return workspace.hotSessionIds.join(', ')
 })
+const hotSessionCount = computed(() => {
+  void workspaceRevision.value
+  return workspace.hotSessionCount
+})
 const foldStateCount = computed(() => {
-  void activeRevision.value
+  void activeUiState.value
   return touchedFoldStateCount()
 })
 const highlightEntries = computed(() => {
-  void activeRevision.value
+  void activeUiState.value
   return highlightCacheSize()
 })
 
 function switchSession(id: string): void {
-  if (id === workspace.activeSessionId) return
+  if (id === activeSession.value.id) return
   const snapshot = viewportRef.value?.captureSnapshot()
   workspace.activate(id, snapshot)
 }
@@ -49,7 +53,7 @@ function jump(): void {
 
 function randomJump(): void {
   const runtime = activeSession.value
-  const next = (Math.imul(runtime.currentLogicalPosition + 17, 1103515245) + 12345) >>> 0
+  const next = (Math.imul(activeUiState.value.reader + 17, 1103515245) + 12345) >>> 0
   runtime.jumpInput = next % runtime.logicalCount
   void viewportRef.value?.jumpToMessage(runtime.jumpInput)
 }
@@ -87,11 +91,11 @@ function onRateChange(event: Event): void {
           v-for="descriptor in workspace.descriptors"
           :key="descriptor.id"
           class="session-row"
-          :class="{ active: descriptor.id === workspace.activeSessionId }"
+          :class="{ active: descriptor.id === activeSession.id }"
           :data-testid="`session-${descriptor.id}`"
           @click="switchSession(descriptor.id)"
         >
-          <span class="session-glyph">{{ descriptor.id === workspace.activeSessionId ? '✦' : '○' }}</span>
+          <span class="session-glyph">{{ descriptor.id === activeSession.id ? '✦' : '○' }}</span>
           <span class="session-copy">
             <strong>{{ descriptor.title }}</strong>
             <small>{{ descriptor.status === 'running' ? 'Running · synthetic backend' : `${descriptor.logicalCount.toLocaleString()} messages` }}</small>
@@ -101,7 +105,7 @@ function onRateChange(event: Event): void {
       </div>
       <div class="sidebar-footer">
         <span class="status-led" /> Runtime connected
-        <span class="sidebar-version">{{ workspace.hotSessionCount }}/3 hot</span>
+        <span class="sidebar-version">{{ hotSessionCount }}/3 hot</span>
       </div>
     </aside>
 
@@ -144,7 +148,7 @@ function onRateChange(event: Event): void {
       <div class="control-group">
         <label>Live LLM output</label>
         <div class="inline-control">
-          <select :value="activeSession.streamRate" @change="onRateChange">
+          <select :value="activeUiState.streamRate" @change="onRateChange">
             <option :value="5">5 Hz</option>
             <option :value="20">20 Hz</option>
             <option :value="60">60 Hz</option>
@@ -156,30 +160,30 @@ function onRateChange(event: Event): void {
 
       <div class="metrics" data-testid="metrics">
         <div><span>logical</span><strong data-testid="logical-count">{{ activeSession.logicalCount.toLocaleString() }}</strong></div>
-        <div><span>hot sessions</span><strong data-testid="hot-sessions">{{ workspace.hotSessionCount }}</strong></div>
-        <div><span>hot messages</span><strong>{{ (activeSession.range.end - activeSession.range.start).toLocaleString() }}</strong></div>
-        <div><span>render units</span><strong data-testid="active-units">{{ activeSession.projection.size.toLocaleString() }}</strong></div>
-        <div><span>DOM rows</span><strong data-testid="mounted-rows">{{ activeSession.mountedRows }}</strong></div>
-        <div><span>messages after</span><strong data-testid="messages-after-metric">{{ activeSession.messagesAfterCurrent.toLocaleString() }}</strong></div>
+        <div><span>hot sessions</span><strong data-testid="hot-sessions">{{ hotSessionCount }}</strong></div>
+        <div><span>hot messages</span><strong>{{ (activeUiState.rangeEnd - activeUiState.rangeStart).toLocaleString() }}</strong></div>
+        <div><span>render units</span><strong data-testid="active-units">{{ activeUiState.projectionSize.toLocaleString() }}</strong></div>
+        <div><span>DOM rows</span><strong data-testid="mounted-rows">{{ activeUiState.mountedRows }}</strong></div>
+        <div><span>messages after</span><strong data-testid="messages-after-metric">{{ activeUiState.messagesAfter.toLocaleString() }}</strong></div>
         <div><span>FPS</span><strong>{{ fps }}</strong></div>
         <div><span>frame p95</span><strong>{{ frameP95 }} ms</strong></div>
         <div><span>long tasks</span><strong>{{ longTasks }}</strong></div>
         <div><span>JS heap</span><strong>{{ heapMb === null ? 'n/a' : `${heapMb} MB` }}</strong></div>
-        <div><span>stream ingress</span><strong data-testid="stream-ingress">{{ activeSession.streamIngressTicks }}</strong></div>
-        <div><span>UI publishes</span><strong data-testid="stream-ticks">{{ activeSession.streamRenderTicks }}</strong></div>
-        <div><span>live chunks</span><strong data-testid="live-chunks">{{ activeSession.liveTailUnits.length + 1 }}</strong></div>
+        <div><span>stream ingress</span><strong data-testid="stream-ingress">{{ activeUiState.streamIngressTicks }}</strong></div>
+        <div><span>UI publishes</span><strong data-testid="stream-ticks">{{ activeUiState.streamRenderTicks }}</strong></div>
+        <div><span>live chunks</span><strong data-testid="live-chunks">{{ activeUiState.liveChunkCount }}</strong></div>
         <div><span>fold state</span><strong>{{ foldStateCount }}</strong></div>
         <div><span>highlight LRU</span><strong>{{ highlightEntries }}</strong></div>
-        <div><span>virtual epoch</span><strong>{{ activeSession.virtualEpoch }}</strong></div>
+        <div><span>virtual epoch</span><strong>{{ activeUiState.virtualEpoch }}</strong></div>
       </div>
 
       <div class="architecture-note">
         <strong>Bounded scoped rendering</strong>
         <span>Backend → adapter → canonical timeline → keyed projection → NodeSeat → Virtua.</span>
         <span>Hot runtime LRU: <b data-testid="hot-session-ids">{{ hotSessionIds }}</b></span>
-        <span>Stable order: {{ activeSession.projection.size.toLocaleString() }} IDs; streaming patches one keyed node.</span>
+        <span>Stable order: {{ activeUiState.projectionSize.toLocaleString() }} IDs; streaming patches one keyed node.</span>
         <span>Global page index: {{ activeSession.pageHeights.pageCount.toLocaleString() }} Fenwick leaves.</span>
-        <span>Estimated logical height: {{ Math.round(activeSession.estimatedTotalHeight / 1_000_000).toLocaleString() }}M px; never one DOM element.</span>
+        <span>Estimated logical height: {{ Math.round(activeUiState.estimatedTotalHeight / 1_000_000).toLocaleString() }}M px; never one DOM element.</span>
       </div>
     </aside>
 
