@@ -18,12 +18,18 @@ export interface ConversationHistoryAdapter {
   loadRange(start: number, count: number): readonly LogicalMessage[]
 }
 
+/**
+ * Lightweight state that survives viewport unmount and heavyweight-runtime LRU
+ * eviction. It intentionally stores semantic UI state only, never DOM/virtualizer
+ * objects or backend protocol objects.
+ */
 export interface ViewportSnapshot {
   logicalPosition: number
   anchorUnitId: string | null
   anchorOffsetPx: number
   followTail: boolean
   atVisualBottom: boolean
+  draftText: string
 }
 
 export interface StreamDelta {
