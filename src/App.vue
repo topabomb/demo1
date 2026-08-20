@@ -4,7 +4,7 @@ import AgentWorkspace from './components/AgentWorkspace.vue'
 import ArchitectureOverview from './components/ArchitectureOverview.vue'
 
 const hash = ref(window.location.hash)
-const view = computed(() => hash.value === '#lab' ? 'lab' : 'architecture')
+const view = computed(() => hash.value === '#architecture' ? 'architecture' : 'lab')
 
 function syncHash(): void { hash.value = window.location.hash }
 onMounted(() => window.addEventListener('hashchange', syncHash))
@@ -12,6 +12,6 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', syncHash))
 </script>
 
 <template>
-  <AgentWorkspace v-if="view === 'lab'" />
-  <ArchitectureOverview v-else />
+  <ArchitectureOverview v-if="view === 'architecture'" />
+  <AgentWorkspace v-else />
 </template>
