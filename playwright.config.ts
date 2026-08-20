@@ -1,24 +1,26 @@
 import { defineConfig, devices } from '@playwright/test'
 
+const remoteBaseURL = process.env.PLAYWRIGHT_BASE_URL?.replace(/\/?$/, '/')
+
 export default defineConfig({
   testDir: './e2e',
-  timeout: 45_000,
-  expect: { timeout: 10_000 },
+  timeout: 60_000,
+  expect: { timeout: 12_000 },
   retries: 0,
   reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'list',
   use: {
-    baseURL: 'http://127.0.0.1:4173',
+    baseURL: remoteBaseURL ?? 'http://127.0.0.1:4173/',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },
   projects: [{
-    name: 'chromium',
+    name: remoteBaseURL ? 'pages-chromium' : 'chromium',
     use: {
       ...devices['Desktop Chrome'],
       ...(process.env.CI ? { channel: 'chrome' as const } : {}),
     },
   }],
-  webServer: {
+  webServer: remoteBaseURL ? undefined : {
     command: 'pnpm exec vite --host 127.0.0.1 --port 4173',
     url: 'http://127.0.0.1:4173',
     timeout: 15_000,
