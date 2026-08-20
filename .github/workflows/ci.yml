@@ -13,6 +13,66 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  pages-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Verify published GitHub Pages site
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://topabomb.github.io/demo1/'
+          html="$(mktemp)"
+
+          echo "Probing $base"
+          ok=0
+          for attempt in $(seq 1 18); do
+            status="$(curl -L -sS -o "$html" -w '%{http_code}' "$base" || true)"
+            echo "attempt=$attempt status=$status"
+            if [ "$status" = '200' ] && grep -q 'Million Message Lab' "$html"; then
+              ok=1
+              break
+            fi
+            sleep 5
+          done
+
+          if [ "$ok" != '1' ]; then
+            echo 'Published page did not become healthy.' >&2
+            echo '--- response ---' >&2
+            head -c 1000 "$html" >&2 || true
+            exit 1
+          fi
+
+          asset="$(grep -oE 'src="[^"]+/assets/index-[^"]+\.js"' "$html" | head -1 | cut -d'"' -f2)"
+          if [ -z "$asset" ]; then
+            echo 'Main JavaScript asset was not found in deployed HTML.' >&2
+            cat "$html" >&2
+            exit 1
+          fi
+
+          case "$asset" in
+            http*) asset_url="$asset" ;;
+            /*) asset_url="https://topabomb.github.io$asset" ;;
+            *) asset_url="${base}${asset}" ;;
+          esac
+
+          echo "main_asset=$asset_url"
+          curl -L --fail --silent --show-error "$asset_url" -o main.js
+          grep -q 'CodeNomad Lab' main.js
+
+          worker="$(grep -oE 'highlight\.worker-[A-Za-z0-9_-]+\.js' main.js | head -1 || true)"
+          if [ -z "$worker" ]; then
+            echo 'Highlight worker reference was not found in deployed main bundle.' >&2
+            exit 1
+          fi
+
+          worker_url="${base}assets/${worker}"
+          echo "worker_asset=$worker_url"
+          curl -L --fail --silent --show-error "$worker_url" -o worker.js
+          test -s worker.js
+
+          echo 'PAGES_PROBE_GREEN'
+
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 8
