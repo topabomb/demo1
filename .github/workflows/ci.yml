@@ -14,21 +14,42 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.1
+          run_install: false
+
       - uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: npm
+          cache: pnpm
           cache-dependency-path: package.json
+
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: pnpm install --no-frozen-lockfile --prefer-offline
+
       - name: Unit tests
-        run: npm test
+        run: pnpm test
+
       - name: Typecheck and build
-        run: npm run build
+        run: pnpm build
+
+      - name: Cache Playwright Chromium
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-chromium-1.62.1
+
       - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: pnpm exec playwright install --with-deps chromium
+
       - name: Browser stress gate
-        run: npm run test:e2e
+        run: pnpm test:e2e
+
       - name: Upload Playwright report on failure
         if: failure()
         uses: actions/upload-artifact@v4
