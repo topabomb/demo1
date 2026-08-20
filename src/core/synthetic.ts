@@ -40,19 +40,32 @@ const TURN_PATTERN: readonly PatternEntry[] = [
 ]
 
 export class SyntheticConversationSource implements ConversationSource {
-  constructor(public readonly count: number) {}
+  readonly count: number
+  #scope: string
+  #seedOffset: number
+
+  constructor(count: number, scope = '', seedOffset = 0) {
+    this.count = count
+    this.#scope = scope
+    this.#seedOffset = seedOffset
+  }
 
   getMessage(index: number): LogicalMessage {
     if (!Number.isInteger(index) || index < 0 || index >= this.count) {
       throw new RangeError(`message index ${index} outside 0..${this.count - 1}`)
     }
 
-    const seed = hash32(index + 0x51f15e)
+    const seed = hash32(index + 0x51f15e + this.#seedOffset)
+    const messageId = this.#scope ? `${this.#scope}:m-${index}` : `m-${index}`
+    const turnId = this.#scope
+      ? `${this.#scope}:turn-${Math.floor(index / TURN_PATTERN.length)}`
+      : `turn-${Math.floor(index / TURN_PATTERN.length)}`
+
     if (index === this.count - 1) {
       return {
-        id: `m-${index}`,
+        id: messageId,
         index,
-        turnId: `turn-${Math.floor(index / TURN_PATTERN.length)}`,
+        turnId,
         role: 'assistant',
         kind: 'markdown',
         seed,
@@ -64,9 +77,9 @@ export class SyntheticConversationSource implements ConversationSource {
 
     const pattern = TURN_PATTERN[index % TURN_PATTERN.length]!
     return {
-      id: `m-${index}`,
+      id: messageId,
       index,
-      turnId: `turn-${Math.floor(index / TURN_PATTERN.length)}`,
+      turnId,
       role: pattern.role,
       kind: pattern.kind,
       seed,
