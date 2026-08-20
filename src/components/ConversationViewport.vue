@@ -15,22 +15,33 @@ const EDGE_THRESHOLD_PX = 900
 const USER_SCROLL_INTENT_MS = 650
 const VIRTUAL_BUFFER_PX = 900
 const VIRTUAL_ITEM_HINT_PX = 180
+const COMPOSER_MIN_PX = 56
+const COMPOSER_MAX_PX = 180
 
 const listRef = ref<VListHandle | null>(null)
 const scrollStageRef = ref<HTMLElement | null>(null)
-// Domain projection remains readonly. Virtua's Vue binding requires a mutable
-// array type, so copy only when membership/order actually changes.
+const composerInputRef = ref<HTMLTextAreaElement | null>(null)
+const composerShellRef = ref<HTMLElement | null>(null)
 const order = shallowRef<string[]>([...props.runtime.projection.order])
 const stateRevision = ref(0)
-const composerText = ref('')
 const shifting = ref(false)
 let lastStreamTick = props.runtime.streamRenderTicks
 let userScrollIntentUntil = 0
 let userScrollDirection: -1 | 0 | 1 = 0
 let lastScrollOffset = 0
 let metricsFrame = 0
+let viewportResizeFrame = 0
+let viewportObserver: ResizeObserver | null = null
 let unsubscribeOrder: (() => void) | null = null
 let unsubscribeState: (() => void) | null = null
+
+const composerText = computed({
+  get: () => {
+    void stateRevision.value
+    return props.runtime.draftText
+  },
+  set: (value: string) => props.runtime.setDraftText(value),
+})
 
 const messagesAfter = computed(() => {
   void stateRevision.value
@@ -38,7 +49,7 @@ const messagesAfter = computed(() => {
 })
 const showLatest = computed(() => {
   void stateRevision.value
-  return messagesAfter.value > 0 || !props.runtime.atVisualBottom
+  return !props.runtime.atVisualBottom || messagesAfter.value > 0
 })
 const followLabel = computed(() => {
   void stateRevision.value
@@ -86,14 +97,23 @@ function remainingToBottom(): number {
   return Math.max(0, list.scrollSize - list.scrollOffset - list.viewportSize)
 }
 
+/**
+ * Reader position means the last logical message currently visible to the user.
+ * That makes `messagesAfterCurrent` an exact logical count for the Latest badge.
+ */
 function updateReader(offset = listRef.value?.scrollOffset ?? 0): void {
   const list = listRef.value
   if (!list || order.value.length === 0) return
-  const probe = Math.max(0, offset + list.viewportSize * 0.65)
-  const index = Math.max(0, Math.min(order.value.length - 1, list.findItemIndex(probe)))
-  const node = nodeFor(order.value[index]!)
   const atBottom = remainingToBottom() < 32 && props.runtime.range.end === props.runtime.logicalCount
-  if (node) props.runtime.setReaderPosition(node.messageIndex, atBottom)
+  if (atBottom) {
+    props.runtime.setReaderPosition(props.runtime.logicalCount - 1, true)
+    return
+  }
+
+  const bottomProbe = Math.max(0, Math.min(list.scrollSize - 1, offset + Math.max(1, list.viewportSize - 2)))
+  const index = Math.max(0, Math.min(order.value.length - 1, list.findItemIndex(bottomProbe)))
+  const node = nodeFor(order.value[index]!)
+  if (node) props.runtime.setReaderPosition(node.messageIndex, false)
 }
 
 function markUserIntent(direction: -1 | 0 | 1): void {
@@ -110,9 +130,6 @@ function onUserWheel(event: WheelEvent): void {
   const direction: -1 | 0 | 1 = event.deltaY < 0 ? -1 : event.deltaY > 0 ? 1 : 0
   markUserIntent(direction)
 
-  // The first upward gesture leaving a streaming pinned tail is serialized via
-  // Virtua's own scroll queue. This avoids racing a scheduled end-follow write
-  // and ResizeObserver compensation while preserving native scrolling afterward.
   if (direction < 0 && props.runtime.streamTarget && props.runtime.followTail) {
     event.preventDefault()
     props.runtime.setFollowTail(false)
@@ -189,15 +206,28 @@ async function shiftForward(): Promise<void> {
   shifting.value = false
 }
 
+function findMessageUnitIndex(target: number, preferLast = false): number {
+  let found = -1
+  for (let i = 0; i < order.value.length; i += 1) {
+    if (nodeFor(order.value[i]!)?.messageIndex !== target) continue
+    found = i
+    if (!preferLast) break
+  }
+  return found
+}
+
 async function scrollToLogical(target: number, align: 'start' | 'center' | 'end' = 'center'): Promise<void> {
-  for (let attempt = 0; attempt < 5; attempt += 1) {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
     const list = listRef.value
     if (!list) {
       await settleFrames(1)
       continue
     }
-    const index = order.value.findIndex(id => nodeFor(id)?.messageIndex === target)
-    if (index < 0) return
+    const index = findMessageUnitIndex(target, align === 'end')
+    if (index < 0) {
+      await settleFrames(1)
+      continue
+    }
     list.scrollToIndex(index, { align })
     await settleFrames(2)
     if (scrollStageRef.value?.querySelector(`[data-message-index="${target}"]`)) break
@@ -206,27 +236,35 @@ async function scrollToLogical(target: number, align: 'start' | 'center' | 'end'
   updateReader()
 }
 
+/** Browsing history never cancels an asynchronous Agent run. */
 async function jumpToMessage(raw = props.runtime.jumpInput): Promise<void> {
   const target = Math.max(0, Math.min(props.runtime.logicalCount - 1, Math.floor(Number(raw) || 0)))
   clearUserIntent()
-  if (props.stream.running) props.stream.stop(false)
   props.runtime.jump(target)
   await settleFrames(3)
   await scrollToLogical(target)
 }
 
+/** Latest is navigation only: it never starts/stops the underlying Agent run. */
 async function jumpToLatest(): Promise<void> {
   clearUserIntent()
   const last = props.runtime.logicalCount - 1
+  const streamRunning = props.stream.running
+
   if (props.runtime.range.end !== props.runtime.logicalCount) {
     props.runtime.jump(last)
+    props.runtime.refreshProjection()
     await settleFrames(3)
+  } else {
+    props.runtime.refreshProjection()
+    await settleFrames(1)
   }
-  props.runtime.setFollowTail(props.runtime.status === 'running')
-  listRef.value?.scrollToIndex(Math.max(0, order.value.length - 1), { align: 'end' })
+
+  await scrollToLogical(last, 'end')
   await settleFrames(2)
-  updateReader()
-  if (props.runtime.status === 'running' && !props.stream.running) props.stream.start(false)
+  const physicallyAtBottom = remainingToBottom() < 48
+  props.runtime.setReaderPosition(last, physicallyAtBottom)
+  props.runtime.setFollowTail(streamRunning && physicallyAtBottom)
 }
 
 function restartStream(): void {
@@ -241,10 +279,46 @@ function setStreamRate(rate: number): void {
   props.stream.setRate(rate)
 }
 
+function resizeComposer(): void {
+  const input = composerInputRef.value
+  if (!input) return
+  input.style.height = '0px'
+  const next = Math.max(COMPOSER_MIN_PX, Math.min(COMPOSER_MAX_PX, input.scrollHeight))
+  input.style.height = `${next}px`
+  input.style.overflowY = input.scrollHeight > COMPOSER_MAX_PX ? 'auto' : 'hidden'
+}
+
+function onComposerInput(): void {
+  void nextTick().then(resizeComposer)
+}
+
 function sendComposer(): void {
   if (!composerText.value.trim()) return
   composerText.value = ''
+  void nextTick().then(resizeComposer)
   if (props.runtime.status === 'running') props.stream.start(true)
+}
+
+/**
+ * Composer height changes resize the physical viewport rather than overlaying it.
+ * At the global tail we re-pin after Virtua observes the new viewport height;
+ * in history we leave scrollTop/top anchor untouched and just refresh semantics.
+ */
+function scheduleViewportResizeReconcile(): void {
+  if (viewportResizeFrame) cancelAnimationFrame(viewportResizeFrame)
+  viewportResizeFrame = requestAnimationFrame(async () => {
+    viewportResizeFrame = 0
+    await nextTick()
+    const shouldPin = props.runtime.atVisualBottom || props.runtime.followTail
+    if (shouldPin && props.runtime.range.end === props.runtime.logicalCount) {
+      const last = props.runtime.logicalCount - 1
+      await scrollToLogical(last, 'end')
+      if (remainingToBottom() < 48) props.runtime.setReaderPosition(last, true)
+    } else {
+      updateReader()
+    }
+    refreshMountedRows()
+  })
 }
 
 function captureSnapshot(): ViewportSnapshot {
@@ -265,7 +339,10 @@ async function restoreSnapshot(): Promise<void> {
   if (!list) return
 
   if (snapshot.atVisualBottom && props.runtime.range.end === props.runtime.logicalCount) {
-    list.scrollToIndex(Math.max(0, order.value.length - 1), { align: 'end' })
+    props.runtime.refreshProjection()
+    await settleFrames(1)
+    await scrollToLogical(props.runtime.logicalCount - 1, 'end')
+    if (remainingToBottom() < 48) props.runtime.setReaderPosition(props.runtime.logicalCount - 1, true)
   } else if (snapshot.anchorUnitId) {
     const index = order.value.indexOf(snapshot.anchorUnitId)
     if (index >= 0) list.scrollToIndex(index, { align: 'start', offset: -snapshot.anchorOffsetPx })
@@ -280,9 +357,7 @@ async function restoreSnapshot(): Promise<void> {
 }
 
 function formatAfter(count: number): string {
-  if (count < 1000) return `${count}`
-  if (count < 1_000_000) return `${(count / 1000).toFixed(count >= 10_000 ? 0 : 1)}K`
-  return `${(count / 1_000_000).toFixed(1)}M`
+  return count.toLocaleString('en-US')
 }
 
 onMounted(() => {
@@ -299,6 +374,12 @@ onMounted(() => {
       })
     }
   })
+
+  viewportObserver = new ResizeObserver(scheduleViewportResizeReconcile)
+  if (scrollStageRef.value) viewportObserver.observe(scrollStageRef.value)
+  if (composerShellRef.value) viewportObserver.observe(composerShellRef.value)
+
+  resizeComposer()
   void restoreSnapshot()
 })
 
@@ -306,7 +387,9 @@ onBeforeUnmount(() => {
   props.runtime.rememberSnapshot(captureSnapshot())
   unsubscribeOrder?.()
   unsubscribeState?.()
+  viewportObserver?.disconnect()
   if (metricsFrame) cancelAnimationFrame(metricsFrame)
+  if (viewportResizeFrame) cancelAnimationFrame(viewportResizeFrame)
 })
 
 defineExpose({
@@ -373,15 +456,23 @@ defineExpose({
       </button>
     </div>
 
-    <footer class="composer-shell">
+    <footer ref="composerShellRef" class="composer-shell" data-testid="composer-shell">
       <div class="composer-box">
-        <textarea v-model="composerText" rows="2" placeholder="Ask the agent anything…" @keydown.enter.exact.prevent="sendComposer" />
+        <textarea
+          ref="composerInputRef"
+          v-model="composerText"
+          data-testid="composer-input"
+          rows="1"
+          placeholder="Ask the agent anything…"
+          @input="onComposerInput"
+          @keydown.enter.exact.prevent="sendComposer"
+        />
         <div class="composer-actions">
           <div><button class="composer-icon">＋</button><button class="mode-button">Agent ▾</button></div>
           <div><span class="context-meter">{{ runtime.logicalCount.toLocaleString() }} logical messages</span><button class="send-button" :disabled="!composerText.trim() || runtime.status !== 'running'" @click="sendComposer">↑</button></div>
         </div>
       </div>
-      <span class="composer-hint">Stable keyed nodes · session-scoped runtime · bounded physical DOM</span>
+      <span class="composer-hint">Stable keyed nodes · async session scope · bounded physical DOM</span>
     </footer>
   </main>
 </template>
