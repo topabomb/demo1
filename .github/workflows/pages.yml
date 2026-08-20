@@ -1,5 +1,6 @@
 name: Deploy GitHub Pages
 
+# Re-triggered after enabling GitHub Actions as the repository Pages source.
 on:
   push:
     branches: [main, feat/million-message-lab]
