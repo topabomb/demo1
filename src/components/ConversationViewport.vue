@@ -23,9 +23,28 @@ const scrollStageRef = ref<HTMLElement | null>(null)
 const composerInputRef = ref<HTMLTextAreaElement | null>(null)
 const composerShellRef = ref<HTMLElement | null>(null)
 const order = shallowRef<string[]>([...props.runtime.projection.order])
-const stateRevision = ref(0)
+const composerText = ref(props.runtime.draftText)
 const shifting = ref(false)
-let lastStreamTick = props.runtime.streamRenderTicks
+
+function readUiState() {
+  return {
+    rangeStart: props.runtime.range.start,
+    rangeEnd: props.runtime.range.end,
+    reader: props.runtime.currentLogicalPosition,
+    followTail: props.runtime.followTail,
+    atVisualBottom: props.runtime.atVisualBottom,
+    mountedRows: props.runtime.mountedRows,
+    streamTarget: props.runtime.streamTarget,
+    streamTicks: props.runtime.streamRenderTicks,
+    messagesAfter: props.runtime.messagesAfterCurrent,
+    virtualEpoch: props.runtime.virtualEpoch,
+  }
+}
+
+// One immutable snapshot per runtime notification prevents Vue from rendering
+// reader/count/status fields from different revisions of a mutable domain object.
+const uiState = shallowRef(readUiState())
+let lastStreamTick = uiState.value.streamTicks
 let userScrollIntentUntil = 0
 let userScrollDirection: -1 | 0 | 1 = 0
 let lastScrollOffset = 0
@@ -35,26 +54,17 @@ let viewportObserver: ResizeObserver | null = null
 let unsubscribeOrder: (() => void) | null = null
 let unsubscribeState: (() => void) | null = null
 
-const composerText = computed({
-  get: () => {
-    void stateRevision.value
-    return props.runtime.draftText
-  },
-  set: (value: string) => props.runtime.setDraftText(value),
-})
+interface LayoutAnchor {
+  id: string
+  offsetPx: number
+}
 
-const messagesAfter = computed(() => {
-  void stateRevision.value
-  return props.runtime.messagesAfterCurrent
-})
-const showLatest = computed(() => {
-  void stateRevision.value
-  return !props.runtime.atVisualBottom || messagesAfter.value > 0
-})
-const followLabel = computed(() => {
-  void stateRevision.value
-  return props.runtime.followTail ? 'following tail' : 'tail paused'
-})
+let pendingComposerAnchor: LayoutAnchor | null = null
+let pendingComposerPinned = false
+
+const messagesAfter = computed(() => uiState.value.messagesAfter)
+const showLatest = computed(() => !uiState.value.atVisualBottom || messagesAfter.value > 0)
+const followLabel = computed(() => uiState.value.followTail ? 'following tail' : 'tail paused')
 
 function frame(): Promise<void> {
   return new Promise(resolve => requestAnimationFrame(() => resolve()))
@@ -97,10 +107,7 @@ function remainingToBottom(): number {
   return Math.max(0, list.scrollSize - list.scrollOffset - list.viewportSize)
 }
 
-/**
- * Reader position means the last logical message currently visible to the user.
- * That makes `messagesAfterCurrent` an exact logical count for the Latest badge.
- */
+/** The reader is the last logical message currently visible in the viewport. */
 function updateReader(offset = listRef.value?.scrollOffset ?? 0): void {
   const list = listRef.value
   if (!list || order.value.length === 0) return
@@ -114,6 +121,24 @@ function updateReader(offset = listRef.value?.scrollOffset ?? 0): void {
   const index = Math.max(0, Math.min(order.value.length - 1, list.findItemIndex(bottomProbe)))
   const node = nodeFor(order.value[index]!)
   if (node) props.runtime.setReaderPosition(node.messageIndex, false)
+}
+
+function captureListAnchor(): LayoutAnchor | null {
+  const list = listRef.value
+  if (!list || order.value.length === 0) return null
+  const index = Math.max(0, Math.min(order.value.length - 1, list.findItemIndex(list.scrollOffset + 1)))
+  const id = order.value[index]
+  if (!id) return null
+  return { id, offsetPx: list.getItemOffset(index) - list.scrollOffset }
+}
+
+async function restoreListAnchor(anchor: LayoutAnchor): Promise<void> {
+  const list = listRef.value
+  if (!list) return
+  const index = order.value.indexOf(anchor.id)
+  if (index < 0) return
+  list.scrollToIndex(index, { align: 'start', offset: -anchor.offsetPx })
+  await settleFrames(2)
 }
 
 function markUserIntent(direction: -1 | 0 | 1): void {
@@ -289,31 +314,41 @@ function resizeComposer(): void {
 }
 
 function onComposerInput(): void {
+  props.runtime.setDraftText(composerText.value)
+  pendingComposerPinned = props.runtime.atVisualBottom && props.runtime.range.end === props.runtime.logicalCount
+  pendingComposerAnchor = pendingComposerPinned ? null : captureListAnchor()
   void nextTick().then(resizeComposer)
 }
 
 function sendComposer(): void {
   if (!composerText.value.trim()) return
   composerText.value = ''
+  props.runtime.setDraftText('')
+  pendingComposerPinned = props.runtime.atVisualBottom && props.runtime.range.end === props.runtime.logicalCount
+  pendingComposerAnchor = pendingComposerPinned ? null : captureListAnchor()
   void nextTick().then(resizeComposer)
   if (props.runtime.status === 'running') props.stream.start(true)
 }
 
-/**
- * Composer height changes resize the physical viewport rather than overlaying it.
- * At the global tail we re-pin after Virtua observes the new viewport height;
- * in history we leave scrollTop/top anchor untouched and just refresh semantics.
- */
+/** Reconcile viewport geometry after the composer changes height. */
 function scheduleViewportResizeReconcile(): void {
   if (viewportResizeFrame) cancelAnimationFrame(viewportResizeFrame)
   viewportResizeFrame = requestAnimationFrame(async () => {
     viewportResizeFrame = 0
     await nextTick()
-    const shouldPin = props.runtime.atVisualBottom || props.runtime.followTail
-    if (shouldPin && props.runtime.range.end === props.runtime.logicalCount) {
+
+    const pin = pendingComposerPinned || (pendingComposerAnchor === null && (props.runtime.atVisualBottom || props.runtime.followTail))
+    const anchor = pendingComposerAnchor
+    pendingComposerPinned = false
+    pendingComposerAnchor = null
+
+    if (pin && props.runtime.range.end === props.runtime.logicalCount) {
       const last = props.runtime.logicalCount - 1
       await scrollToLogical(last, 'end')
       if (remainingToBottom() < 48) props.runtime.setReaderPosition(last, true)
+    } else if (anchor) {
+      await restoreListAnchor(anchor)
+      updateReader()
     } else {
       updateReader()
     }
@@ -360,30 +395,37 @@ function formatAfter(count: number): string {
   return count.toLocaleString('en-US')
 }
 
+function attachViewportObserver(): void {
+  viewportObserver?.disconnect()
+  viewportObserver = new ResizeObserver(scheduleViewportResizeReconcile)
+  if (scrollStageRef.value) viewportObserver.observe(scrollStageRef.value)
+  if (composerShellRef.value) viewportObserver.observe(composerShellRef.value)
+}
+
 onMounted(() => {
   unsubscribeOrder = props.runtime.projection.subscribeOrder(() => {
     order.value = [...props.runtime.projection.order]
   })
   unsubscribeState = props.runtime.subscribeState(() => {
-    stateRevision.value += 1
-    const tick = props.runtime.streamRenderTicks
-    if (tick !== lastStreamTick) {
-      lastStreamTick = tick
-      if (props.runtime.followTail) void nextTick().then(() => {
+    const next = readUiState()
+    uiState.value = next
+    if (next.streamTicks !== lastStreamTick) {
+      lastStreamTick = next.streamTicks
+      if (next.followTail) void nextTick().then(() => {
         listRef.value?.scrollToIndex(Math.max(0, order.value.length - 1), { align: 'end' })
       })
     }
   })
 
-  viewportObserver = new ResizeObserver(scheduleViewportResizeReconcile)
-  if (scrollStageRef.value) viewportObserver.observe(scrollStageRef.value)
-  if (composerShellRef.value) viewportObserver.observe(composerShellRef.value)
-
+  // Establish the restored draft height first, then restore semantic viewport,
+  // and only then start observing future layout changes. This avoids mount-time
+  // composer geometry racing session restoration.
   resizeComposer()
-  void restoreSnapshot()
+  void restoreSnapshot().then(attachViewportObserver)
 })
 
 onBeforeUnmount(() => {
+  props.runtime.setDraftText(composerText.value)
   props.runtime.rememberSnapshot(captureSnapshot())
   unsubscribeOrder?.()
   unsubscribeState?.()
@@ -413,21 +455,21 @@ defineExpose({
       </div>
       <div class="header-chips">
         <button class="model-chip">Synthetic Agent · canonical runtime⌄</button>
-        <span class="run-status"><i :class="{ idle: !runtime.streamTarget }" /> {{ runtime.streamTarget ? 'streaming' : runtime.status }}</span>
+        <span class="run-status"><i :class="{ idle: !uiState.streamTarget }" /> {{ uiState.streamTarget ? 'streaming' : runtime.status }}</span>
         <button class="header-icon" title="Search">⌕</button>
       </div>
     </header>
 
     <div ref="scrollStageRef" class="scroll-stage" data-testid="scrollport" @wheel.capture="onUserWheel" @pointerdown.capture="onUserPointerDown">
       <div class="conversation-meta-strip">
-        <span>Loaded <strong data-testid="segment-range">{{ runtime.range.start.toLocaleString() }} – {{ (runtime.range.end - 1).toLocaleString() }}</strong></span>
-        <span>Reader <strong data-testid="reader-position">#{{ runtime.currentLogicalPosition.toLocaleString() }}</strong></span>
-        <span data-testid="mounted-label">{{ runtime.mountedRows }} DOM rows</span>
-        <span v-if="runtime.streamTarget" data-testid="follow-state">{{ followLabel }}</span>
+        <span>Loaded <strong data-testid="segment-range">{{ uiState.rangeStart.toLocaleString() }} – {{ (uiState.rangeEnd - 1).toLocaleString() }}</strong></span>
+        <span>Reader <strong data-testid="reader-position">#{{ uiState.reader.toLocaleString() }}</strong></span>
+        <span data-testid="mounted-label">{{ uiState.mountedRows }} DOM rows</span>
+        <span v-if="uiState.streamTarget" data-testid="follow-state">{{ followLabel }}</span>
       </div>
 
       <VList
-        :key="`${runtime.id}:${runtime.virtualEpoch}`"
+        :key="`${runtime.id}:${uiState.virtualEpoch}`"
         ref="listRef"
         class="conversation-vlist"
         :data="order"
