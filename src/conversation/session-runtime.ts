@@ -17,11 +17,6 @@ export interface ShiftPlan {
   final: readonly RenderUnit[]
 }
 
-/**
- * One isolated Agent-conversation scope. No Vue/React/Solid imports live here.
- * A backend adapter supplies canonical messages, the runtime maintains a bounded
- * hot window, and KeyedConversationProjection exposes stable row identity.
- */
 export class ConversationSessionRuntime {
   readonly projection = new KeyedConversationProjection()
   readonly pageHeights: PageHeightIndex
@@ -41,6 +36,7 @@ export class ConversationSessionRuntime {
   currentLogicalPosition: number
   followTail: boolean
   atVisualBottom: boolean
+  draftText: string
   streamRate = 20
   streamIngressTicks = 0
   streamRenderTicks = 0
@@ -65,6 +61,7 @@ export class ConversationSessionRuntime {
     this.currentLogicalPosition = position
     this.followTail = snapshot.followTail
     this.atVisualBottom = snapshot.atVisualBottom && this.segment.range.end === adapter.count
+    this.draftText = snapshot.draftText
     this.#activeUnits = this.#materialize(this.segment.range)
     this.#refreshPageEstimates()
     this.projection.replace(this.#activeUnits)
@@ -89,6 +86,12 @@ export class ConversationSessionRuntime {
     this.#stateNotifier.markDirty()
   }
 
+  setDraftText(value: string): void {
+    if (this.draftText === value) return
+    this.draftText = value
+    this.#stateNotifier.markDirty()
+  }
+
   snapshot(anchorUnitId = this.#snapshot.anchorUnitId, anchorOffsetPx = this.#snapshot.anchorOffsetPx): ViewportSnapshot {
     return {
       logicalPosition: clampIndex(this.currentLogicalPosition, this.logicalCount),
@@ -96,15 +99,17 @@ export class ConversationSessionRuntime {
       anchorOffsetPx,
       followTail: this.followTail,
       atVisualBottom: this.atVisualBottom,
+      draftText: this.draftText,
     }
   }
 
   rememberSnapshot(snapshot: ViewportSnapshot): void {
     this.#snapshot = { ...snapshot, logicalPosition: clampIndex(snapshot.logicalPosition, this.logicalCount) }
+    this.draftText = snapshot.draftText
   }
 
   get rememberedSnapshot(): ViewportSnapshot {
-    return { ...this.#snapshot }
+    return { ...this.#snapshot, draftText: this.draftText }
   }
 
   setReaderPosition(index: number, atVisualBottom: boolean): void {
@@ -139,10 +144,6 @@ export class ConversationSessionRuntime {
     this.#stateNotifier.markDirty()
   }
 
-  /**
-   * Build a two-phase prepend using only newly-entering messages. Retained units
-   * are the exact same objects, so keyed NodeSeats and renderer caches stay warm.
-   */
   planShiftBackward(): ShiftPlan | null {
     const previous = { ...this.range }
     const next = this.segment.shiftBackward()
@@ -160,7 +161,6 @@ export class ConversationSessionRuntime {
     }
   }
 
-  /** Same optimization for forward shifts: project only the new tail slice. */
   planShiftForward(): ShiftPlan | null {
     const previous = { ...this.range }
     const next = this.segment.shiftForward()
