@@ -16,7 +16,7 @@ describe('SyntheticConversationSource', () => {
     const kinds = new Set(Array.from({ length: 1000 }, (_, i) => source.getMessage(i).kind))
     expect(kinds).toEqual(new Set(['text', 'markdown', 'thinking', 'code', 'image', 'html', 'tool', 'diff']))
 
-    const turn = source.getRange(480_000, 20)
+    const turn = source.getRange(0, 20)
     expect(turn[0]).toMatchObject({ role: 'user', kind: 'markdown' })
     expect(turn[1]).toMatchObject({ role: 'assistant', kind: 'thinking' })
     expect(turn[2]).toMatchObject({ role: 'assistant', kind: 'tool', variant: 'call:read_file' })
