@@ -183,7 +183,23 @@ function clearUserScrollIntent() {
 function onUserWheel(event: WheelEvent) {
   const direction: -1 | 0 | 1 = event.deltaY < 0 ? -1 : event.deltaY > 0 ? 1 : 0
   markUserScrollIntent(direction)
-  if (direction < 0) escapeTailFollow()
+
+  // The transition out of a pinned streaming tail is the only wheel event we
+  // serialize ourselves. Native wheel scrolling can race an already-scheduled
+  // scrollToIndex(end) and a live ResizeObserver correction. Cancel the follow
+  // intent synchronously, suppress that one native wheel, then send the exact
+  // delta through Virtua's public scrollBy() queue. Subsequent wheel input is
+  // native again, so touchpad momentum and browser scrolling remain untouched.
+  if (direction < 0 && streamTarget.value && followTail.value) {
+    event.preventDefault()
+    escapeTailFollow()
+    const intent = tailIntentGeneration
+    const delta = event.deltaY
+    requestAnimationFrame(() => {
+      if (followTail.value || intent !== tailIntentGeneration) return
+      listRef.value?.scrollBy(delta)
+    })
+  }
 }
 
 function onUserPointerDown() {
@@ -525,7 +541,7 @@ onBeforeUnmount(() => {
         class="scroll-stage"
         data-testid="scroll-stage"
         @pointerdown.capture.passive="onUserPointerDown"
-        @wheel.capture.passive="onUserWheel"
+        @wheel.capture="onUserWheel"
       >
         <VList
           :key="virtualEpoch"
