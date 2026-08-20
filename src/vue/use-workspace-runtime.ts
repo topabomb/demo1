@@ -1,22 +1,28 @@
-import { computed, onBeforeUnmount, shallowRef } from 'vue'
+import { onBeforeUnmount, shallowRef } from 'vue'
 import { ConversationWorkspaceRuntime } from '../conversation/workspace-runtime'
+import type { ConversationSessionRuntime, SessionUiSnapshot } from '../conversation/session-runtime'
 
 /**
- * Thin Vue bridge. Business state stays in framework-free runtime classes; Vue
- * receives only revision signals and asks the runtime for current projections.
+ * Thin Vue bridge. Framework-free runtimes stay mutable internally for efficient
+ * event ingestion, but Vue receives atomic immutable snapshots. This prevents
+ * different components from observing different revisions of reader/count/run
+ * state while keeping the keyed node projection on its own fine-grained channel.
  */
 export function useWorkspaceRuntime() {
   const workspace = new ConversationWorkspaceRuntime()
   const workspaceRevision = shallowRef(0)
-  const activeRevision = shallowRef(0)
+  const activeSession = shallowRef<ConversationSessionRuntime>(workspace.activeSession)
+  const activeUiState = shallowRef<SessionUiSnapshot>(workspace.activeSession.uiSnapshot)
   let unsubscribeSession: (() => void) | null = null
 
   const bindActive = () => {
     unsubscribeSession?.()
-    unsubscribeSession = workspace.activeSession.subscribeState(() => {
-      activeRevision.value += 1
+    const runtime = workspace.activeSession
+    activeSession.value = runtime
+    activeUiState.value = runtime.uiSnapshot
+    unsubscribeSession = runtime.subscribeState(() => {
+      activeUiState.value = runtime.uiSnapshot
     })
-    activeRevision.value += 1
   }
 
   const unsubscribeWorkspace = workspace.subscribe(() => {
@@ -25,17 +31,11 @@ export function useWorkspaceRuntime() {
   })
   bindActive()
 
-  const activeSession = computed(() => {
-    void workspaceRevision.value
-    void activeRevision.value
-    return workspace.activeSession
-  })
-
   onBeforeUnmount(() => {
     unsubscribeSession?.()
     unsubscribeWorkspace()
     workspace.dispose()
   })
 
-  return { workspace, activeSession, workspaceRevision, activeRevision }
+  return { workspace, activeSession, activeUiState, workspaceRevision }
 }
