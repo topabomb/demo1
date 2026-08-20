@@ -520,7 +520,13 @@ onBeforeUnmount(() => {
         </div>
       </header>
 
-      <div ref="scrollStageRef" class="scroll-stage">
+      <div
+        ref="scrollStageRef"
+        class="scroll-stage"
+        data-testid="scroll-stage"
+        @pointerdown.capture.passive="onUserPointerDown"
+        @wheel.capture.passive="onUserWheel"
+      >
         <VList
           :key="virtualEpoch"
           ref="listRef"
@@ -531,8 +537,6 @@ onBeforeUnmount(() => {
           :item-size="VIRTUAL_ITEM_HINT_PX"
           :shift="shiftMode"
           :item-props="itemProps"
-          @pointerdown.passive="onUserPointerDown"
-          @wheel.passive="onUserWheel"
           @scroll="onVirtualScroll"
           @scroll-end="onVirtualScrollEnd"
         >
