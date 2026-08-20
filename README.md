@@ -1,69 +1,70 @@
-# Million Message Lab
+# Million Message Agent UI Lab
 
-A concrete browser stress rig for extremely long AI/agent conversations. The target is **1,000,000 logical messages** with variable-height Markdown, HTML, images, code, tool cards, and diffs while keeping Vue reactivity, active memory, physical scroll height, and DOM size bounded.
+A browser-verified architecture experiment for CodeNomad/DSH-like Agent workspaces with **1,000,000 logical messages**, multiple Recent sessions, variable-height rich content and continuously growing LLM output.
 
-## What this validates
+Live site: https://topabomb.github.io/demo1/
 
-The project intentionally does **not** create a million Vue objects or DOM rows. It demonstrates the architecture discussed for CodeNomad-like agent UIs:
+Detailed architecture, failed approaches, UX contract and current evidence: [`docs/agent-conversation-architecture-lab.md`](docs/agent-conversation-architecture-lab.md).
+
+## Architecture
 
 ```text
-Backend / synthetic source
-        ↓
-Canonical logical messages        (addressable by stable id/index)
-        ↓
-Presentation projector            (backend-neutral)
-        ↓
-RenderUnit[]                      (markdown/image/tool/diff/...)
-        ↓
-2048-message hot window           (512-message incremental shifts)
-        ↓
-TanStack Virtual dynamic measure  (viewport + overscan only)
-        ↓
-Vue 3 renderers
+OpenCode / DSH / remote backend / synthetic lab
+                  ↓
+       ConversationHistoryAdapter
+                  ↓
+          LogicalMessage
+                  ↓
+              projector
+                  ↓
+       ConversationSessionRuntime
+  2048-message hot window / 512 shifts
+                  ↓
+      KeyedConversationProjection
+       order + keyed stable nodes
+           ↓              ↓
+        Virtua       NodeSeat subscription
+           └──────┬───────┘
+                  ↓
+               Vue UI
 ```
 
-### Hard invariants
+`ConversationWorkspaceRuntime` owns independent session scopes and keeps at most three heavyweight hot runtimes. Recent metadata and semantic viewport snapshots remain cheap. Vue does not own backend/runtime business objects; it is a thin projection layer.
 
-- Logical conversation size can be 10K / 100K / **1M**.
-- The million-message source is deterministic and O(1)-addressable; it is never eagerly materialized.
-- The active window is capped at 2,048 logical messages.
-- A shift only generates/evicts 512 logical messages and preserves retained `RenderUnit` object identity.
-- Long Markdown and diff messages split into multiple stable `RenderUnit`s so a single backend message cannot become an unbounded virtual row.
-- Vue sees only the hot render units through a `shallowRef`; the million-message source and page height index are plain TypeScript objects.
-- Dynamic row size is measured by TanStack Virtual; image dimensions are reserved up front with an aspect ratio.
-- Segment rebasing uses a semantic anchor (`RenderUnit id + viewport offset`), not raw `scrollTop`.
-- A page-level Fenwick tree tracks estimated global height in O(log pages), avoiding a million-item height prefix array.
-- Streaming mutates one visible render unit through an override map rather than rebuilding the full active window.
+### Important invariants
 
-## Stress controls
-
-The published site lets you:
-
-- switch between 10K, 100K and 1M logical messages;
-- jump directly to any global logical message;
-- continuously shift the active segment backward/forward;
-- stream synthetic model deltas at 5/20/60 Hz into a row that keeps growing;
-- expand/collapse code, diff, and tool renderers to force live `ResizeObserver` corrections;
-- observe active render units, mounted DOM rows, FPS, frame p95, long tasks and heap (when the browser exposes it).
-
-## Architecture boundaries
-
-`ConversationSource` is the backend boundary. DSH, OpenCode or another runtime should implement it/adapt its event stream into canonical logical messages. `projectMessage()` is the presentation boundary. Renderer components know only `RenderUnit`; they never know the backend protocol.
-
-A production implementation would replace the deterministic source with paged IndexedDB/SQLite/network persistence, while keeping the hot-window, page-height-index, projector and renderer contracts unchanged.
+- A 1M history is addressable but never eagerly materialized into Vue state or DOM.
+- Only ~2048 logical messages are hot for the active conversation.
+- A 512-message neighboring shift projects only the entering slice and reuses retained `RenderUnit` objects.
+- Random far jumps start a new virtualizer epoch instead of reusing unrelated measurements.
+- Normal streaming patches one stable keyed node; list order is not invalidated.
+- Repeated node changes are microtask-batched before UI notification.
+- Long assistant/code/diff content is split into bounded RenderUnits.
+- Dynamic height is handled by Virtua; Shiki highlighting runs in a Worker.
+- Markdown/HTML is sanitized with DOMPurify.
+- Disclosure keys are session-scoped.
+- Recent A → B → A restores semantic reader state; cold sessions can be reconstructed after LRU eviction.
+- The floating Latest button reports exact logical messages after the reader without loading those messages.
 
 ## Validation
 
 ```bash
-npm install
-npm test
-npm run build
-npx playwright install chromium
-npm run test:e2e
+pnpm install
+pnpm test
+pnpm build
+pnpm test:e2e
 ```
 
-CI validates algorithms and a real Chromium run. The browser gate asserts that a 1M logical conversation keeps fewer than 180 physical rows mounted, supports a global jump, performs streaming resize, and rebases a segment without console errors.
+The Chromium gate verifies:
 
-## Deployment
+- 1M logical messages with fewer than 180 mounted rows;
+- 60 Hz synthetic LLM streaming and bounded live-response chunking;
+- user escape from tail-follow while streaming continues;
+- global jump and `<4px` semantic anchor drift across reverse-history prepend;
+- Latest button and messages-after count;
+- thinking/tool/code/diff/image/HTML behavior;
+- multi-session ID/fold/viewport isolation;
+- off-screen running-session streaming;
+- bounded hot-session LRU and semantic rehydration.
 
-`.github/workflows/pages.yml` builds the Vite application with `/demo1/` as its GitHub Pages base path and deploys `dist/` using the official Pages artifact/deploy actions.
+GitHub Actions also builds production assets and deploys the experiment to GitHub Pages.
