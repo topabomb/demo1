@@ -78,7 +78,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           JOB_STATUS: ${{ job.status }}
-          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
         run: |
           state=success
           description='deployed Pages passed full Chromium suite'
@@ -86,10 +85,7 @@ jobs:
             state=failure
             description='Pages deploy or deployed-site Chromium suite failed'
           fi
-          target_url="$PAGE_URL"
-          if [ -z "$target_url" ]; then
-            target_url="https://github.com/${GITHUB_REPOSITORY}/actions"
-          fi
+          target_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           payload=$(printf '{"state":"%s","context":"pages-public-e2e","description":"%s","target_url":"%s"}' "$state" "$description" "$target_url")
           curl --fail-with-body --silent --show-error \
             -X POST \
