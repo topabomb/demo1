@@ -42,7 +42,16 @@ async function jump(page: Page, index: number): Promise<void> {
     const [startText, endText] = range.split('–')
     return numeric(startText) <= index && numeric(endText) >= index
   }).toBe(true)
-  await expect.poll(async () => page.locator(`[data-message-index="${index}"]`).count()).toBeGreaterThan(0)
+
+  // Virtua may temporarily mount the target as a measurement probe before the
+  // asynchronous programmatic scroll has actually committed. Navigation is only
+  // complete when the target is physically visible and the semantic reader has
+  // converged around it; DOM presence alone is not a completion signal.
+  await expect(page.locator(`[data-message-index="${index}"]`).first()).toBeVisible({ timeout: 15_000 })
+  await expect.poll(async () => {
+    const reader = numeric(await page.getByTestId('reader-position').textContent())
+    return Math.abs(reader - index)
+  }, { timeout: 15_000 }).toBeLessThan(48)
 }
 
 async function switchSession(page: Page, id: string): Promise<void> {
