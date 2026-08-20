@@ -128,9 +128,9 @@ function captureListAnchor(): LayoutAnchor | null {
 }
 
 /**
- * Same-data viewport resize is the one place where a DOM geometry correction is
- * appropriate. Virtua remains the source of size truth; after its normal indexed
- * scroll, we reconcile the already-rendered stable row to the exact pre-resize Y.
+ * Same-data viewport resize and semantic session restoration share one anchor
+ * primitive. Virtua remains the source of size truth; after its indexed scroll we
+ * reconcile the stable rendered row to the exact semantic Y coordinate.
  */
 async function restoreListAnchor(anchor: LayoutAnchor): Promise<void> {
   const list = listRef.value
@@ -407,14 +407,21 @@ async function restoreSnapshot(): Promise<void> {
     await pinMeasuredEnd()
   } else if (snapshot.anchorUnitId) {
     const index = order.value.indexOf(snapshot.anchorUnitId)
-    if (index >= 0) list.scrollToIndex(index, { align: 'start', offset: -snapshot.anchorOffsetPx })
-    else await scrollToLogical(snapshot.logicalPosition)
+    if (index >= 0) {
+      await restoreListAnchor({
+        id: snapshot.anchorUnitId,
+        offsetPx: snapshot.anchorOffsetPx,
+        viewportTopPx: snapshot.anchorOffsetPx,
+      })
+    } else {
+      await scrollToLogical(snapshot.logicalPosition)
+    }
   } else {
     await scrollToLogical(snapshot.logicalPosition)
   }
   await settleFrames(2)
-  lastScrollOffset = list.scrollOffset
-  updateReader()
+  lastScrollOffset = listRef.value?.scrollOffset ?? 0
+  updateReader(lastScrollOffset)
   refreshMountedRows()
 }
 
