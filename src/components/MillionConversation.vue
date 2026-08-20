@@ -210,15 +210,15 @@ function onVirtualScroll(offset: number) {
   const inferredDirection: -1 | 0 | 1 = offset < lastScrollOffset ? -1 : offset > lastScrollOffset ? 1 : 0
   lastScrollOffset = offset
   const hasUserIntent = performance.now() < userScrollIntentUntil
-  if (hasUserIntent && inferredDirection !== 0) userScrollDirection = inferredDirection
+
+  // A concrete wheel direction is authoritative for the whole intent window.
+  // Offset direction is only a fallback for directionless pointer/scrollbar input;
+  // otherwise a stale programmatic tail write could invert an upward reader intent.
+  if (hasUserIntent && userScrollDirection === 0 && inferredDirection !== 0) userScrollDirection = inferredDirection
 
   updateLogicalPosition(offset)
   refreshMountedRows()
 
-  // Tail following is reader intent, not a geometric side effect. A stale
-  // programmatic scroll event near the bottom must never re-enable follow after
-  // the user has started scrolling upward. Follow resumes only when a user-driven
-  // downward scroll explicitly returns to the bottom threshold.
   if (!streamTarget.value || !hasUserIntent) return
   const remaining = remainingToBottom()
   if (userScrollDirection < 0) escapeTailFollow()
@@ -247,15 +247,11 @@ async function shiftBackward() {
   const finalUnits = [...windowModel.value.shiftBackward()]
   const incoming = finalUnits.filter(unit => unit.messageIndex < previous.start)
 
-  // Virtua's shift mode is specifically defined for insert/remove at the list start.
-  // First grow the window by prepending history so stable keyed rows stay anchored.
   shiftMode.value = true
   activeUnits.value = [...incoming, ...oldUnits]
   syncRange()
   await settleFrames(3)
 
-  // The tail trim does not move rows before the reader, so turn shift off before
-  // returning to the normal bounded 2048-message hot window.
   shiftMode.value = false
   activeUnits.value = finalUnits
   await settleFrames(2)
@@ -275,13 +271,11 @@ async function shiftForward() {
   const finalUnits = [...windowModel.value.shiftForward()]
   const incoming = finalUnits.filter(unit => unit.messageIndex >= previous.end)
 
-  // Appending at the end is start-relative and needs no shift compensation.
   shiftMode.value = false
   activeUnits.value = [...oldUnits, ...incoming]
   syncRange()
   await settleFrames(2)
 
-  // Removing the old head is exactly Virtua's reverse-infinite-scroll use case.
   shiftMode.value = true
   activeUnits.value = finalUnits
   await settleFrames(3)
@@ -325,9 +319,6 @@ async function jumpToMessage(raw = jumpInput.value) {
   syncRange()
   pruneOverrides()
 
-  // A random jump is a new physical coordinate system. Remounting a bounded
-  // virtualizer is cheaper and more correct than carrying measurements from an
-  // unrelated 2048-message segment and trying to compensate them with DOM math.
   virtualEpoch.value += 1
   await settleFrames(3)
   await scrollToMessage(target)
