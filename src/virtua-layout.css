@@ -14,8 +14,17 @@
   height: 100%;
 }
 
+/* Virtua measures the item wrapper. Keep all visual geometry inside that
+ * border box so ResizeObserver and the browser see exactly the same height. */
 .virtua-row {
+  display: flow-root;
+  min-width: 0;
   padding: 7px max(17px, calc((100% - 860px) / 2));
+  overflow: visible;
+}
+
+.virtua-row > * {
+  margin-block: 0;
 }
 
 .scroll-stage .conversation-meta-strip {
