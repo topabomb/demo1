@@ -17,6 +17,24 @@ export interface ShiftPlan {
   final: readonly RenderUnit[]
 }
 
+export interface SessionUiSnapshot {
+  rangeStart: number
+  rangeEnd: number
+  reader: number
+  followTail: boolean
+  atVisualBottom: boolean
+  mountedRows: number
+  streamRate: number
+  streamIngressTicks: number
+  streamRenderTicks: number
+  streamTarget: string | null
+  messagesAfter: number
+  liveChunkCount: number
+  projectionSize: number
+  virtualEpoch: number
+  estimatedTotalHeight: number
+}
+
 /**
  * Framework-free per-session conversation scope. Viewport navigation and Agent
  * execution are deliberately separate lifecycles: a running stream can continue
@@ -88,6 +106,25 @@ export class ConversationSessionRuntime {
   }
   get messagesAfterCurrent(): number { return Math.max(0, this.logicalCount - 1 - this.currentLogicalPosition) }
   get estimatedTotalHeight(): number { return this.pageHeights.estimatedTotalHeight() }
+  get uiSnapshot(): SessionUiSnapshot {
+    return {
+      rangeStart: this.range.start,
+      rangeEnd: this.range.end,
+      reader: this.currentLogicalPosition,
+      followTail: this.followTail,
+      atVisualBottom: this.atVisualBottom,
+      mountedRows: this.mountedRows,
+      streamRate: this.streamRate,
+      streamIngressTicks: this.streamIngressTicks,
+      streamRenderTicks: this.streamRenderTicks,
+      streamTarget: this.streamTarget,
+      messagesAfter: this.messagesAfterCurrent,
+      liveChunkCount: this.#liveTailUnits.length + 1,
+      projectionSize: this.projection.size,
+      virtualEpoch: this.virtualEpoch,
+      estimatedTotalHeight: this.estimatedTotalHeight,
+    }
+  }
 
   subscribeState(listener: () => void): Unsubscribe {
     return this.#stateNotifier.subscribe(listener)
