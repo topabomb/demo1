@@ -18,9 +18,9 @@ export const RECENT_SESSIONS: readonly (ConversationDescriptor & { seedOffset: n
 ]
 
 /**
- * Framework-free workspace controller. It keeps session metadata/snapshots cheap,
- * lazily hydrates heavyweight session runtimes, and evicts cold runtimes with LRU.
- * Running streams belong to their session scopes and may continue off-screen.
+ * Framework-free workspace controller. Switching Recent sessions only changes the
+ * active viewport scope; a running session's stream controller is not cancelled.
+ * Lightweight semantic snapshots survive viewport unmount and hot-runtime LRU.
  */
 export class ConversationWorkspaceRuntime {
   readonly descriptors = RECENT_SESSIONS
@@ -75,7 +75,10 @@ export class ConversationWorkspaceRuntime {
     return stream
   }
 
-  /** Persist the old semantic viewport before changing active scope. */
+  isSessionStreaming(id: string): boolean {
+    return this.#streams.get(id)?.running ?? false
+  }
+
   activate(id: string, outgoingSnapshot?: ViewportSnapshot): ConversationSessionRuntime {
     if (outgoingSnapshot) this.saveSnapshot(this.#activeSessionId, outgoingSnapshot)
     else this.saveSnapshot(this.#activeSessionId, this.activeSession.snapshot())
@@ -99,6 +102,7 @@ export class ConversationWorkspaceRuntime {
       anchorOffsetPx: snapshot.anchorOffsetPx,
       followTail: snapshot.followTail,
       atVisualBottom: snapshot.atVisualBottom,
+      draftText: snapshot.draftText,
     }
     this.#snapshots.set(id, normalized)
     runtime?.rememberSnapshot(normalized)
@@ -148,5 +152,6 @@ function defaultSnapshot(descriptor: ConversationDescriptor): ViewportSnapshot {
     anchorOffsetPx: 0,
     followTail: descriptor.status === 'running',
     atVisualBottom: true,
+    draftText: '',
   }
 }
