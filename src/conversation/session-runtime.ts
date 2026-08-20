@@ -17,6 +17,11 @@ export interface ShiftPlan {
   final: readonly RenderUnit[]
 }
 
+/**
+ * Framework-free per-session conversation scope. Viewport navigation and Agent
+ * execution are deliberately separate lifecycles: a running stream can continue
+ * while this session is off-screen or while the reader browses old history.
+ */
 export class ConversationSessionRuntime {
   readonly projection = new KeyedConversationProjection()
   readonly pageHeights: PageHeightIndex
@@ -27,6 +32,7 @@ export class ConversationSessionRuntime {
   #stateNotifier = new BatchedNotifier()
   #activeUnits: RenderUnit[] = []
   #liveTailUnits: RenderUnit[] = []
+  #liveBaseOverride: RenderUnit | null = null
   #snapshot: ViewportSnapshot
 
   virtualEpoch = 0
@@ -64,7 +70,7 @@ export class ConversationSessionRuntime {
     this.draftText = snapshot.draftText
     this.#activeUnits = this.#materialize(this.segment.range)
     this.#refreshPageEstimates()
-    this.projection.replace(this.#activeUnits)
+    this.projection.replace(this.displayUnits)
   }
 
   get id(): string { return this.descriptor.id }
@@ -74,7 +80,13 @@ export class ConversationSessionRuntime {
   get range(): SegmentRange { return this.segment.range }
   get activeUnits(): readonly RenderUnit[] { return this.#activeUnits }
   get liveTailUnits(): readonly RenderUnit[] { return this.#liveTailUnits }
-  get displayUnits(): readonly RenderUnit[] { return this.range.end === this.logicalCount ? [...this.#activeUnits, ...this.#liveTailUnits] : this.#activeUnits }
+  get displayUnits(): readonly RenderUnit[] {
+    if (this.range.end !== this.logicalCount) return this.#activeUnits
+    const base = this.#liveBaseOverride
+      ? this.#activeUnits.map(unit => unit.id === this.#liveBaseOverride!.id ? this.#liveBaseOverride! : unit)
+      : this.#activeUnits
+    return [...base, ...this.#liveTailUnits]
+  }
   get messagesAfterCurrent(): number { return Math.max(0, this.logicalCount - 1 - this.currentLogicalPosition) }
   get estimatedTotalHeight(): number { return this.pageHeights.estimatedTotalHeight() }
 
@@ -125,22 +137,18 @@ export class ConversationSessionRuntime {
     this.#stateNotifier.markDirty()
   }
 
+  /** Change the semantic hot viewport only; never cancel/reset an async Agent run. */
   jump(index: number): void {
     const target = clampIndex(index, this.logicalCount)
     this.segment.jump(target)
     this.#activeUnits = this.#materialize(this.range)
-    this.#liveTailUnits = []
-    this.streamTarget = null
-    this.streamBaseUnit = null
-    this.streamChunkText = ''
-    this.pendingDelta = ''
     this.currentLogicalPosition = target
     this.jumpInput = target
-    this.followTail = target === this.logicalCount - 1
-    this.atVisualBottom = target === this.logicalCount - 1
+    if (target !== this.logicalCount - 1) this.setFollowTail(false)
+    this.atVisualBottom = false
     this.virtualEpoch += 1
     this.#refreshPageEstimates()
-    this.projection.replace(this.#activeUnits)
+    this.projection.replace(this.displayUnits)
     this.#stateNotifier.markDirty()
   }
 
@@ -153,11 +161,8 @@ export class ConversationSessionRuntime {
     const retained = this.#activeUnits.filter(unit => unit.messageIndex < next.end)
     const final = [...incoming, ...retained]
     return {
-      direction: 'backward',
-      previous,
-      next: { ...next },
-      intermediate: [...incoming, ...this.#activeUnits],
-      final,
+      direction: 'backward', previous, next: { ...next },
+      intermediate: [...incoming, ...this.#activeUnits], final,
     }
   }
 
@@ -170,11 +175,8 @@ export class ConversationSessionRuntime {
     const retained = this.#activeUnits.filter(unit => unit.messageIndex >= next.start)
     const final = [...retained, ...incoming]
     return {
-      direction: 'forward',
-      previous,
-      next: { ...next },
-      intermediate: [...this.#activeUnits, ...incoming],
-      final,
+      direction: 'forward', previous, next: { ...next },
+      intermediate: [...this.#activeUnits, ...incoming], final,
     }
   }
 
@@ -199,20 +201,29 @@ export class ConversationSessionRuntime {
 
   appendLiveChunk(unit: RenderUnit): void {
     this.#liveTailUnits = [...this.#liveTailUnits, unit]
-    this.projection.replace(this.displayUnits)
+    if (this.range.end === this.logicalCount) this.projection.replace(this.displayUnits)
     this.#stateNotifier.markDirty()
   }
 
+  /** Store the latest tail node even when it is outside the current projection. */
   patchNode(unit: RenderUnit): void {
+    if (unit.messageIndex === this.logicalCount - 1) this.#liveBaseOverride = unit
     this.projection.patch(unit)
     this.streamRenderTicks += 1
     this.#stateNotifier.markDirty()
   }
 
+  /** Re-apply off-screen stream state after navigating back to the logical tail. */
+  refreshProjection(): void {
+    this.projection.replace(this.displayUnits)
+    this.#stateNotifier.markDirty()
+  }
+
   clearLiveTail(): void {
-    if (this.#liveTailUnits.length === 0) return
     this.#liveTailUnits = []
-    this.projection.replace(this.#activeUnits)
+    this.#liveBaseOverride = null
+    this.streamChunkText = ''
+    if (this.range.end === this.logicalCount) this.projection.replace(this.#activeUnits)
     this.#stateNotifier.markDirty()
   }
 
