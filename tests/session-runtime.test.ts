@@ -82,6 +82,42 @@ describe('ConversationSessionRuntime segment shifts', () => {
     expect(runtime.projection.getNode(tail.id)?.payload.markdown).toContain('async text')
   })
 
+  it('restores every rolled-over live chunk after off-screen async streaming', () => {
+    const runtime = runtimeAt(999_999, 'running')
+    const tail = runtime.activeUnits.find(unit => unit.messageIndex === 999_999)!
+    const basePatched = {
+      ...tail,
+      revision: 3,
+      payload: { ...tail.payload, markdown: 'base live chunk', live: true },
+    }
+    const extra = {
+      ...tail,
+      id: `${tail.messageId}:live-extra-1`,
+      revision: 0,
+      payload: { ...tail.payload, markdown: '', live: true, partIndex: 1, partCount: 2 },
+    }
+    const extraPatched = {
+      ...extra,
+      revision: 11,
+      payload: { ...extra.payload, markdown: 'second chunk continued while off-screen' },
+    }
+
+    runtime.patchNode(basePatched)
+    runtime.appendLiveChunk(extra)
+    runtime.patchNode(extraPatched)
+    runtime.streamTarget = extra.id
+    runtime.streamBaseUnit = extra
+
+    runtime.jump(400_000)
+    expect(runtime.projection.order.includes(extra.id)).toBe(false)
+
+    runtime.jump(999_999)
+    runtime.refreshProjection()
+    expect(runtime.projection.getNode(tail.id)?.revision).toBe(3)
+    expect(runtime.projection.getNode(extra.id)?.revision).toBe(11)
+    expect(runtime.projection.getNode(extra.id)?.payload.markdown).toContain('continued while off-screen')
+  })
+
   it('persists a per-session composer draft as lightweight semantic state', () => {
     const runtime = runtimeAt(500_000)
     runtime.setDraftText('line one\nline two\nline three')
