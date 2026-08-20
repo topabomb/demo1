@@ -68,7 +68,9 @@ test('dynamic heterogeneous rows never overlap after disclosure, async measureme
   await expectRowsDisjoint(page)
 
   await jump(page, 120_010)
-  await expect(page.locator('[data-message-index="120010"] .shiki')).toBeVisible({ timeout: 15_000 })
+  const codeUnits = page.locator('[data-message-index="120010"] .shiki')
+  await expect.poll(() => codeUnits.count(), { timeout: 15_000 }).toBeGreaterThan(0)
+  await expect(codeUnits.first()).toBeVisible()
   await expectRowsDisjoint(page)
 
   const composer = page.getByTestId('composer-input')
