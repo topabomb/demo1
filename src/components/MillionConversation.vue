@@ -16,6 +16,8 @@ const SHIFT_MESSAGES = 512
 const EDGE_THRESHOLD_PX = 900
 const FOLLOW_THRESHOLD_PX = 140
 const LIVE_CHUNK_LIMIT = 6500
+const PROGRAMMATIC_SETTLE_MS = 180
+const USER_SCROLL_INTENT_MS = 650
 
 const logicalCount = ref(1_000_000)
 const source = shallowRef(new SyntheticConversationSource(logicalCount.value))
@@ -44,7 +46,10 @@ let pendingDelta = ''
 let streamChunkText = ''
 let streamBaseUnit: RenderUnit | null = null
 let tailIntentGeneration = 0
-let programmaticTailScroll = false
+let programmaticScrollUntil = 0
+let userScrollIntentUntil = 0
+let userScrollDirection: -1 | 0 | 1 = 0
+let lastScrollTop = 0
 
 const sessions = [
   ['Million-message stress session', 'now'],
@@ -133,6 +138,10 @@ function renderedElement(id: string): HTMLElement | null {
   return null
 }
 
+function renderedMessageElement(messageIndex: number): HTMLElement | null {
+  return parentRef.value?.querySelector<HTMLElement>(`[data-message-index="${messageIndex}"]`) ?? null
+}
+
 function captureAnchor(): Anchor | null {
   const el = parentRef.value
   if (!el) return null
@@ -147,15 +156,36 @@ function frame(): Promise<void> {
   return new Promise(resolve => requestAnimationFrame(() => resolve()))
 }
 
+function markProgrammaticScroll(ms = PROGRAMMATIC_SETTLE_MS) {
+  programmaticScrollUntil = Math.max(programmaticScrollUntil, performance.now() + ms)
+}
+
+function isProgrammaticScroll(): boolean {
+  return performance.now() < programmaticScrollUntil
+}
+
+function consumeUserScrollIntent() {
+  userScrollIntentUntil = 0
+  userScrollDirection = 0
+}
+
+function markUserScrollIntent(direction: -1 | 0 | 1) {
+  userScrollIntentUntil = performance.now() + USER_SCROLL_INTENT_MS
+  if (direction !== 0) userScrollDirection = direction
+}
+
 async function restoreAnchor(anchor: Anchor | null) {
   if (!anchor) return
   const index = renderUnits.value.findIndex(unit => unit.id === anchor.id)
   if (index < 0) return
+
+  markProgrammaticScroll(900)
   await nextTick()
   rowVirtualizer.value.measure()
   rowVirtualizer.value.scrollToIndex(index, { align: 'start' })
 
-  for (let attempt = 0; attempt < 6; attempt += 1) {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    markProgrammaticScroll(300)
     await frame()
     await nextTick()
     rowVirtualizer.value.measure()
@@ -170,24 +200,31 @@ async function restoreAnchor(anchor: Anchor | null) {
     if (Math.abs(delta) < 0.75) break
     el.scrollTop += delta
   }
+  markProgrammaticScroll()
   await frame()
 }
 
 async function shiftBackward() {
   if (shifting.value || windowModel.value.range.start === 0) return
   shifting.value = true
+  consumeUserScrollIntent()
+  markProgrammaticScroll(900)
   const anchor = captureAnchor()
   applyWindow(windowModel.value.shiftBackward())
   await restoreAnchor(anchor)
+  markProgrammaticScroll()
   shifting.value = false
 }
 
 async function shiftForward() {
   if (shifting.value || windowModel.value.range.end === logicalCount.value) return
   shifting.value = true
+  consumeUserScrollIntent()
+  markProgrammaticScroll(900)
   const anchor = captureAnchor()
   applyWindow(windowModel.value.shiftForward())
   await restoreAnchor(anchor)
+  markProgrammaticScroll()
   shifting.value = false
 }
 
@@ -211,7 +248,7 @@ function remainingToBottom(): number {
 }
 
 function escapeTailFollow() {
-  if (streamTimer === null) return
+  if (!streamTarget.value) return
   if (followTail.value) {
     followTail.value = false
     tailIntentGeneration += 1
@@ -219,12 +256,28 @@ function escapeTailFollow() {
 }
 
 function onUserWheel(event: WheelEvent) {
-  if (event.deltaY < 0) escapeTailFollow()
+  const direction: -1 | 0 | 1 = event.deltaY < 0 ? -1 : event.deltaY > 0 ? 1 : 0
+  markUserScrollIntent(direction)
+  if (direction < 0) escapeTailFollow()
+}
+
+function onUserPointerDown() {
+  markUserScrollIntent(0)
 }
 
 function onScroll() {
+  const el = parentRef.value
+  if (!el) return
+
+  const currentTop = el.scrollTop
+  const inferredDirection: -1 | 0 | 1 = currentTop < lastScrollTop ? -1 : currentTop > lastScrollTop ? 1 : 0
+  lastScrollTop = currentTop
+
+  const fromUser = !isProgrammaticScroll() && performance.now() < userScrollIntentUntil
+  if (fromUser && inferredDirection !== 0) userScrollDirection = inferredDirection
+
   const remainingNow = remainingToBottom()
-  if (!programmaticTailScroll && streamTimer !== null) {
+  if (!isProgrammaticScroll() && streamTarget.value) {
     if (remainingNow > FOLLOW_THRESHOLD_PX) escapeTailFollow()
     else if (remainingNow < 40) followTail.value = true
   }
@@ -232,12 +285,16 @@ function onScroll() {
   if (scrollFrame) return
   scrollFrame = requestAnimationFrame(() => {
     scrollFrame = 0
-    const el = parentRef.value
-    if (!el || shifting.value) return
+    const scrollEl = parentRef.value
+    if (!scrollEl || shifting.value) return
     updateLogicalPosition()
+
+    // Segment rebasing is a response to reader navigation, never to a scroll event
+    // generated by jump(), anchor restoration, ResizeObserver correction or tail-follow.
+    if (isProgrammaticScroll() || performance.now() >= userScrollIntentUntil) return
     const remaining = remainingToBottom()
-    if (el.scrollTop < EDGE_THRESHOLD_PX) void shiftBackward()
-    else if (remaining < EDGE_THRESHOLD_PX) void shiftForward()
+    if (userScrollDirection < 0 && scrollEl.scrollTop < EDGE_THRESHOLD_PX) void shiftBackward()
+    else if (userScrollDirection > 0 && remaining < EDGE_THRESHOLD_PX) void shiftForward()
   })
 }
 
@@ -245,14 +302,54 @@ async function jumpToMessage(raw = jumpInput.value) {
   const target = Math.max(0, Math.min(logicalCount.value - 1, Math.floor(Number(raw) || 0)))
   stopStreaming()
   shifting.value = true
+  consumeUserScrollIntent()
+  markProgrammaticScroll(1400)
   applyWindow(windowModel.value.jump(target))
+
   await nextTick()
+  const el = parentRef.value
+  if (!el) {
+    shifting.value = false
+    return
+  }
+
+  // A completely different hot segment must not inherit the old segment's physical
+  // scroll offset. Reset first, then let the virtualizer estimate the target, then
+  // reconcile against real DOM geometry as dynamic measurements settle.
+  el.scrollTop = 0
+  lastScrollTop = 0
   rowVirtualizer.value.measure()
-  const index = renderUnits.value.findIndex(unit => unit.messageIndex >= target)
-  rowVirtualizer.value.scrollToIndex(Math.max(0, index), { align: 'center' })
   await frame()
+
+  const index = renderUnits.value.findIndex(unit => unit.messageIndex === target)
+  if (index >= 0) {
+    rowVirtualizer.value.scrollToIndex(index, { align: 'center' })
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      markProgrammaticScroll(320)
+      await frame()
+      await nextTick()
+      rowVirtualizer.value.measure()
+      const node = renderedMessageElement(target)
+      if (!node) {
+        rowVirtualizer.value.scrollToIndex(index, { align: 'center' })
+        continue
+      }
+
+      const viewport = el.getBoundingClientRect()
+      const rect = node.getBoundingClientRect()
+      const usableHeight = Math.max(80, el.clientHeight - 64)
+      const visibleHeight = Math.min(rect.height, usableHeight)
+      const desiredTop = Math.max(24, (el.clientHeight - visibleHeight) / 2)
+      const delta = (rect.top - viewport.top) - desiredTop
+      if (Math.abs(delta) < 2) break
+      el.scrollTop += delta
+    }
+  }
+
   currentLogicalPosition.value = target
   jumpInput.value = target
+  markProgrammaticScroll(260)
+  await frame()
   shifting.value = false
 }
 
@@ -339,21 +436,20 @@ async function stickToTail(force: boolean) {
   if (!atTailSegment.value || renderUnits.value.length === 0) return
   if (!force && !followTail.value) return
   const intent = tailIntentGeneration
-  programmaticTailScroll = true
-  try {
-    await nextTick()
-    if (intent !== tailIntentGeneration || (!force && !followTail.value)) return
-    rowVirtualizer.value.measure()
-    rowVirtualizer.value.scrollToIndex(renderUnits.value.length - 1, { align: 'end' })
-    await frame()
-    if (intent !== tailIntentGeneration || (!force && !followTail.value)) return
-    const el = parentRef.value
-    if (!el) return
-    el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight)
-    await frame()
-  } finally {
-    programmaticTailScroll = false
-  }
+  markProgrammaticScroll(700)
+  await nextTick()
+  if (intent !== tailIntentGeneration || (!force && !followTail.value)) return
+
+  rowVirtualizer.value.measure()
+  rowVirtualizer.value.scrollToIndex(renderUnits.value.length - 1, { align: 'end' })
+  await frame()
+  if (intent !== tailIntentGeneration || (!force && !followTail.value)) return
+
+  const el = parentRef.value
+  if (!el) return
+  markProgrammaticScroll(300)
+  el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight)
+  await frame()
 }
 
 async function startStreaming(reset = true) {
@@ -407,6 +503,8 @@ function forceForward() { void shiftForward() }
 
 onMounted(async () => {
   await nextTick()
+  const el = parentRef.value
+  if (el) lastScrollTop = el.scrollTop
   void startStreaming(true)
 })
 
@@ -456,7 +554,14 @@ onBeforeUnmount(() => {
         </div>
       </header>
 
-      <div ref="parentRef" class="scrollport" data-testid="scrollport" @wheel.passive="onUserWheel" @scroll.passive="onScroll">
+      <div
+        ref="parentRef"
+        class="scrollport"
+        data-testid="scrollport"
+        @pointerdown.passive="onUserPointerDown"
+        @wheel.passive="onUserWheel"
+        @scroll.passive="onScroll"
+      >
         <div class="conversation-meta-strip">
           <span>Loaded <strong data-testid="segment-range">{{ segmentStart.toLocaleString() }} – {{ (segmentEnd - 1).toLocaleString() }}</strong></span>
           <span>Reader <strong data-testid="reader-position">#{{ currentLogicalPosition.toLocaleString() }}</strong></span>
