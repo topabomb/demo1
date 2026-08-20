@@ -3,6 +3,7 @@ import type { Component } from 'vue'
 import type { RenderKind, RenderUnit } from '../core/types'
 import TextBlock from './renderers/TextBlock.vue'
 import MarkdownBlock from './renderers/MarkdownBlock.vue'
+import ThinkingBlock from './renderers/ThinkingBlock.vue'
 import CodeBlock from './renderers/CodeBlock.vue'
 import ImageBlock from './renderers/ImageBlock.vue'
 import HtmlBlock from './renderers/HtmlBlock.vue'
@@ -14,6 +15,7 @@ defineProps<{ unit: RenderUnit }>()
 const registry: Record<RenderKind, Component> = {
   text: TextBlock,
   markdown: MarkdownBlock,
+  thinking: ThinkingBlock,
   code: CodeBlock,
   image: ImageBlock,
   html: HtmlBlock,
@@ -21,6 +23,7 @@ const registry: Record<RenderKind, Component> = {
   diff: DiffBlock,
 }
 </script>
+
 <template>
   <component :is="registry[unit.kind]" :unit="unit" />
 </template>
