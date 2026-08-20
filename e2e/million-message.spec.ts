@@ -49,6 +49,7 @@ test('one million logical messages keep the physical DOM bounded and interactive
 
   await page.getByTestId('stream-start').click()
   await expect.poll(async () => numeric(await page.getByTestId('stream-ticks').textContent())).toBeGreaterThan(5)
+  await page.getByRole('button', { name: 'Stop' }).click()
 
   const anchorBefore = await visibleAnchor(page)
   expect(anchorBefore).not.toBeNull()
