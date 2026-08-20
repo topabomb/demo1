@@ -13,8 +13,11 @@
   background: #111a24;
 }
 
+/* A virtualized row owns its entire block geometry. Never use negative outer
+ * margins to visually merge neighboring RenderUnits: those margins are outside
+ * ResizeObserver's border-box measurement and can make adjacent cards overlap. */
 .message-card.continuation {
-  margin-top: -5px;
+  margin-top: 0;
   border-top-color: rgba(38, 49, 62, .45);
 }
 
