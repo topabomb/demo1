@@ -18,7 +18,9 @@ const VIRTUAL_ITEM_HINT_PX = 180
 
 const listRef = ref<VListHandle | null>(null)
 const scrollStageRef = ref<HTMLElement | null>(null)
-const order = shallowRef<readonly string[]>(props.runtime.projection.order)
+// Domain projection remains readonly. Virtua's Vue binding requires a mutable
+// array type, so copy only when membership/order actually changes.
+const order = shallowRef<string[]>([...props.runtime.projection.order])
 const stateRevision = ref(0)
 const composerText = ref('')
 const shifting = ref(false)
@@ -285,7 +287,7 @@ function formatAfter(count: number): string {
 
 onMounted(() => {
   unsubscribeOrder = props.runtime.projection.subscribeOrder(() => {
-    order.value = props.runtime.projection.order
+    order.value = [...props.runtime.projection.order]
   })
   unsubscribeState = props.runtime.subscribeState(() => {
     stateRevision.value += 1
