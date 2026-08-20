@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowReactive, shallowRef } from 'vue'
-import { useVirtualizer } from '@tanstack/vue-virtual'
+import { VList, type VListHandle } from 'virtua/vue'
 import RenderUnitView from './RenderUnitView.vue'
 import { SyntheticConversationSource } from '../core/synthetic'
 import { WindowMaterializer } from '../core/window-materializer'
-import { estimateUnitHeight } from '../core/estimates'
 import { PageHeightIndex, DEFAULT_PAGE_SIZE } from '../core/page-index'
 import { usePerformanceMetrics } from '../core/perf'
 import { touchedFoldStateCount } from './renderers/fold-state'
@@ -16,18 +15,22 @@ const SHIFT_MESSAGES = 512
 const EDGE_THRESHOLD_PX = 900
 const FOLLOW_THRESHOLD_PX = 140
 const LIVE_CHUNK_LIMIT = 6500
-const PROGRAMMATIC_SETTLE_MS = 180
 const USER_SCROLL_INTENT_MS = 650
+const VIRTUAL_BUFFER_PX = 900
+const VIRTUAL_ITEM_HINT_PX = 180
 
 const logicalCount = ref(1_000_000)
 const source = shallowRef(new SyntheticConversationSource(logicalCount.value))
 const windowModel = shallowRef(new WindowMaterializer(source.value, WINDOW_MESSAGES, SHIFT_MESSAGES))
 const pageHeights = shallowRef(new PageHeightIndex(logicalCount.value))
-const activeUnits = shallowRef<readonly RenderUnit[]>(windowModel.value.units)
-const liveTailUnits = shallowRef<readonly RenderUnit[]>([])
+const activeUnits = shallowRef<RenderUnit[]>([...windowModel.value.units])
+const liveTailUnits = shallowRef<RenderUnit[]>([])
 const overrides = shallowReactive(new Map<string, RenderUnit>())
 
-const parentRef = ref<HTMLElement | null>(null)
+const listRef = ref<VListHandle | null>(null)
+const scrollStageRef = ref<HTMLElement | null>(null)
+const virtualEpoch = ref(0)
+const shiftMode = ref(false)
 const segmentStart = ref(windowModel.value.range.start)
 const segmentEnd = ref(windowModel.value.range.end)
 const jumpInput = ref(Math.floor(logicalCount.value / 2))
@@ -39,17 +42,21 @@ const streamTarget = ref<string | null>(null)
 const diagnosticsOpen = ref(true)
 const composerText = ref('')
 const followTail = ref(true)
+const mountedRows = ref(0)
+const currentLogicalPosition = ref(segmentEnd.value - 1)
+const foldStateCount = ref(0)
+const highlightEntries = ref(0)
+
 let streamTimer: number | null = null
 let streamFrame = 0
-let scrollFrame = 0
+let metricsFrame = 0
 let pendingDelta = ''
 let streamChunkText = ''
 let streamBaseUnit: RenderUnit | null = null
 let tailIntentGeneration = 0
-let programmaticScrollUntil = 0
 let userScrollIntentUntil = 0
 let userScrollDirection: -1 | 0 | 1 = 0
-let lastScrollTop = 0
+let lastScrollOffset = 0
 
 const sessions = [
   ['Million-message stress session', 'now'],
@@ -64,35 +71,44 @@ const sessions = [
 
 const { fps, frameP95, longTasks, heapMb } = usePerformanceMetrics()
 const atTailSegment = computed(() => segmentEnd.value === logicalCount.value)
-const renderUnits = computed<readonly RenderUnit[]>(() => atTailSegment.value
+const displayUnits = computed<RenderUnit[]>(() => atTailSegment.value
   ? [...activeUnits.value, ...liveTailUnits.value]
-  : activeUnits.value)
+  : [...activeUnits.value])
+const activeUnitCount = computed(() => displayUnits.value.length)
+const estimatedTotalHeight = computed(() => pageHeights.value.estimatedTotalHeight())
 
-function unitAt(index: number): RenderUnit | undefined {
-  const base = renderUnits.value[index]
-  return base ? overrides.get(base.id) ?? base : undefined
+function resolvedUnit(unit: RenderUnit): RenderUnit {
+  return overrides.get(unit.id) ?? unit
 }
 
-const virtualizerOptions = computed(() => ({
-  count: renderUnits.value.length,
-  getScrollElement: () => parentRef.value,
-  estimateSize: (index: number) => estimateUnitHeight(unitAt(index)),
-  getItemKey: (index: number) => renderUnits.value[index]?.id ?? index,
-  overscan: 10,
-}))
+function itemProps({ item, index }: { item: RenderUnit; index: number }) {
+  return {
+    class: 'virtua-row',
+    'data-index': index,
+    'data-message-index': item.messageIndex,
+    'data-render-unit': item.id,
+  }
+}
 
-const rowVirtualizer = useVirtualizer(virtualizerOptions)
-const virtualRows = computed(() => rowVirtualizer.value.getVirtualItems())
-const totalSize = computed(() => rowVirtualizer.value.getTotalSize())
-const mountedRows = computed(() => virtualRows.value.length)
-const activeUnitCount = computed(() => renderUnits.value.length)
-const estimatedTotalHeight = computed(() => pageHeights.value.estimatedTotalHeight())
-const currentLogicalPosition = ref(segmentEnd.value - 1)
-const foldStateCount = ref(0)
-const highlightEntries = ref(0)
+function frame(): Promise<void> {
+  return new Promise(resolve => requestAnimationFrame(() => resolve()))
+}
 
-function measureElement(el: unknown) {
-  if (el instanceof Element) rowVirtualizer.value.measureElement(el)
+async function settleFrames(count = 2): Promise<void> {
+  for (let i = 0; i < count; i += 1) {
+    await nextTick()
+    await frame()
+  }
+}
+
+function refreshMountedRows() {
+  if (metricsFrame) return
+  metricsFrame = requestAnimationFrame(() => {
+    metricsFrame = 0
+    mountedRows.value = scrollStageRef.value?.querySelectorAll('.virtua-row').length ?? 0
+    foldStateCount.value = touchedFoldStateCount()
+    highlightEntries.value = highlightCacheSize()
+  })
 }
 
 function syncRange() {
@@ -100,13 +116,6 @@ function syncRange() {
   segmentStart.value = range.start
   segmentEnd.value = range.end
   updatePageEstimates()
-}
-
-function applyWindow(units: readonly RenderUnit[]) {
-  activeUnits.value = units
-  const activeIds = new Set([...units, ...liveTailUnits.value].map(unit => unit.id))
-  for (const key of overrides.keys()) if (!activeIds.has(key)) overrides.delete(key)
-  syncRange()
 }
 
 function updatePageEstimates() {
@@ -127,124 +136,24 @@ function updatePageEstimates() {
   }
 }
 
-interface Anchor { id: string; viewportTop: number }
-
-function renderedElement(id: string): HTMLElement | null {
-  const el = parentRef.value
-  if (!el) return null
-  for (const node of el.querySelectorAll<HTMLElement>('[data-render-unit]')) {
-    if (node.dataset.renderUnit === id) return node
-  }
-  return null
-}
-
-function renderedMessageElement(messageIndex: number): HTMLElement | null {
-  return parentRef.value?.querySelector<HTMLElement>(`[data-message-index="${messageIndex}"]`) ?? null
-}
-
-function captureAnchor(): Anchor | null {
-  const el = parentRef.value
-  if (!el) return null
-  const viewport = el.getBoundingClientRect()
-  const rows = [...el.querySelectorAll<HTMLElement>('[data-render-unit]')]
-  const candidate = rows.find(row => row.getBoundingClientRect().bottom > viewport.top + 1) ?? rows[0]
-  if (!candidate?.dataset.renderUnit) return null
-  return { id: candidate.dataset.renderUnit, viewportTop: candidate.getBoundingClientRect().top - viewport.top }
-}
-
-function frame(): Promise<void> {
-  return new Promise(resolve => requestAnimationFrame(() => resolve()))
-}
-
-function markProgrammaticScroll(ms = PROGRAMMATIC_SETTLE_MS) {
-  programmaticScrollUntil = Math.max(programmaticScrollUntil, performance.now() + ms)
-}
-
-function isProgrammaticScroll(): boolean {
-  return performance.now() < programmaticScrollUntil
-}
-
-function consumeUserScrollIntent() {
-  userScrollIntentUntil = 0
-  userScrollDirection = 0
-}
-
-function markUserScrollIntent(direction: -1 | 0 | 1) {
-  userScrollIntentUntil = performance.now() + USER_SCROLL_INTENT_MS
-  if (direction !== 0) userScrollDirection = direction
-}
-
-async function restoreAnchor(anchor: Anchor | null) {
-  if (!anchor) return
-  const index = renderUnits.value.findIndex(unit => unit.id === anchor.id)
-  if (index < 0) return
-
-  markProgrammaticScroll(900)
-  await nextTick()
-  rowVirtualizer.value.measure()
-  rowVirtualizer.value.scrollToIndex(index, { align: 'start' })
-
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    markProgrammaticScroll(300)
-    await frame()
-    await nextTick()
-    rowVirtualizer.value.measure()
-    const el = parentRef.value
-    const node = renderedElement(anchor.id)
-    if (!el || !node) {
-      rowVirtualizer.value.scrollToIndex(index, { align: 'start' })
-      continue
-    }
-    const currentTop = node.getBoundingClientRect().top - el.getBoundingClientRect().top
-    const delta = currentTop - anchor.viewportTop
-    if (Math.abs(delta) < 0.75) break
-    el.scrollTop += delta
-  }
-  markProgrammaticScroll()
-  await frame()
-}
-
-async function shiftBackward() {
-  if (shifting.value || windowModel.value.range.start === 0) return
-  shifting.value = true
-  consumeUserScrollIntent()
-  markProgrammaticScroll(900)
-  const anchor = captureAnchor()
-  applyWindow(windowModel.value.shiftBackward())
-  await restoreAnchor(anchor)
-  markProgrammaticScroll()
-  shifting.value = false
-}
-
-async function shiftForward() {
-  if (shifting.value || windowModel.value.range.end === logicalCount.value) return
-  shifting.value = true
-  consumeUserScrollIntent()
-  markProgrammaticScroll(900)
-  const anchor = captureAnchor()
-  applyWindow(windowModel.value.shiftForward())
-  await restoreAnchor(anchor)
-  markProgrammaticScroll()
-  shifting.value = false
-}
-
-function updateLogicalPosition() {
-  const el = parentRef.value
-  if (!el) return
-  const viewport = el.getBoundingClientRect()
-  const rows = [...el.querySelectorAll<HTMLElement>('[data-render-unit]')]
-    .filter(row => row.getBoundingClientRect().top < viewport.bottom && row.getBoundingClientRect().bottom > viewport.top)
-  const last = rows.at(-1)
-  if (!last) return
-  const index = Number(last.dataset.index)
-  const unit = renderUnits.value[index]
-  if (unit) currentLogicalPosition.value = unit.messageIndex
+function pruneOverrides() {
+  const activeIds = new Set([...activeUnits.value, ...liveTailUnits.value].map(unit => unit.id))
+  for (const key of overrides.keys()) if (!activeIds.has(key)) overrides.delete(key)
 }
 
 function remainingToBottom(): number {
-  const el = parentRef.value
-  if (!el) return Number.POSITIVE_INFINITY
-  return Math.max(0, el.scrollHeight - el.scrollTop - el.clientHeight)
+  const list = listRef.value
+  if (!list) return Number.POSITIVE_INFINITY
+  return Math.max(0, list.scrollSize - list.scrollOffset - list.viewportSize)
+}
+
+function updateLogicalPosition(offset = listRef.value?.scrollOffset ?? 0) {
+  const list = listRef.value
+  if (!list || displayUnits.value.length === 0) return
+  const probe = Math.max(0, offset + list.viewportSize * 0.65)
+  const index = Math.max(0, Math.min(displayUnits.value.length - 1, list.findItemIndex(probe)))
+  const unit = displayUnits.value[index]
+  if (unit) currentLogicalPosition.value = unit.messageIndex
 }
 
 function escapeTailFollow() {
@@ -253,6 +162,16 @@ function escapeTailFollow() {
     followTail.value = false
     tailIntentGeneration += 1
   }
+}
+
+function markUserScrollIntent(direction: -1 | 0 | 1) {
+  userScrollIntentUntil = performance.now() + USER_SCROLL_INTENT_MS
+  if (direction !== 0) userScrollDirection = direction
+}
+
+function clearUserScrollIntent() {
+  userScrollIntentUntil = 0
+  userScrollDirection = 0
 }
 
 function onUserWheel(event: WheelEvent) {
@@ -265,91 +184,130 @@ function onUserPointerDown() {
   markUserScrollIntent(0)
 }
 
-function onScroll() {
-  const el = parentRef.value
-  if (!el) return
+function onVirtualScroll(offset: number) {
+  const inferredDirection: -1 | 0 | 1 = offset < lastScrollOffset ? -1 : offset > lastScrollOffset ? 1 : 0
+  lastScrollOffset = offset
+  if (performance.now() < userScrollIntentUntil && inferredDirection !== 0) userScrollDirection = inferredDirection
 
-  const currentTop = el.scrollTop
-  const inferredDirection: -1 | 0 | 1 = currentTop < lastScrollTop ? -1 : currentTop > lastScrollTop ? 1 : 0
-  lastScrollTop = currentTop
+  updateLogicalPosition(offset)
+  refreshMountedRows()
 
-  const fromUser = !isProgrammaticScroll() && performance.now() < userScrollIntentUntil
-  if (fromUser && inferredDirection !== 0) userScrollDirection = inferredDirection
-
-  const remainingNow = remainingToBottom()
-  if (!isProgrammaticScroll() && streamTarget.value) {
-    if (remainingNow > FOLLOW_THRESHOLD_PX) escapeTailFollow()
-    else if (remainingNow < 40) followTail.value = true
+  const remaining = remainingToBottom()
+  if (streamTarget.value) {
+    if (performance.now() < userScrollIntentUntil && remaining > FOLLOW_THRESHOLD_PX) escapeTailFollow()
+    else if (remaining < 32) followTail.value = true
   }
+}
 
-  if (scrollFrame) return
-  scrollFrame = requestAnimationFrame(() => {
-    scrollFrame = 0
-    const scrollEl = parentRef.value
-    if (!scrollEl || shifting.value) return
-    updateLogicalPosition()
+function onVirtualScrollEnd() {
+  refreshMountedRows()
+  if (shifting.value || performance.now() >= userScrollIntentUntil) return
+  const list = listRef.value
+  if (!list) return
 
-    // Segment rebasing is a response to reader navigation, never to a scroll event
-    // generated by jump(), anchor restoration, ResizeObserver correction or tail-follow.
-    if (isProgrammaticScroll() || performance.now() >= userScrollIntentUntil) return
-    const remaining = remainingToBottom()
-    if (userScrollDirection < 0 && scrollEl.scrollTop < EDGE_THRESHOLD_PX) void shiftBackward()
-    else if (userScrollDirection > 0 && remaining < EDGE_THRESHOLD_PX) void shiftForward()
-  })
+  const remaining = remainingToBottom()
+  if (userScrollDirection < 0 && list.scrollOffset < EDGE_THRESHOLD_PX) void shiftBackward()
+  else if (userScrollDirection > 0 && remaining < EDGE_THRESHOLD_PX) void shiftForward()
+}
+
+async function shiftBackward() {
+  if (shifting.value || windowModel.value.range.start === 0) return
+  shifting.value = true
+  clearUserScrollIntent()
+  escapeTailFollow()
+
+  const previous = windowModel.value.range
+  const oldUnits = [...activeUnits.value]
+  const finalUnits = [...windowModel.value.shiftBackward()]
+  const incoming = finalUnits.filter(unit => unit.messageIndex < previous.start)
+
+  // Virtua's shift mode is specifically defined for insert/remove at the list start.
+  // First grow the window by prepending history so stable keyed rows stay anchored.
+  shiftMode.value = true
+  activeUnits.value = [...incoming, ...oldUnits]
+  syncRange()
+  await settleFrames(3)
+
+  // The tail trim does not move rows before the reader, so turn shift off before
+  // returning to the normal bounded 2048-message hot window.
+  shiftMode.value = false
+  activeUnits.value = finalUnits
+  await settleFrames(2)
+  pruneOverrides()
+  updateLogicalPosition()
+  refreshMountedRows()
+  shifting.value = false
+}
+
+async function shiftForward() {
+  if (shifting.value || windowModel.value.range.end === logicalCount.value) return
+  shifting.value = true
+  clearUserScrollIntent()
+
+  const previous = windowModel.value.range
+  const oldUnits = [...activeUnits.value]
+  const finalUnits = [...windowModel.value.shiftForward()]
+  const incoming = finalUnits.filter(unit => unit.messageIndex >= previous.end)
+
+  // Appending at the end is start-relative and needs no shift compensation.
+  shiftMode.value = false
+  activeUnits.value = [...oldUnits, ...incoming]
+  syncRange()
+  await settleFrames(2)
+
+  // Removing the old head is exactly Virtua's reverse-infinite-scroll use case.
+  shiftMode.value = true
+  activeUnits.value = finalUnits
+  await settleFrames(3)
+  shiftMode.value = false
+  await nextTick()
+  pruneOverrides()
+  updateLogicalPosition()
+  refreshMountedRows()
+  shifting.value = false
+}
+
+async function scrollToMessage(target: number) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const list = listRef.value
+    if (!list) {
+      await settleFrames(1)
+      continue
+    }
+    const index = displayUnits.value.findIndex(unit => unit.messageIndex === target)
+    if (index < 0) return
+    list.scrollToIndex(index, { align: 'center' })
+    await settleFrames(2)
+
+    const mounted = scrollStageRef.value?.querySelector(`[data-message-index="${target}"]`)
+    if (mounted) break
+  }
+  lastScrollOffset = listRef.value?.scrollOffset ?? 0
+  updateLogicalPosition()
+  refreshMountedRows()
 }
 
 async function jumpToMessage(raw = jumpInput.value) {
   const target = Math.max(0, Math.min(logicalCount.value - 1, Math.floor(Number(raw) || 0)))
   stopStreaming()
   shifting.value = true
-  consumeUserScrollIntent()
-  markProgrammaticScroll(1400)
-  applyWindow(windowModel.value.jump(target))
+  clearUserScrollIntent()
+  shiftMode.value = false
 
-  await nextTick()
-  const el = parentRef.value
-  if (!el) {
-    shifting.value = false
-    return
-  }
+  activeUnits.value = [...windowModel.value.jump(target)]
+  liveTailUnits.value = []
+  syncRange()
+  pruneOverrides()
 
-  // A completely different hot segment must not inherit the old segment's physical
-  // scroll offset. Reset first, then let the virtualizer estimate the target, then
-  // reconcile against real DOM geometry as dynamic measurements settle.
-  el.scrollTop = 0
-  lastScrollTop = 0
-  rowVirtualizer.value.measure()
-  await frame()
-
-  const index = renderUnits.value.findIndex(unit => unit.messageIndex === target)
-  if (index >= 0) {
-    rowVirtualizer.value.scrollToIndex(index, { align: 'center' })
-    for (let attempt = 0; attempt < 10; attempt += 1) {
-      markProgrammaticScroll(320)
-      await frame()
-      await nextTick()
-      rowVirtualizer.value.measure()
-      const node = renderedMessageElement(target)
-      if (!node) {
-        rowVirtualizer.value.scrollToIndex(index, { align: 'center' })
-        continue
-      }
-
-      const viewport = el.getBoundingClientRect()
-      const rect = node.getBoundingClientRect()
-      const usableHeight = Math.max(80, el.clientHeight - 64)
-      const visibleHeight = Math.min(rect.height, usableHeight)
-      const desiredTop = Math.max(24, (el.clientHeight - visibleHeight) / 2)
-      const delta = (rect.top - viewport.top) - desiredTop
-      if (Math.abs(delta) < 2) break
-      el.scrollTop += delta
-    }
-  }
+  // A random jump is a new physical coordinate system. Remounting a bounded
+  // virtualizer is cheaper and more correct than carrying measurements from an
+  // unrelated 2048-message segment and trying to compensate them with DOM math.
+  virtualEpoch.value += 1
+  await settleFrames(3)
+  await scrollToMessage(target)
 
   currentLogicalPosition.value = target
   jumpInput.value = target
-  markProgrammaticScroll(260)
-  await frame()
   shifting.value = false
 }
 
@@ -359,12 +317,15 @@ async function configureCount(count: number) {
   source.value = new SyntheticConversationSource(count)
   windowModel.value = new WindowMaterializer(source.value, WINDOW_MESSAGES, SHIFT_MESSAGES)
   pageHeights.value = new PageHeightIndex(count)
+  activeUnits.value = [...windowModel.value.units]
   liveTailUnits.value = []
-  applyWindow(windowModel.value.units)
+  shiftMode.value = false
+  syncRange()
+  pruneOverrides()
+  virtualEpoch.value += 1
   jumpInput.value = Math.floor(count / 2)
-  await nextTick()
-  rowVirtualizer.value.measure()
   currentLogicalPosition.value = count - 1
+  await settleFrames(3)
   void startStreaming(false)
 }
 
@@ -408,7 +369,6 @@ function publishStreamFrame() {
     streamTarget.value = next.id
     streamChunkText = ''
     pendingDelta = `${pendingDelta}\n\n`
-    void nextTick().then(() => rowVirtualizer.value.measure())
   }
 
   streamChunkText += pendingDelta
@@ -421,8 +381,7 @@ function publishStreamFrame() {
     payload: { ...streamBaseUnit.payload, markdown: streamChunkText, live: true },
   })
   streamRenderTicks.value += 1
-  foldStateCount.value = touchedFoldStateCount()
-  highlightEntries.value = highlightCacheSize()
+  refreshMountedRows()
   if (followTail.value) void stickToTail(false)
 }
 
@@ -433,23 +392,20 @@ function ingestStreamDelta() {
 }
 
 async function stickToTail(force: boolean) {
-  if (!atTailSegment.value || renderUnits.value.length === 0) return
+  if (!atTailSegment.value || displayUnits.value.length === 0) return
   if (!force && !followTail.value) return
   const intent = tailIntentGeneration
-  markProgrammaticScroll(700)
+
   await nextTick()
   if (intent !== tailIntentGeneration || (!force && !followTail.value)) return
-
-  rowVirtualizer.value.measure()
-  rowVirtualizer.value.scrollToIndex(renderUnits.value.length - 1, { align: 'end' })
+  listRef.value?.scrollToIndex(displayUnits.value.length - 1, { align: 'end' })
   await frame()
+
   if (intent !== tailIntentGeneration || (!force && !followTail.value)) return
-
-  const el = parentRef.value
-  if (!el) return
-  markProgrammaticScroll(300)
-  el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight)
+  listRef.value?.scrollToIndex(displayUnits.value.length - 1, { align: 'end' })
   await frame()
+  updateLogicalPosition()
+  refreshMountedRows()
 }
 
 async function startStreaming(reset = true) {
@@ -502,15 +458,15 @@ function forcePrepend() { void shiftBackward() }
 function forceForward() { void shiftForward() }
 
 onMounted(async () => {
-  await nextTick()
-  const el = parentRef.value
-  if (el) lastScrollTop = el.scrollTop
+  await settleFrames(2)
+  lastScrollOffset = listRef.value?.scrollOffset ?? 0
+  refreshMountedRows()
   void startStreaming(true)
 })
 
 onBeforeUnmount(() => {
   stopStreaming()
-  if (scrollFrame) cancelAnimationFrame(scrollFrame)
+  if (metricsFrame) cancelAnimationFrame(metricsFrame)
 })
 </script>
 
@@ -540,7 +496,7 @@ onBeforeUnmount(() => {
           <time>{{ session[1] }}</time>
         </button>
       </div>
-      <div class="sidebar-footer"><span class="status-led" /> Runtime connected <span class="sidebar-version">Vue / virtual</span></div>
+      <div class="sidebar-footer"><span class="status-led" /> Runtime connected <span class="sidebar-version">Vue / Virtua</span></div>
     </aside>
 
     <main class="conversation-shell">
@@ -554,33 +510,32 @@ onBeforeUnmount(() => {
         </div>
       </header>
 
-      <div
-        ref="parentRef"
-        class="scrollport"
-        data-testid="scrollport"
-        @pointerdown.passive="onUserPointerDown"
-        @wheel.passive="onUserWheel"
-        @scroll.passive="onScroll"
-      >
+      <div ref="scrollStageRef" class="scroll-stage">
+        <VList
+          :key="virtualEpoch"
+          ref="listRef"
+          class="scrollport"
+          data-testid="scrollport"
+          :data="displayUnits"
+          :buffer-size="VIRTUAL_BUFFER_PX"
+          :item-size="VIRTUAL_ITEM_HINT_PX"
+          :shift="shiftMode"
+          :item-props="itemProps"
+          @pointerdown.passive="onUserPointerDown"
+          @wheel.passive="onUserWheel"
+          @scroll="onVirtualScroll"
+          @scroll-end="onVirtualScrollEnd"
+        >
+          <template #default="{ item }">
+            <RenderUnitView :key="item.id" :unit="resolvedUnit(item)" />
+          </template>
+        </VList>
+
         <div class="conversation-meta-strip">
           <span>Loaded <strong data-testid="segment-range">{{ segmentStart.toLocaleString() }} – {{ (segmentEnd - 1).toLocaleString() }}</strong></span>
           <span>Reader <strong data-testid="reader-position">#{{ currentLogicalPosition.toLocaleString() }}</strong></span>
           <span>{{ mountedRows }} DOM rows</span>
           <span v-if="streamTarget">{{ followTail ? 'following tail' : 'tail paused' }}</span>
-        </div>
-        <div class="virtual-canvas" :style="{ height: `${totalSize}px` }">
-          <div
-            v-for="virtualRow in virtualRows"
-            :key="String(virtualRow.key)"
-            :ref="measureElement"
-            :data-index="virtualRow.index"
-            :data-message-index="renderUnits[virtualRow.index]?.messageIndex"
-            :data-render-unit="renderUnits[virtualRow.index]?.id"
-            class="virtual-row"
-            :style="{ transform: `translateY(${virtualRow.start}px)` }"
-          >
-            <RenderUnitView v-if="unitAt(virtualRow.index)" :unit="unitAt(virtualRow.index)!" />
-          </div>
         </div>
       </div>
 
@@ -592,7 +547,7 @@ onBeforeUnmount(() => {
             <div><span class="context-meter">{{ logicalCount.toLocaleString() }} synthetic messages</span><button class="send-button" :disabled="!composerText.trim()" @click="sendComposer">↑</button></div>
           </div>
         </div>
-        <span class="composer-hint">Enter to send · live output is frame-coalesced and chunked into bounded RenderUnits</span>
+        <span class="composer-hint">Enter to send · frame-coalesced live output · Virtua native dynamic-height anchoring</span>
       </footer>
     </main>
 
@@ -636,8 +591,9 @@ onBeforeUnmount(() => {
       <div class="architecture-note">
         <strong>Bounded rendering path</strong>
         <span>{{ logicalCount.toLocaleString() }} logical messages stay outside Vue deep reactivity.</span>
-        <span>Physical virtualizer: {{ activeUnitCount.toLocaleString() }} hot RenderUnits.</span>
+        <span>Physical virtualizer: {{ activeUnitCount.toLocaleString() }} hot RenderUnits; {{ mountedRows }} DOM rows.</span>
         <span>Global page index: {{ pageHeights.pageCount.toLocaleString() }} Fenwick leaves.</span>
+        <span>Large jumps start a fresh bounded virtualizer epoch; adjacent history uses native shift anchoring.</span>
         <span>Live output rolls to a new RenderUnit after {{ LIVE_CHUNK_LIMIT.toLocaleString() }} chars.</span>
         <span>Estimated logical height: {{ Math.round(estimatedTotalHeight / 1_000_000).toLocaleString() }}M px, never emitted as one DOM height.</span>
       </div>
