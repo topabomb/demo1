@@ -20,25 +20,28 @@ describe('ConversationWorkspaceRuntime', () => {
       workspace.activate('event-normalization')
       workspace.activate('dynamic-heights')
       expect(workspace.hotSessionCount).toBeLessThanOrEqual(HOT_SESSION_LIMIT)
-      expect(workspace.hasHotRuntime('million')).toBe(true) // running stream is pinned hot
+      expect(workspace.hasHotRuntime('million')).toBe(true)
+      expect(workspace.isSessionStreaming('million')).toBe(true)
     } finally {
       workspace.dispose()
     }
   })
 
-  it('rehydrates an evicted session from semantic viewport state instead of DOM state', () => {
+  it('rehydrates an evicted session from semantic viewport and draft state instead of DOM state', () => {
     const workspace = new ConversationWorkspaceRuntime()
     try {
       workspace.activate('dsh-transport')
       const dsh = workspace.activeSession
       dsh.currentLogicalPosition = 90_000
       dsh.setFollowTail(false)
+      dsh.setDraftText('draft survives eviction\nwith variable composer height')
       workspace.saveSnapshot('dsh-transport', {
         logicalPosition: 90_000,
         anchorUnitId: dsh.activeUnits[Math.floor(dsh.activeUnits.length / 2)]?.id ?? null,
         anchorOffsetPx: 73,
         followTail: false,
         atVisualBottom: false,
+        draftText: dsh.draftText,
       })
 
       workspace.activate('tool-rendering')
@@ -52,6 +55,7 @@ describe('ConversationWorkspaceRuntime', () => {
       expect(restored.followTail).toBe(false)
       expect(restored.range.start).toBeLessThanOrEqual(90_000)
       expect(restored.range.end).toBeGreaterThan(90_000)
+      expect(restored.draftText).toContain('variable composer height')
     } finally {
       workspace.dispose()
     }
