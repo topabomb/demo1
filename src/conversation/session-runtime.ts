@@ -32,7 +32,7 @@ export class ConversationSessionRuntime {
   #stateNotifier = new BatchedNotifier()
   #activeUnits: RenderUnit[] = []
   #liveTailUnits: RenderUnit[] = []
-  #liveBaseOverride: RenderUnit | null = null
+  #liveOverrides = new Map<string, RenderUnit>()
   #snapshot: ViewportSnapshot
 
   virtualEpoch = 0
@@ -82,10 +82,9 @@ export class ConversationSessionRuntime {
   get liveTailUnits(): readonly RenderUnit[] { return this.#liveTailUnits }
   get displayUnits(): readonly RenderUnit[] {
     if (this.range.end !== this.logicalCount) return this.#activeUnits
-    const base = this.#liveBaseOverride
-      ? this.#activeUnits.map(unit => unit.id === this.#liveBaseOverride!.id ? this.#liveBaseOverride! : unit)
-      : this.#activeUnits
-    return [...base, ...this.#liveTailUnits]
+    const base = this.#activeUnits.map(unit => this.#liveOverrides.get(unit.id) ?? unit)
+    const extra = this.#liveTailUnits.map(unit => this.#liveOverrides.get(unit.id) ?? unit)
+    return [...base, ...extra]
   }
   get messagesAfterCurrent(): number { return Math.max(0, this.logicalCount - 1 - this.currentLogicalPosition) }
   get estimatedTotalHeight(): number { return this.pageHeights.estimatedTotalHeight() }
@@ -205,9 +204,9 @@ export class ConversationSessionRuntime {
     this.#stateNotifier.markDirty()
   }
 
-  /** Store the latest tail node even when it is outside the current projection. */
+  /** Store live node state even when its row is outside the current projection. */
   patchNode(unit: RenderUnit): void {
-    if (unit.messageIndex === this.logicalCount - 1) this.#liveBaseOverride = unit
+    if (unit.messageIndex === this.logicalCount - 1) this.#liveOverrides.set(unit.id, unit)
     this.projection.patch(unit)
     this.streamRenderTicks += 1
     this.#stateNotifier.markDirty()
@@ -221,7 +220,7 @@ export class ConversationSessionRuntime {
 
   clearLiveTail(): void {
     this.#liveTailUnits = []
-    this.#liveBaseOverride = null
+    this.#liveOverrides.clear()
     this.streamChunkText = ''
     if (this.range.end === this.logicalCount) this.projection.replace(this.#activeUnits)
     this.#stateNotifier.markDirty()
