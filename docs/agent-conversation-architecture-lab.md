@@ -1,8 +1,8 @@
 # Agent Long-Conversation Architecture Lab
 
-Status: **active architecture proof** on `feat/million-message-lab`.
+Status: **ACCEPTED architecture proof** on `feat/million-message-lab`.
 
-This document is the design record for the experiment. The Vue/Virtua application is a reference implementation used to prove the architecture; it is not the architecture itself.
+This document is the design record for the experiment. The Vue/Virtua application is a reference implementation used to prove the architecture; it is not the architecture itself. Final executable evidence is recorded in [`final-acceptance-evidence.md`](final-acceptance-evidence.md).
 
 ## 1. Problem and target UX
 
@@ -146,6 +146,12 @@ Neighboring movement is 512 messages. Only the incoming slice is projected; reta
 
 A page-level Fenwick index supplies bounded global navigation metadata. The browser never receives a hundreds-of-millions-pixel element representing the full history.
 
+### Reader position is not a window center
+
+`ViewportSnapshot.logicalPosition` is the **last visible logical message**. It is authoritative semantic state, not a hint for how to center a hot page. A cold/reconstructed session therefore creates its initial bounded range **ending at that reader**. An explicit far jump may build a fresh centered range, because physical navigation will then move the requested target into view within that new virtualizer epoch.
+
+This distinction was made executable after stress testing exposed a repeatable `+1023` error — exactly half of a 2048-message window minus one — when the semantic reader had accidentally been interpreted as a segment center during rehydration.
+
 ## 5. Rendering contract
 
 A renderer is downstream of the projection boundary. The list does not know Markdown, tools or images.
@@ -165,7 +171,13 @@ Current renderer set:
 
 A virtual row owns all of its visual geometry. No child may escape the measured row border box with negative outer margins or similar cross-row tricks.
 
-The user-visible failure that exposed this rule was adjacent thinking/tool cards visibly overlapping. The implementation now makes every `.virtua-row` a self-contained measured box and removes negative continuation margins. Playwright has an explicit invariant:
+The user-visible failure that exposed this rule was adjacent thinking/tool cards visibly overlapping. The browser gate measured the overlap as `14.015625px`, matching the old `7px + 7px` vertical padding on the Virtua-owned wrapper.
+
+The final ownership rule is stronger than “remove the negative margin”:
+
+> **Virtualizer-owned wrappers are geometry-pure. Product spacing/decoration belongs inside the measured child content.**
+
+Playwright has an explicit invariant:
 
 ```text
 for every mounted adjacent row:
@@ -187,7 +199,31 @@ Reader intent and observed physical scrolling are also separate authorities:
 
 An upward gesture at the live tail disables follow before a pending measurement/end-follow update can reclaim the viewport.
 
-## 7. Latest semantics
+## 7. Programmatic navigation semantics
+
+A virtualizer can temporarily mount a row for measurement without having committed the requested physical navigation. Therefore **DOM presence is not a navigation-completion signal**.
+
+The final acceptance model for Jump is:
+
+```text
+semantic target
+      ↓
+replace bounded projection / virtual epoch
+      ↓
+virtualizer may mount measurement probes
+      ↓
+programmatic physical scroll settles
+      ↓
+target is actually visible
+      ↓
+semantic reader converges around target
+      ↓
+Jump is complete
+```
+
+This rule avoids both arbitrary sleeps and false-positive completion while retaining a bounded centered window for explicit far navigation.
+
+## 8. Latest semantics
 
 `Latest` is a logical navigation control, not a scroll-position heuristic.
 
@@ -201,7 +237,7 @@ At the true global/physical bottom the reader is normalized to `logicalCount - 1
 
 Clicking Latest navigates to the true tail and does **not** start or stop the Agent execution.
 
-## 8. Variable-height composer contract
+## 9. Variable-height composer contract
 
 The composer is an independent grid row below the viewport. It grows from roughly 56px to 180px and then scrolls internally. It is never an overlay on top of messages.
 
@@ -212,7 +248,7 @@ Two semantics are required:
 
 Draft state is session-scoped and survives Recent switching.
 
-## 9. What practice rejected
+## 10. What practice rejected
 
 ### Million-message framework state
 
@@ -242,11 +278,15 @@ Rejected. Current shifts project only the entering slice and reuse retained Rend
 
 Rejected after reproducing `Latest 1` at the true tail.
 
-### Cross-row negative margins
+### Cross-row negative margins or decorated virtualizer wrappers
 
-Rejected after a visible card-overlap failure. Virtualized rows must be independent measured boxes.
+Rejected after a visible card-overlap failure. Virtualized rows must be independent measured boxes and the wrapper owned by the virtualizer must remain geometry-pure.
 
-## 10. Reference implementation mapping
+### DOM-presence-only Jump completion
+
+Rejected after traces showed a target row could exist as a Virtua measurement probe while the viewport was still physically blank and the Reader remained at the segment boundary. Completion now requires visible target + semantic convergence.
+
+## 11. Reference implementation mapping
 
 | Architecture role | Reference implementation |
 | --- | --- |
@@ -263,7 +303,7 @@ Rejected after a visible card-overlap failure. Virtualized rows must be independ
 
 Vue and Virtua are replaceable. The contracts and invariants above are the reusable result of the experiment.
 
-## 11. Acceptance matrix
+## 12. Acceptance matrix
 
 Final acceptance requires the production candidate and the deployed GitHub Pages build to pass the same Chromium UX suite.
 
@@ -271,7 +311,7 @@ Final acceptance requires the production candidate and the deployed GitHub Pages
 2. Semantic hot window and hot-session runtime counts remain bounded.
 3. 60 Hz LLM streaming rolls into multiple RenderUnits.
 4. Upward input escapes tail-follow while output continues.
-5. Far jump around message 500,000 works without traversing intervening history.
+5. Far jump around message 500,000 works without traversing intervening history and completes only after visible/semantic convergence.
 6. Reverse prepend of 512 preserves semantic anchor `<4px`.
 7. Async execution survives history browsing and Recent switching.
 8. Latest count is exact, session-scoped and disappears at true tail.
@@ -283,19 +323,22 @@ Final acceptance requires the production candidate and the deployed GitHub Pages
 14. Architecture page and interactive reference lab are both reachable on Pages.
 15. Unit tests, TypeScript, production build, local Chromium, Pages deployment and Pages Chromium are all green.
 
-## 12. Current progress
+## 13. Final status
 
-The experiment has already produced multiple green intermediate checkpoints, but they are deliberately not treated as final proof because UX review kept adding missing real-product cases.
+The architecture proof has reached its defined exit condition.
 
-Latest implementation work has added:
+Validated implementation checkpoint: `7330c7a0c6f237b0fa8da0389516d0688c84267c`.
 
-- explicit reusable contracts for backend, execution and projection layers;
-- the architecture page at `/#architecture`;
-- row-geometry ownership and a browser non-overlap gate after a visible card-stacking failure;
-- session-scoped async execution, live-tail recovery, Latest semantics and variable composer handling;
-- local/Pages browser validation workflows.
+At that checkpoint:
 
-The current branch must still re-run the full expanded suite after these changes. Final status is only declared when both local Chromium and the deployed Pages Chromium suite are green.
+- **20/20** architecture/unit tests passed;
+- TypeScript typecheck and production Vite build passed;
+- local production-candidate Chromium suite passed **8/8**;
+- GitHub Pages deployed the exact same commit;
+- the same Chromium suite ran against `https://topabomb.github.io/demo1/` and passed **8/8**;
+- the commit received durable status `pages-public-e2e = success` linked to its deployment/verification run.
+
+The detailed run IDs, failure history, `14.015625px` overlap diagnosis, `+1023` reader diagnosis and complete acceptance matrix are preserved in [`final-acceptance-evidence.md`](final-acceptance-evidence.md).
 
 Public lab: `https://topabomb.github.io/demo1/`  
 Architecture view: `https://topabomb.github.io/demo1/#architecture`
