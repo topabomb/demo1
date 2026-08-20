@@ -1,15 +1,50 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { RenderUnit } from '../../core/types'
+import { useFoldState } from './fold-state'
+import { highlightCode } from './highlight-client'
+
 const props = defineProps<{ unit: RenderUnit }>()
-const collapsed = ref(String(props.unit.payload.code ?? '').split('\n').length > 70)
+const open = useFoldState(props.unit.id, Boolean(props.unit.payload.defaultOpen))
+const highlighted = ref('')
+let generation = 0
+
+const language = computed(() => String(props.unit.payload.language ?? 'typescript'))
+const fullCode = computed(() => String(props.unit.payload.code ?? ''))
+const lineCount = computed(() => fullCode.value.split('\n').length)
+const displayCode = computed(() => {
+  if (open.value || lineCount.value <= 28) return fullCode.value
+  return `${fullCode.value.split('\n').slice(0, 26).join('\n')}\n// … ${lineCount.value - 26} more lines hidden`
+})
+
+watch(
+  () => [props.unit.revision, displayCode.value, language.value] as const,
+  async () => {
+    const current = ++generation
+    highlighted.value = ''
+    try {
+      const html = await highlightCode(displayCode.value, language.value)
+      if (current === generation) highlighted.value = html
+    } catch {
+      if (current === generation) highlighted.value = ''
+    }
+  },
+  { immediate: true },
+)
+
+onBeforeUnmount(() => { generation += 1 })
 </script>
+
 <template>
-  <article class="message-card code-card">
-    <header>
-      <span><span class="kind-dot code-dot" />Code · {{ unit.payload.language }}</span>
-      <button class="mini" @click="collapsed = !collapsed">{{ collapsed ? 'expand' : 'collapse' }}</button>
+  <article class="message-card code-card" data-testid="code-block">
+    <header class="compact-kind-head">
+      <span><span class="kind-dot code-dot" />{{ unit.payload.filename ?? 'code' }} · {{ language }}</span>
+      <span class="head-actions">
+        <small>{{ lineCount }} lines</small>
+        <button v-if="lineCount > 28" class="mini" type="button" @click="open = !open">{{ open ? 'collapse' : 'expand' }}</button>
+      </span>
     </header>
-    <pre :class="{ collapsed }"><code>{{ unit.payload.code }}</code></pre>
+    <div v-if="highlighted" class="shiki-host" v-html="highlighted" />
+    <pre v-else><code>{{ displayCode }}</code></pre>
   </article>
 </template>
