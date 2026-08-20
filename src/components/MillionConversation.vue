@@ -42,6 +42,9 @@ let streamFrame = 0
 let scrollFrame = 0
 let pendingDelta = ''
 let streamChunkText = ''
+let streamBaseUnit: RenderUnit | null = null
+let tailIntentGeneration = 0
+let programmaticTailScroll = false
 
 const sessions = [
   ['Million-message stress session', 'now'],
@@ -137,10 +140,7 @@ function captureAnchor(): Anchor | null {
   const rows = [...el.querySelectorAll<HTMLElement>('[data-render-unit]')]
   const candidate = rows.find(row => row.getBoundingClientRect().bottom > viewport.top + 1) ?? rows[0]
   if (!candidate?.dataset.renderUnit) return null
-  return {
-    id: candidate.dataset.renderUnit,
-    viewportTop: candidate.getBoundingClientRect().top - viewport.top,
-  }
+  return { id: candidate.dataset.renderUnit, viewportTop: candidate.getBoundingClientRect().top - viewport.top }
 }
 
 function frame(): Promise<void> {
@@ -151,13 +151,10 @@ async function restoreAnchor(anchor: Anchor | null) {
   if (!anchor) return
   const index = renderUnits.value.findIndex(unit => unit.id === anchor.id)
   if (index < 0) return
-
   await nextTick()
   rowVirtualizer.value.measure()
   rowVirtualizer.value.scrollToIndex(index, { align: 'start' })
 
-  // New prepended rows initially have estimated heights. Reconcile against actual DOM
-  // geometry for several frames while ResizeObserver measurements settle.
   for (let attempt = 0; attempt < 6; attempt += 1) {
     await frame()
     await nextTick()
@@ -213,20 +210,32 @@ function remainingToBottom(): number {
   return Math.max(0, el.scrollHeight - el.scrollTop - el.clientHeight)
 }
 
+function escapeTailFollow() {
+  if (streamTimer === null) return
+  if (followTail.value) {
+    followTail.value = false
+    tailIntentGeneration += 1
+  }
+}
+
+function onUserWheel(event: WheelEvent) {
+  if (event.deltaY < 0) escapeTailFollow()
+}
+
 function onScroll() {
+  const remainingNow = remainingToBottom()
+  if (!programmaticTailScroll && streamTimer !== null) {
+    if (remainingNow > FOLLOW_THRESHOLD_PX) escapeTailFollow()
+    else if (remainingNow < 40) followTail.value = true
+  }
+
   if (scrollFrame) return
   scrollFrame = requestAnimationFrame(() => {
     scrollFrame = 0
     const el = parentRef.value
     if (!el || shifting.value) return
     updateLogicalPosition()
-
     const remaining = remainingToBottom()
-    if (streamTimer !== null) {
-      if (remaining > FOLLOW_THRESHOLD_PX) followTail.value = false
-      else if (remaining < 40) followTail.value = true
-    }
-
     if (el.scrollTop < EDGE_THRESHOLD_PX) void shiftBackward()
     else if (remaining < EDGE_THRESHOLD_PX) void shiftForward()
   })
@@ -258,7 +267,6 @@ async function configureCount(count: number) {
   jumpInput.value = Math.floor(count / 2)
   await nextTick()
   rowVirtualizer.value.measure()
-  await stickToTail()
   currentLogicalPosition.value = count - 1
   void startStreaming(false)
 }
@@ -268,10 +276,6 @@ function randomJump() {
   void jumpToMessage(next % logicalCount.value)
 }
 
-function streamBase(id: string): RenderUnit | undefined {
-  return [...activeUnits.value, ...liveTailUnits.value].find(unit => unit.id === id)
-}
-
 function createNextLiveChunk(previous: RenderUnit): RenderUnit {
   const chunkIndex = liveTailUnits.value.length + 1
   return {
@@ -279,13 +283,7 @@ function createNextLiveChunk(previous: RenderUnit): RenderUnit {
     id: `${previous.messageId}:live-extra-${chunkIndex}`,
     revision: 0,
     estimatePx: 180,
-    payload: {
-      ...previous.payload,
-      markdown: '',
-      live: true,
-      partIndex: chunkIndex,
-      partCount: chunkIndex + 1,
-    },
+    payload: { ...previous.payload, markdown: '', live: true, partIndex: chunkIndex, partCount: chunkIndex + 1 },
   }
 }
 
@@ -304,40 +302,31 @@ function nextSyntheticDelta(): string {
 
 function publishStreamFrame() {
   streamFrame = 0
-  if (!pendingDelta || !streamTarget.value) return
-  const targetId = streamTarget.value
-  const base = streamBase(targetId)
-  if (!base) return
+  if (!pendingDelta || !streamTarget.value || !streamBaseUnit) return
 
   if (streamChunkText.length >= LIVE_CHUNK_LIMIT) {
-    const next = createNextLiveChunk(base)
+    const next = createNextLiveChunk(streamBaseUnit)
     liveTailUnits.value = [...liveTailUnits.value, next]
+    streamBaseUnit = next
     streamTarget.value = next.id
     streamChunkText = ''
     pendingDelta = `${pendingDelta}\n\n`
     void nextTick().then(() => rowVirtualizer.value.measure())
   }
 
-  const currentTarget = streamTarget.value
-  const currentBase = currentTarget ? streamBase(currentTarget) : undefined
-  if (!currentTarget || !currentBase) return
   streamChunkText += pendingDelta
   pendingDelta = ''
-
+  const currentTarget = streamTarget.value
   overrides.set(currentTarget, {
-    ...currentBase,
-    revision: currentBase.revision + streamRenderTicks.value + 1,
-    estimatePx: Math.max(currentBase.estimatePx, 180 + Math.min(5200, streamChunkText.length * 0.12)),
-    payload: {
-      ...currentBase.payload,
-      markdown: streamChunkText,
-      live: true,
-    },
+    ...streamBaseUnit,
+    revision: streamBaseUnit.revision + streamRenderTicks.value + 1,
+    estimatePx: Math.max(streamBaseUnit.estimatePx, 180 + Math.min(5200, streamChunkText.length * 0.12)),
+    payload: { ...streamBaseUnit.payload, markdown: streamChunkText, live: true },
   })
   streamRenderTicks.value += 1
   foldStateCount.value = touchedFoldStateCount()
   highlightEntries.value = highlightCacheSize()
-  if (followTail.value) void stickToTail()
+  if (followTail.value) void stickToTail(false)
 }
 
 function ingestStreamDelta() {
@@ -346,14 +335,25 @@ function ingestStreamDelta() {
   if (!streamFrame) streamFrame = requestAnimationFrame(publishStreamFrame)
 }
 
-async function stickToTail() {
+async function stickToTail(force: boolean) {
   if (!atTailSegment.value || renderUnits.value.length === 0) return
-  await nextTick()
-  rowVirtualizer.value.measure()
-  rowVirtualizer.value.scrollToIndex(renderUnits.value.length - 1, { align: 'end' })
-  await frame()
-  const el = parentRef.value
-  if (el) el.scrollTop = el.scrollHeight - el.clientHeight
+  if (!force && !followTail.value) return
+  const intent = tailIntentGeneration
+  programmaticTailScroll = true
+  try {
+    await nextTick()
+    if (intent !== tailIntentGeneration || (!force && !followTail.value)) return
+    rowVirtualizer.value.measure()
+    rowVirtualizer.value.scrollToIndex(renderUnits.value.length - 1, { align: 'end' })
+    await frame()
+    if (intent !== tailIntentGeneration || (!force && !followTail.value)) return
+    const el = parentRef.value
+    if (!el) return
+    el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight)
+    await frame()
+  } finally {
+    programmaticTailScroll = false
+  }
 }
 
 async function startStreaming(reset = true) {
@@ -368,13 +368,15 @@ async function startStreaming(reset = true) {
     for (const key of [...overrides.keys()]) if (key.startsWith(tail.messageId)) overrides.delete(key)
   }
 
+  streamBaseUnit = tail
   streamTarget.value = tail.id
   streamChunkText = String(tail.payload.markdown ?? '')
   pendingDelta = ''
   streamIngressTicks.value = 0
   streamRenderTicks.value = 0
   followTail.value = true
-  await stickToTail()
+  tailIntentGeneration += 1
+  await stickToTail(true)
   streamTimer = window.setInterval(ingestStreamDelta, Math.max(16, Math.round(1000 / streamRate.value)))
 }
 
@@ -384,6 +386,8 @@ function stopStreaming(clear = true) {
   if (streamFrame) cancelAnimationFrame(streamFrame)
   streamFrame = 0
   pendingDelta = ''
+  streamBaseUnit = null
+  tailIntentGeneration += 1
   if (clear) {
     const liveMessageId = `m-${logicalCount.value - 1}`
     for (const key of [...overrides.keys()]) if (key.startsWith(liveMessageId)) overrides.delete(key)
@@ -403,7 +407,6 @@ function forceForward() { void shiftForward() }
 
 onMounted(async () => {
   await nextTick()
-  await stickToTail()
   void startStreaming(true)
 })
 
@@ -427,10 +430,7 @@ onBeforeUnmount(() => {
     </nav>
 
     <aside class="session-sidebar">
-      <div class="sidebar-head">
-        <div class="product-name">CodeNomad Lab</div>
-        <button class="icon-button">⌘</button>
-      </div>
+      <div class="sidebar-head"><div class="product-name">CodeNomad Lab</div><button class="icon-button">⌘</button></div>
       <button class="workspace-picker"><span class="workspace-dot" /> million-message-workspace <span>⌄</span></button>
       <button class="new-session">＋ New session</button>
       <div class="session-search">⌕ <span>Search sessions</span><kbd>⌘K</kbd></div>
@@ -442,18 +442,12 @@ onBeforeUnmount(() => {
           <time>{{ session[1] }}</time>
         </button>
       </div>
-      <div class="sidebar-footer">
-        <span class="status-led" /> Runtime connected
-        <span class="sidebar-version">Vue / virtual</span>
-      </div>
+      <div class="sidebar-footer"><span class="status-led" /> Runtime connected <span class="sidebar-version">Vue / virtual</span></div>
     </aside>
 
     <main class="conversation-shell">
       <header class="conversation-header">
-        <div class="conversation-title">
-          <strong>Million-message stress session</strong>
-          <span>million-message-workspace / main</span>
-        </div>
+        <div class="conversation-title"><strong>Million-message stress session</strong><span>million-message-workspace / main</span></div>
         <div class="header-chips">
           <button class="model-chip">Synthetic Agent · 1M context⌄</button>
           <span class="run-status"><i /> {{ streamTarget ? 'streaming' : 'idle' }}</span>
@@ -462,7 +456,7 @@ onBeforeUnmount(() => {
         </div>
       </header>
 
-      <div ref="parentRef" class="scrollport" data-testid="scrollport" @scroll.passive="onScroll">
+      <div ref="parentRef" class="scrollport" data-testid="scrollport" @wheel.passive="onUserWheel" @scroll.passive="onScroll">
         <div class="conversation-meta-strip">
           <span>Loaded <strong data-testid="segment-range">{{ segmentStart.toLocaleString() }} – {{ (segmentEnd - 1).toLocaleString() }}</strong></span>
           <span>Reader <strong data-testid="reader-position">#{{ currentLogicalPosition.toLocaleString() }}</strong></span>
@@ -498,11 +492,7 @@ onBeforeUnmount(() => {
     </main>
 
     <aside v-if="diagnosticsOpen" class="diagnostics-panel">
-      <div class="diagnostics-head">
-        <div><span class="eyebrow">Performance lab</span><strong>Conversation diagnostics</strong></div>
-        <button class="icon-button" @click="diagnosticsOpen = false">×</button>
-      </div>
-
+      <div class="diagnostics-head"><div><span class="eyebrow">Performance lab</span><strong>Conversation diagnostics</strong></div><button class="icon-button" @click="diagnosticsOpen = false">×</button></div>
       <div class="control-group">
         <label>Logical history</label>
         <div class="segmented" data-testid="count-selector">
@@ -511,53 +501,33 @@ onBeforeUnmount(() => {
           <button :class="{ active: logicalCount === 1_000_000 }" data-testid="count-1m" @click="configureCount(1_000_000)">1M</button>
         </div>
       </div>
-
       <div class="control-group">
         <label for="jump">Jump to global message</label>
-        <div class="inline-control">
-          <input id="jump" v-model.number="jumpInput" data-testid="jump-input" type="number" min="0" :max="logicalCount - 1" />
-          <button data-testid="jump-button" @click="jumpToMessage()">Jump</button>
-        </div>
+        <div class="inline-control"><input id="jump" v-model.number="jumpInput" data-testid="jump-input" type="number" min="0" :max="logicalCount - 1" /><button data-testid="jump-button" @click="jumpToMessage()">Jump</button></div>
         <button class="secondary wide" @click="randomJump">Deterministic random jump</button>
       </div>
-
       <div class="control-group">
         <label>History window</label>
-        <div class="inline-control">
-          <button class="secondary" data-testid="prepend-button" @click="forcePrepend">← prepend 512</button>
-          <button class="secondary" @click="forceForward">append 512 →</button>
-        </div>
+        <div class="inline-control"><button class="secondary" data-testid="prepend-button" @click="forcePrepend">← prepend 512</button><button class="secondary" @click="forceForward">append 512 →</button></div>
       </div>
-
       <div class="control-group">
         <label>Live LLM output</label>
         <div class="inline-control">
-          <select v-model.number="streamRate">
-            <option :value="5">5 Hz ingress</option>
-            <option :value="20">20 Hz ingress</option>
-            <option :value="60">60 Hz ingress</option>
-          </select>
-          <button data-testid="stream-start" @click="startStreaming(true)">Restart</button>
-          <button class="secondary" @click="stopStreaming(false)">Pause</button>
+          <select v-model.number="streamRate"><option :value="5">5 Hz ingress</option><option :value="20">20 Hz ingress</option><option :value="60">60 Hz ingress</option></select>
+          <button data-testid="stream-start" @click="startStreaming(true)">Restart</button><button class="secondary" @click="stopStreaming(false)">Pause</button>
         </div>
       </div>
-
       <div class="metrics" data-testid="metrics">
         <div><span>logical</span><strong data-testid="logical-count">{{ logicalCount.toLocaleString() }}</strong></div>
         <div><span>hot messages</span><strong>{{ (segmentEnd - segmentStart).toLocaleString() }}</strong></div>
         <div><span>render units</span><strong data-testid="active-units">{{ activeUnitCount.toLocaleString() }}</strong></div>
         <div><span>DOM rows</span><strong data-testid="mounted-rows">{{ mountedRows }}</strong></div>
-        <div><span>FPS</span><strong>{{ fps }}</strong></div>
-        <div><span>frame p95</span><strong>{{ frameP95 }} ms</strong></div>
-        <div><span>long tasks</span><strong>{{ longTasks }}</strong></div>
-        <div><span>JS heap</span><strong>{{ heapMb === null ? 'n/a' : `${heapMb} MB` }}</strong></div>
-        <div><span>stream ingress</span><strong data-testid="stream-ingress">{{ streamIngressTicks }}</strong></div>
-        <div><span>UI publishes</span><strong data-testid="stream-ticks">{{ streamRenderTicks }}</strong></div>
-        <div><span>live chunks</span><strong data-testid="live-chunks">{{ liveTailUnits.length + 1 }}</strong></div>
-        <div><span>fold state</span><strong>{{ foldStateCount }}</strong></div>
+        <div><span>FPS</span><strong>{{ fps }}</strong></div><div><span>frame p95</span><strong>{{ frameP95 }} ms</strong></div>
+        <div><span>long tasks</span><strong>{{ longTasks }}</strong></div><div><span>JS heap</span><strong>{{ heapMb === null ? 'n/a' : `${heapMb} MB` }}</strong></div>
+        <div><span>stream ingress</span><strong data-testid="stream-ingress">{{ streamIngressTicks }}</strong></div><div><span>UI publishes</span><strong data-testid="stream-ticks">{{ streamRenderTicks }}</strong></div>
+        <div><span>live chunks</span><strong data-testid="live-chunks">{{ liveTailUnits.length + 1 }}</strong></div><div><span>fold state</span><strong>{{ foldStateCount }}</strong></div>
         <div><span>highlight LRU</span><strong>{{ highlightEntries }}</strong></div>
       </div>
-
       <div class="architecture-note">
         <strong>Bounded rendering path</strong>
         <span>{{ logicalCount.toLocaleString() }} logical messages stay outside Vue deep reactivity.</span>
