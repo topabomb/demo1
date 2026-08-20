@@ -320,7 +320,7 @@ onBeforeUnmount(() => {
         <div class="virtual-canvas" :style="{ height: `${totalSize}px` }">
           <div
             v-for="virtualRow in virtualRows"
-            :key="virtualRow.key"
+            :key="String(virtualRow.key)"
             :ref="measureElement"
             :data-index="virtualRow.index"
             :data-render-unit="activeUnits[virtualRow.index]?.id"
