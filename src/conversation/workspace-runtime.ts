@@ -2,6 +2,7 @@ import type { ConversationDescriptor, ViewportSnapshot } from './contracts'
 import { BatchedNotifier, type Unsubscribe } from './notifier'
 import { ConversationSessionRuntime } from './session-runtime'
 import { SyntheticHistoryAdapter } from './synthetic-adapter'
+import { SyntheticStreamController } from './stream-controller'
 
 export const HOT_SESSION_LIMIT = 3
 
@@ -19,12 +20,14 @@ export const RECENT_SESSIONS: readonly (ConversationDescriptor & { seedOffset: n
 /**
  * Framework-free workspace controller. It keeps session metadata/snapshots cheap,
  * lazily hydrates heavyweight session runtimes, and evicts cold runtimes with LRU.
+ * Running streams belong to their session scopes and may continue off-screen.
  */
 export class ConversationWorkspaceRuntime {
   readonly descriptors = RECENT_SESSIONS
   #descriptorById = new Map(RECENT_SESSIONS.map(entry => [entry.id, entry]))
   #snapshots = new Map<string, ViewportSnapshot>()
   #runtimes = new Map<string, ConversationSessionRuntime>()
+  #streams = new Map<string, SyntheticStreamController>()
   #lastAccess = new Map<string, number>()
   #notifier = new BatchedNotifier()
   #clock = 0
@@ -32,7 +35,8 @@ export class ConversationWorkspaceRuntime {
 
   constructor() {
     for (const descriptor of this.descriptors) this.#snapshots.set(descriptor.id, defaultSnapshot(descriptor))
-    this.ensureRuntime(this.#activeSessionId)
+    const first = this.ensureRuntime(this.#activeSessionId)
+    if (first.status === 'running') this.streamFor(first.id).start(true)
   }
 
   subscribe(listener: () => void): Unsubscribe {
@@ -57,16 +61,21 @@ export class ConversationWorkspaceRuntime {
     const adapter = new SyntheticHistoryAdapter(id, descriptor.logicalCount, descriptor.seedOffset)
     const runtime = new ConversationSessionRuntime(descriptor, adapter, snapshot)
     this.#runtimes.set(id, runtime)
+    this.#streams.set(id, new SyntheticStreamController(runtime))
     this.#touch(id)
     this.#prune()
     this.#notifier.markDirty()
     return runtime
   }
 
-  /**
-   * Persist the old runtime's semantic viewport before changing active scope.
-   * No DOM/virtualizer object is shared between sessions.
-   */
+  streamFor(id: string): SyntheticStreamController {
+    this.ensureRuntime(id)
+    const stream = this.#streams.get(id)
+    if (!stream) throw new Error(`Stream controller missing for session: ${id}`)
+    return stream
+  }
+
+  /** Persist the old semantic viewport before changing active scope. */
   activate(id: string, outgoingSnapshot?: ViewportSnapshot): ConversationSessionRuntime {
     if (outgoingSnapshot) this.saveSnapshot(this.#activeSessionId, outgoingSnapshot)
     else this.saveSnapshot(this.#activeSessionId, this.activeSession.snapshot())
@@ -105,6 +114,12 @@ export class ConversationWorkspaceRuntime {
     return this.#runtimes.has(id)
   }
 
+  dispose(): void {
+    for (const stream of this.#streams.values()) stream.stop(false)
+    this.#streams.clear()
+    this.#runtimes.clear()
+  }
+
   #touch(id: string): void {
     this.#clock += 1
     this.#lastAccess.set(id, this.#clock)
@@ -113,11 +128,13 @@ export class ConversationWorkspaceRuntime {
   #prune(): void {
     while (this.#runtimes.size > HOT_SESSION_LIMIT) {
       const candidates = [...this.#runtimes.values()]
-        .filter(runtime => runtime.id !== this.#activeSessionId && runtime.streamTarget === null)
+        .filter(runtime => runtime.id !== this.#activeSessionId && !this.#streams.get(runtime.id)?.running)
         .sort((a, b) => (this.#lastAccess.get(a.id) ?? 0) - (this.#lastAccess.get(b.id) ?? 0))
       const victim = candidates[0]
       if (!victim) break
       this.#snapshots.set(victim.id, victim.snapshot())
+      this.#streams.get(victim.id)?.stop(false)
+      this.#streams.delete(victim.id)
       this.#runtimes.delete(victim.id)
       this.#lastAccess.delete(victim.id)
     }
