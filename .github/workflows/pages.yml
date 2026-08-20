@@ -1,6 +1,5 @@
 name: Deploy GitHub Pages
 
-# Re-triggered after enabling GitHub Actions as the repository Pages source.
 on:
   push:
     branches: [main, feat/million-message-lab]
@@ -16,12 +15,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-and-deploy:
+  build-deploy-and-verify:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
 
@@ -30,17 +29,17 @@ jobs:
         with:
           version: 10.15.1
           run_install: false
+          cache: true
+          cache_dependency_path: package.json
 
       - uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: pnpm
-          cache-dependency-path: package.json
 
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile --prefer-offline
 
-      - name: Verify core algorithms
+      - name: Verify architecture tests
         run: pnpm test
 
       - name: Build for Pages
@@ -59,3 +58,16 @@ jobs:
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: Run full Chromium UX suite against deployed site
+        env:
+          PLAYWRIGHT_BASE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: pnpm test:e2e
+
+      - name: Upload deployed-site Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pages-playwright-report
+          path: playwright-report/
+          retention-days: 7
