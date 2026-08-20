@@ -1,240 +1,301 @@
 # Agent Long-Conversation Architecture Lab
 
-Status: active implementation and validation on `feat/million-message-lab`.
+Status: **active architecture proof** on `feat/million-message-lab`.
 
-## Background and target UX
+This document is the design record for the experiment. The Vue/Virtua application is a reference implementation used to prove the architecture; it is not the architecture itself.
 
-This repository is not a generic virtual-list benchmark. It is a concrete architecture experiment for a CodeNomad/DSH-like Agent workspace where users keep many conversations in **Recent**, switch between them, inspect old history, expand thinking/tool details, and keep a current LLM response streaming while the conversation may already contain hundreds of thousands or millions of heterogeneous messages.
+## 1. Problem and target UX
 
-The target is **1,000,000 logical messages in one session** without eagerly materializing the history into framework state or DOM. The UI must remain product-like: sidebar Recent sessions, a single active conversation viewport, Markdown/code/diff/image/HTML/tool/thinking renderers, bottom-follow while the reader stays pinned, reliable escape when the reader scrolls upward, semantic viewport restore when switching sessions, a variable-height composer, and a floating **Latest** control with an exact count of logical messages after the reader.
+A real Agent workspace has several properties at the same time:
 
-Hard UX requirements:
+- one conversation may contain hundreds of thousands or millions of logical messages;
+- message heights are unknown and may change after mount (Markdown, thinking, tool results, images, HTML, diff, syntax highlighting);
+- the current assistant output may grow continuously;
+- users switch between many Recent conversations;
+- a conversation may continue running asynchronously while it is not visible;
+- each conversation owns independent reader position, draft, disclosures and live state;
+- the composer changes height and therefore changes the physical viewport;
+- users expect exact “Latest / messages after” semantics, not a scrollbar approximation;
+- the frontend must not depend on OpenCode, DSH, a provider protocol or one message schema.
 
-- Recent contains multiple real, independently scoped conversations rather than decorative rows.
-- A → B → A restores A's semantic reader position, draft and disclosure state without leaking B state.
-- A running session can continue receiving model deltas while another session is visible or while its own reader is browsing old history.
-- Thinking/tool/code/diff may change height after mount; virtualization must stay stable.
-- The newest assistant response may grow continuously and is split into bounded RenderUnits instead of becoming one unbounded row.
-- When the user leaves the bottom, a floating Latest button appears and shows the **exact** logical message count after the last visible logical message; clicking it returns directly to the true global tail and then disappears.
-- The composer may grow from one line to roughly 180 px. It owns layout space and must resize the viewport rather than overlaying/stacking message cards.
-- Composer resize at the tail keeps the reader pinned; composer resize in history preserves the same semantic top anchor within the same <4 px budget used for reverse prepend.
-- Global jump and reverse-history prepend must work without creating a million-pixel DOM surface.
-- Physical DOM, hot message state, renderer caches, and hot session runtimes remain bounded.
+The primary performance target is **1,000,000 logical messages** with bounded hot state and bounded physical DOM. The primary UX target is that the above interactions continue to behave like a normal CodeNomad/DSH-style Agent client.
 
-## Final architecture under test
+## 2. Architecture claim
 
-```text
-OpenCode / DSH / remote backend / synthetic lab
-                  │
-                  ▼
-       ConversationHistoryAdapter
-       (backend/protocol boundary)
-                  │
-                  ▼
-          canonical LogicalMessage
-                  │
-                  ▼
-             projector
-     LogicalMessage → RenderUnit[]
-                  │
-                  ▼
-       ConversationSessionRuntime
-  2048-message semantic hot window
-  512-message incremental shifts
-  page-height Fenwick index
-  async run + reader + draft state
-                  │
-                  ▼
-      KeyedConversationProjection
-        order: readonly NodeId[]
-        nodes: Map<NodeId, RenderUnit>
-                  │
-        ┌─────────┴─────────┐
-        │                   │
- order membership       one-node patch
- notification           notification
-        │                   │
-        ▼                   ▼
-      Virtua           ConversationNodeSeat
- dynamic-height          key subscription
- virtualization               │
-        └─────────┬───────────┘
-                  ▼
-          Vue renderer components
- markdown / thinking / tool / code / diff / image / html
-```
+The central design rule is:
 
-Above the sessions is a framework-free `ConversationWorkspaceRuntime`. It keeps lightweight descriptors and semantic viewport snapshots for all Recent sessions, lazily creates heavy runtimes, and retains at most **3 hot session runtimes** by LRU. A running off-screen stream is intentionally pinned hot. Evicted sessions are reconstructed around their logical reader position; no DOM node or virtualizer object is persisted.
-
-Vue is deliberately the projection layer, not the owner of Agent business state. `useWorkspaceRuntime()` is a thin revision bridge. The conversation runtime, workspace runtime, backend contract, stream controller, keyed projection and notifier are plain TypeScript and have no Vue/React/Solid dependency.
-
-## DSH ideas deliberately adopted
-
-The useful DSH lesson was not "use React". It was the render economics of a framework-free session model and a stable keyed conversation projection:
-
-- raw/backend semantics are separated from UI nodes;
-- order changes only when rows enter, leave or move;
-- a streaming delta replaces one stable node instead of rebuilding the whole conversation projection;
-- each rendered NodeSeat subscribes to exactly one node key;
-- repeated mutations are microtask-batched before notifying the UI;
-- session scope owns conversation state, so an off-screen session may continue processing events.
-
-`KeyedConversationProjection` makes those properties executable. Unit tests assert that patching one streaming node does **not** publish the order or sibling node subscriptions, and twenty synchronous patches collapse into one node notification.
-
-## Storage and bounded-state strategy
-
-The 1M history is an addressable logical source, not one million Vue objects. The active session materializes only a 2048-message window. A neighboring shift is 512 messages.
-
-A shift is incremental: only the newly entering 512 logical messages are loaded/projected; the retained ~1536 logical messages reuse the exact same RenderUnit objects. This preserves renderer and virtualizer identity while reducing CPU churn. A large random jump is different: it intentionally starts a new virtualizer epoch because old physical measurements have no useful relationship to a distant semantic window.
-
-The page-level `PageHeightIndex` uses a Fenwick tree for global height estimates without maintaining a one-million-entry per-message prefix array. The global index is useful for navigation/diagnostics; the browser never receives one giant physical scroll element representing the entire logical history.
-
-Per-session state is split by lifetime:
-
-- **Persistent/lightweight:** descriptor plus semantic viewport snapshot (`logicalPosition`, stable `anchorUnitId`, `anchorOffsetPx`, `followTail`, `atVisualBottom`, `draftText`).
-- **Hot/bounded:** 2048-message RenderUnit window, local height information, async stream state, projection nodes, virtualizer cache.
-- **Sparse user state:** disclosure state is stored only for keys the user touched. RenderUnit IDs include the session scope, so identical logical indices in different sessions never share fold state.
-- **Bounded renderer caches:** Shiki highlighting is done in a Worker with an LRU rather than on the UI thread or an unbounded global cache.
-
-A production backend can replace `SyntheticHistoryAdapter` with OpenCode, DSH, IndexedDB/SQLite or network paging while preserving everything above the adapter contract.
-
-## Rendering and streaming decisions
-
-`Virtua` is the physical dynamic-height virtualizer. It is used only for the current hot projection, not for the entire 1M history. It supplies ResizeObserver-based measurement and start-shift semantics for reverse history.
-
-Long/unbounded content is split before virtualization. A single logical assistant message can therefore own multiple stable RenderUnits. Synthetic live output rolls into another RenderUnit after roughly 6500 characters. This prevents the pathological case where "the last message" itself grows to tens of thousands of pixels.
-
-Every live RenderUnit revision is retained by stable key, not just the newest chunk. This matters when a long response has already rolled over into several chunks and the reader leaves the viewport: all chunks can keep receiving/recovering session-scoped state and are recomposed when the reader returns to Latest.
-
-Model ingress and UI publication are different rates. Synthetic model deltas can arrive at 5/20/60 Hz; publication is coalesced before the UI sees it. The stable list `order` is unchanged by normal token growth, so the parent list is not invalidated. Only the NodeSeat for the live RenderUnit updates.
-
-Code syntax highlighting uses Shiki in a dedicated Web Worker. Markdown and HTML pass through DOMPurify. Images reserve dimensions up front to reduce late layout shifts.
-
-## Async execution vs viewport navigation
-
-This became a blocking requirement during browser testing. An Agent run and a viewport are different lifecycles:
+> **Long Agent conversations are four different lifecycles. Do not collapse them into one framework-owned message list.**
 
 ```text
-SessionRuntime
-├─ execution / model stream       may continue off-screen
-├─ live tail keyed revisions      may continue off-screen
-└─ viewport/navigation
-   ├─ global tail
-   ├─ old history segment
-   └─ unmounted because another Recent session is active
+Backend / provider / Agent runtime
+             │
+             ▼
+┌───────────────────────────────┐
+│ 1. ConversationBackend        │  backend lifetime
+│ protocol translation + paging│
+└──────────────┬────────────────┘
+               ▼
+       canonical events/messages
+               │
+               ▼
+┌───────────────────────────────┐
+│ 2. Conversation Engine        │  session lifetime
+│ execution + logical history   │
+│ live tail + semantic snapshot │
+└──────────────┬────────────────┘
+               ▼
+┌───────────────────────────────┐
+│ 3. Projection Store           │  hot semantic lifetime
+│ bounded RenderUnits           │
+│ order[] + nodes[stable key]   │
+└──────────────┬────────────────┘
+               ▼
+┌───────────────────────────────┐
+│ 4. Viewport Controller        │  mounted viewport lifetime
+│ dynamic measure + scroll      │
+│ anchor + follow + resize      │
+└──────────────┬────────────────┘
+               ▼
+          framework UI
 ```
 
-Therefore `jump(history)` and `A → B` never cancel or reset A's run. When A is revisited, its semantic viewport is restored. If the reader then presses Latest, the current tail projection is composed from the latest keyed live chunks accumulated while off-screen. Latest is navigation only; it does not start or stop the execution.
+### Layer 1 — backend boundary
 
-A running session is pinned in the hot-runtime set in this lab so the browser can continue consuming synthetic deltas. A production remote backend may use a lighter event/session cache, but the ownership rule remains the same: execution state is session-scoped, never component-scoped.
+`ConversationBackend` is the only place allowed to know OpenCode, DSH, a remote API, IndexedDB/SQLite or the synthetic data source. It produces canonical logical data.
 
-## Variable-height composer contract
+Current reference implementation: `SyntheticHistoryAdapter`.
 
-The composer is a real grid row below the scroll viewport, never an absolute overlay. Its textarea auto-grows from about 56 px to 180 px and then scrolls internally. Resizing it changes the physical VList viewport height.
+### Layer 2 — session/execution lifetime
 
-Two distinct semantics are required:
+Execution belongs to a conversation session, not a Vue component. It may continue while:
 
-- **Pinned tail:** after the viewport shrinks/grows, Virtua is allowed to settle its measurement and the controller re-aligns the global tail. The final message remains visible and Latest stays hidden.
-- **History:** the scroll viewport's top coordinate does not move. The same top semantic RenderUnit must remain at the same pixel Y (acceptance drift <4 px), while fewer/more rows become visible at the bottom.
+- the user reads older history;
+- another Recent conversation is active;
+- the conversation viewport is completely unmounted.
 
-The draft itself is session-scoped semantic state. A → B → A restores A's text and therefore its composer height without leaking B's draft.
+The current lab exposes this through the framework-free `ConversationExecutionController` contract and `SyntheticStreamController` reference implementation.
 
-## Latest semantics
+### Layer 3 — semantic projection
 
-`Latest` is intentionally based on logical semantics, not scrollbar approximation.
+Backend messages are not rendering rows. `LogicalMessage` is projected into one or more bounded `RenderUnit`s. A very long assistant answer, code block or diff may become multiple units.
 
-`currentLogicalPosition` means the **last logical message currently visible** in the viewport. At the true physical/global bottom the runtime explicitly normalizes it to `logicalCount - 1`, avoiding the common `Latest 1` ghost caused by a few pixels of virtualizer/scrollbar remainder.
+`ConversationProjectionStore` exposes two separate channels:
+
+```text
+order: NodeId[]
+             └─ changes only when membership/order changes
+
+nodes: Map<NodeId, RenderUnit>
+             └─ one streaming node can change independently
+```
+
+`KeyedConversationProjection` implements this model. This is the main idea borrowed from DSH: stable keyed presentation state outside React/Vue, with a NodeSeat subscribing to one key.
+
+### Layer 4 — physical viewport
+
+The virtualizer owns only the currently mounted physical coordinate system. It does not represent the whole million-message history.
+
+Virtua is the current reference implementation for dynamic measurement. A far jump starts a new virtualizer epoch rather than trying to reuse unrelated physical measurements.
+
+## 3. Workspace and store model
+
+Recent is a real multi-session workspace, not decorative UI.
+
+```text
+ConversationWorkspaceRuntime
+├─ lightweight Recent descriptors
+├─ semantic ViewportSnapshot / session
+├─ independent execution controller / session
+└─ bounded hot viewport runtimes (LRU)
+```
+
+A semantic snapshot contains only data that is meaningful after DOM destruction:
+
+```ts
+{
+  logicalPosition,
+  anchorUnitId,
+  anchorOffsetPx,
+  followTail,
+  atVisualBottom,
+  draftText
+}
+```
+
+It deliberately excludes Vue objects, DOM nodes, Virtua handles and provider protocol objects.
+
+Current lab invariant: at most three heavy hot session runtimes. Cold sessions rehydrate around their semantic reader position.
+
+Production refinement: asynchronous execution/live-tail state can be kept even lighter than the viewport runtime so many background runs do not force many heavyweight viewports to stay resident. The ownership boundary is already explicit; the lab currently keeps the single synthetic running session hot so its browser-side stream can continue.
+
+## 4. Two coordinate systems, not one giant scroll surface
+
+The logical history and browser scroll surface are different coordinate systems.
+
+```text
+logical conversation       0 … 999,999
+            ↓
+semantic hot window        ~2,048 logical messages
+            ↓
+RenderUnit projection      bounded rows for those messages
+            ↓
+physical Virtua viewport   usually tens of mounted DOM rows
+```
+
+Neighboring movement is 512 messages. Only the incoming slice is projected; retained RenderUnit objects keep identity.
+
+A page-level Fenwick index supplies bounded global navigation metadata. The browser never receives a hundreds-of-millions-pixel element representing the full history.
+
+## 5. Rendering contract
+
+A renderer is downstream of the projection boundary. The list does not know Markdown, tools or images.
+
+Current renderer set:
+
+- Markdown (`marked` + DOMPurify)
+- thinking disclosure
+- tool call/result disclosure
+- code (Shiki in a Web Worker)
+- diff
+- image with reserved dimensions
+- sanitized HTML
+- text
+
+### Critical geometry invariant
+
+A virtual row owns all of its visual geometry. No child may escape the measured row border box with negative outer margins or similar cross-row tricks.
+
+The user-visible failure that exposed this rule was adjacent thinking/tool cards visibly overlapping. The implementation now makes every `.virtua-row` a self-contained measured box and removes negative continuation margins. Playwright has an explicit invariant:
+
+```text
+for every mounted adjacent row:
+    next.top >= previous.bottom - 1px
+```
+
+This runs after disclosure expansion, async highlighting/measurement, composer resize and session remount.
+
+## 6. Streaming and follow semantics
+
+Model ingress rate and UI publication rate are separate. Synthetic ingress supports 5/20/60 Hz and publication is coalesced before rendering.
+
+A normal token update changes one stable RenderUnit key, not list membership. Long live output rolls into another RenderUnit after roughly 6500 characters.
+
+Reader intent and observed physical scrolling are also separate authorities:
+
+- wheel/pointer input represents user intent;
+- offsets may change because of user input, Virtua measurement or programmatic follow.
+
+An upward gesture at the live tail disables follow before a pending measurement/end-follow update can reclaim the viewport.
+
+## 7. Latest semantics
+
+`Latest` is a logical navigation control, not a scroll-position heuristic.
+
+`currentLogicalPosition` means the last logical message currently visible.
 
 ```text
 messagesAfter = logicalCount - 1 - currentLogicalPosition
 ```
 
-The badge displays that exact integer. Switching sessions restores the session's semantic reader position and recomputes the number. Clicking Latest rebuilds/navigates to the tail hot segment when necessary, scrolls to the final RenderUnit of the final logical message, normalizes the reader to `logicalCount - 1`, and hides the control. It does not alter the Agent run lifecycle.
+At the true global/physical bottom the reader is normalized to `logicalCount - 1`, preventing a ghost `Latest 1` caused by tiny virtualizer remainders.
 
-## Scroll/follow state machine
+Clicking Latest navigates to the true tail and does **not** start or stop the Agent execution.
 
-A streaming Agent conversation has two authorities that must never be confused:
+## 8. Variable-height composer contract
 
-1. **reader intent** — wheel/pointer input says whether the user wants control;
-2. **observed physical scrolling** — offsets can also change because of programmatic follow or dynamic row measurement.
+The composer is an independent grid row below the viewport. It grows from roughly 56px to 180px and then scrolls internally. It is never an overlay on top of messages.
 
-When pinned at the live tail, the first upward wheel gesture synchronously disables follow. That first transition is serialized through Virtua's public `scrollBy()` so a pending end-follow write or ResizeObserver correction cannot swallow it. During the intent window, explicit wheel direction is authoritative; stale programmatic offset direction is not allowed to re-enable follow.
+Two semantics are required:
 
-When the reader is not at the logical tail, `messagesAfterCurrent` is derived from the last visible logical message, not a viewport-center probe.
+- at the tail: a composer resize re-pins the true measured end;
+- in history: the same top semantic RenderUnit stays at the same pixel Y, with `<4px` drift.
 
-## Approaches tried and rejected
+Draft state is session-scoped and survives Recent switching.
 
-### 1. Treating 1M history as framework/DOM state
+## 9. What practice rejected
 
-Rejected by design. Virtualizing DOM alone is insufficient if one million message objects, derived lists or reactive dependencies remain hot.
+### Million-message framework state
 
-### 2. TanStack Vue Virtual + fixed-length window replacement + manual anchor correction
+Rejected. DOM virtualization is insufficient when the application still owns one million reactive objects or repeatedly scans the whole history.
 
-An early implementation kept a fixed 2048-length array and replaced the semantic window in place. Because the physical virtualizer saw the same count, old measurement state could survive a completely different global window. Large jumps drifted and reverse prepend produced real anchor errors (observed around 113 px and later more than 600 px).
+### Backend message → Vue component
 
-Manual `getBoundingClientRect → measure → scrollTop += delta` compensation was rejected rather than weakening the acceptance threshold. It mixed semantic window management with virtualizer physics and created competing sources of scroll truth.
+Rejected. It couples the product UI to OpenCode/DSH/provider wire semantics and prevents independent projection evolution.
 
-### 3. Using physical offset direction as reader intent
+### TanStack Vue + fixed-length whole-window replacement + manual anchor compensation
 
-Rejected. During streaming, a stale programmatic end-follow write can move the offset downward immediately after the user wheels upward. Treating that observed offset as authoritative can incorrectly restore follow mode. Explicit input direction and physical scroll observation are now separate concepts.
+Rejected after real browser drift (roughly 113px and later >600px). A same-length list could retain measurements belonging to a completely different global segment. Manual `measure → rect → scrollTop correction` mixed semantic and physical responsibilities.
 
-### 4. Framework-owned multi-session store
+### Physical scroll direction as user intent
 
-A temporary Vue-owned workspace store was created during exploration, then removed. It made the framework the owner of backend/runtime objects and did not realize the DSH-style projection boundary. The current workspace/session/projection layers are framework-free; Vue only bridges notifications to rendering.
+Rejected. Streaming measurement/programmatic follow can move the physical offset in the opposite direction immediately after an upward user gesture.
 
-### 5. Re-projecting all 2048 messages on every 512 shift
+### Component-owned Agent execution
 
-Functionally bounded but unnecessarily expensive and hostile to stable identity. The current session runtime projects only the entering 512 and reuses retained RenderUnit objects.
+Rejected. History navigation or Recent switching must not reset a running Agent.
 
-### 6. Coupling history navigation to the stream lifecycle
+### Re-projecting all 2048 messages for every 512 shift
 
-Rejected after async-session testing. A diagnostic `jump()` previously cleared live-tail/run state, which meant merely reading old history could destroy a running Agent execution. Navigation now modifies only the semantic hot viewport.
+Rejected. Current shifts project only the entering slice and reuse retained RenderUnit objects.
 
-### 7. Deriving Latest from a center probe or raw scrollbar remainder
+### Center-probe / raw scrollbar Latest
 
-Rejected after reproducing a `Latest 1` ghost. The reader is the last visible logical message and is normalized to the final logical index at the true global bottom.
+Rejected after reproducing `Latest 1` at the true tail.
 
-## Current technology choices
+### Cross-row negative margins
 
-- Vue 3 for the product shell and renderer components.
-- Virtua (`virtua/vue`) for dynamic-height physical virtualization.
-- Plain TypeScript framework-free workspace/session/projection/store logic.
-- `marked` + DOMPurify for Markdown/HTML handling.
-- Shiki core + JavaScript regex engine inside a Web Worker for code highlighting.
-- Fenwick tree page-height index for bounded global navigation metadata.
-- Vitest for deterministic architecture tests.
-- Playwright + real Chromium for UX/stress acceptance.
-- GitHub Actions with pnpm store cache; system Chromium is used to avoid a repeated browser download.
-- GitHub Pages for the public interactive proof.
+Rejected after a visible card-overlap failure. Virtualized rows must be independent measured boxes.
 
-## Acceptance tests
+## 10. Reference implementation mapping
 
-The experiment is only considered successful when all of the following are green in real Chromium **both against the local production candidate and against the actually deployed GitHub Pages URL**:
+| Architecture role | Reference implementation |
+| --- | --- |
+| Backend boundary | `ConversationBackend`, `SyntheticHistoryAdapter` |
+| Async execution | `ConversationExecutionController`, `SyntheticStreamController` |
+| Session engine | `ConversationSessionRuntime` |
+| Workspace scope | `ConversationWorkspaceRuntime` |
+| Projection | `ConversationProjectionStore`, `KeyedConversationProjection` |
+| Per-node subscription | `ConversationNodeSeat.vue` |
+| Physical virtualization | `virtua/vue` |
+| Framework bridge | `useWorkspaceRuntime()` + Vue components |
+| Rich rendering | renderer registry/components |
+| Browser acceptance | Playwright Chromium |
 
-1. 1,000,000 logical messages remain addressable while mounted DOM stays below 180 rows.
-2. The 2048-message hot window and hot-session runtime count remain bounded.
-3. 60 Hz synthetic LLM ingress grows the current assistant response beyond one RenderUnit and remains pinned only while the reader wants follow.
-4. Upward reader input immediately escapes follow; model output continues without stealing the viewport.
-5. Global jump around message 500,000 works without loading the intervening history.
-6. Reverse prepend of 512 messages preserves the same semantic RenderUnit within **< 4 px** viewport drift.
-7. A running session continues streaming while its reader is in history and while another Recent session is active; multi-chunk live state is restored on return.
-8. The floating Latest control is absent at a true tail, appears off-tail, shows exactly `logicalCount - 1 - lastVisibleLogicalMessage`, survives A → B → A restore, and disappears after returning to the true tail.
-9. A growing composer never overlaps the VList/message cards. In history its semantic top anchor drifts <4 px; at the tail it remains pinned. Draft/height state is session-scoped.
-10. Thinking/tool/code/diff/image/HTML renderers all work with real dynamic heights and sanitization/highlighting paths.
-11. Recent session A → B → A preserves semantic reader position.
-12. Disclosure and draft state are session-scoped; the same logical index in B does not inherit A's state.
-13. More than three visited conversations still keep at most three heavy runtimes; an evicted session rehydrates around its semantic snapshot.
-14. Unit tests, TypeScript, production Vite build, local Chromium E2E, GitHub Pages deployment, and the **same Chromium E2E suite against the deployed Pages URL** are all green.
+Vue and Virtua are replaceable. The contracts and invariants above are the reusable result of the experiment.
 
-## Progress and evidence
+## 11. Acceptance matrix
 
-A green checkpoint at commit `b265836ece51c4b552afb1af3e61fc42fed575ae` / CI run #101 proved the pre-expanded suite:
+Final acceptance requires the production candidate and the deployed GitHub Pages build to pass the same Chromium UX suite.
 
-- 16 unit tests passed;
-- `vue-tsc --noEmit` and production Vite build passed;
-- 3 Playwright Chromium scenarios passed in 16.1 s;
-- the then-current public Pages probe passed.
+1. 1,000,000 logical messages with `<180` mounted rows.
+2. Semantic hot window and hot-session runtime counts remain bounded.
+3. 60 Hz LLM streaming rolls into multiple RenderUnits.
+4. Upward input escapes tail-follow while output continues.
+5. Far jump around message 500,000 works without traversing intervening history.
+6. Reverse prepend of 512 preserves semantic anchor `<4px`.
+7. Async execution survives history browsing and Recent switching.
+8. Latest count is exact, session-scoped and disappears at true tail.
+9. Variable composer never overlaps messages; history anchor `<4px`; tail re-pins.
+10. Thinking/tool/code/diff/image/HTML dynamic rendering works.
+11. A → B → A restores semantic viewport/draft/disclosure state.
+12. More than three visited sessions keep heavy viewport state bounded by LRU.
+13. Mounted heterogeneous rows never overlap after resize/remount/disclosure/async measurement.
+14. Architecture page and interactive reference lab are both reachable on Pages.
+15. Unit tests, TypeScript, production build, local Chromium, Pages deployment and Pages Chromium are all green.
 
-That checkpoint is no longer sufficient for final acceptance because later UX review identified three blocking scenarios: async execution while navigating/switching, variable composer height, and exact Latest semantics. The suite has therefore been expanded to six browser scenarios, the deployed Pages workflow now runs the same Playwright suite after deployment, and runtime tests include multi-chunk async-tail recovery.
+## 12. Current progress
 
-The public target is `https://topabomb.github.io/demo1/`.
+The experiment has already produced multiple green intermediate checkpoints, but they are deliberately not treated as final proof because UX review kept adding missing real-product cases.
+
+Latest implementation work has added:
+
+- explicit reusable contracts for backend, execution and projection layers;
+- the architecture page at `/#architecture`;
+- row-geometry ownership and a browser non-overlap gate after a visible card-stacking failure;
+- session-scoped async execution, live-tail recovery, Latest semantics and variable composer handling;
+- local/Pages browser validation workflows.
+
+The current branch must still re-run the full expanded suite after these changes. Final status is only declared when both local Chromium and the deployed Pages Chromium suite are green.
+
+Public lab: `https://topabomb.github.io/demo1/`  
+Architecture view: `https://topabomb.github.io/demo1/#architecture`
