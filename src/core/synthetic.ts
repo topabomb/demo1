@@ -1,7 +1,43 @@
-import type { ConversationSource, LogicalMessage, RenderKind } from './types'
+import type { ConversationSource, LogicalMessage, LogicalRole, RenderKind } from './types'
 import { hash32, intBetween } from './prng'
 
-const kinds: RenderKind[] = ['text', 'markdown', 'code', 'image', 'html', 'tool', 'diff']
+interface PatternEntry {
+  role: LogicalRole
+  kind: RenderKind
+  variant: string
+}
+
+/**
+ * A deterministic Agent-like turn pattern. It deliberately includes consecutive
+ * thinking/tool/result sequences, long assistant content, code, diffs, images and
+ * raw HTML so the UI is stressed with realistic heterogeneous heights.
+ */
+const TURN_PATTERN: readonly PatternEntry[] = [
+  { role: 'user', kind: 'markdown', variant: 'user-request' },
+  { role: 'assistant', kind: 'thinking', variant: 'analysis' },
+  { role: 'assistant', kind: 'tool', variant: 'call:read_file' },
+  { role: 'tool', kind: 'tool', variant: 'result:read_file' },
+  { role: 'assistant', kind: 'thinking', variant: 'analysis' },
+  { role: 'assistant', kind: 'tool', variant: 'call:search' },
+  { role: 'tool', kind: 'tool', variant: 'result:search' },
+  { role: 'assistant', kind: 'markdown', variant: 'assistant-answer' },
+  { role: 'user', kind: 'text', variant: 'user-followup' },
+  { role: 'assistant', kind: 'thinking', variant: 'analysis' },
+  { role: 'assistant', kind: 'code', variant: 'code-proposal' },
+  { role: 'assistant', kind: 'markdown', variant: 'explanation' },
+  { role: 'user', kind: 'markdown', variant: 'user-change-request' },
+  { role: 'assistant', kind: 'thinking', variant: 'analysis' },
+  { role: 'assistant', kind: 'tool', variant: 'call:edit_file' },
+  { role: 'tool', kind: 'tool', variant: 'result:edit_file' },
+  { role: 'assistant', kind: 'tool', variant: 'call:test' },
+  { role: 'tool', kind: 'tool', variant: 'result:test' },
+  { role: 'assistant', kind: 'diff', variant: 'patch' },
+  { role: 'assistant', kind: 'markdown', variant: 'verification' },
+  { role: 'user', kind: 'text', variant: 'user-visual-request' },
+  { role: 'assistant', kind: 'image', variant: 'image-output' },
+  { role: 'assistant', kind: 'html', variant: 'artifact-preview' },
+  { role: 'assistant', kind: 'markdown', variant: 'turn-summary' },
+]
 
 export class SyntheticConversationSource implements ConversationSource {
   constructor(public readonly count: number) {}
@@ -10,17 +46,32 @@ export class SyntheticConversationSource implements ConversationSource {
     if (!Number.isInteger(index) || index < 0 || index >= this.count) {
       throw new RangeError(`message index ${index} outside 0..${this.count - 1}`)
     }
+
     const seed = hash32(index + 0x51f15e)
-    const roleSelector = seed % 11
-    const role: LogicalMessage['role'] = roleSelector < 3 ? 'user' : roleSelector === 10 ? 'tool' : 'assistant'
-    const kind = kinds[hash32(seed + 17) % kinds.length]
+    if (index === this.count - 1) {
+      return {
+        id: `m-${index}`,
+        index,
+        turnId: `turn-${Math.floor(index / TURN_PATTERN.length)}`,
+        role: 'assistant',
+        kind: 'markdown',
+        seed,
+        intensity: 9,
+        live: true,
+        variant: 'live-tail',
+      }
+    }
+
+    const pattern = TURN_PATTERN[index % TURN_PATTERN.length]!
     return {
       id: `m-${index}`,
       index,
-      role,
-      kind,
+      turnId: `turn-${Math.floor(index / TURN_PATTERN.length)}`,
+      role: pattern.role,
+      kind: pattern.kind,
       seed,
       intensity: intBetween(seed + 31, 1, 10),
+      variant: pattern.variant,
     }
   }
 
