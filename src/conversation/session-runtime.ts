@@ -139,24 +139,43 @@ export class ConversationSessionRuntime {
     this.#stateNotifier.markDirty()
   }
 
+  /**
+   * Build a two-phase prepend using only newly-entering messages. Retained units
+   * are the exact same objects, so keyed NodeSeats and renderer caches stay warm.
+   */
   planShiftBackward(): ShiftPlan | null {
     const previous = { ...this.range }
     const next = this.segment.shiftBackward()
     if (next.start === previous.start) return null
-    const oldUnits = [...this.#activeUnits]
-    const final = this.#materialize(next)
-    const incoming = final.filter(unit => unit.messageIndex < previous.start)
-    return { direction: 'backward', previous, next: { ...next }, intermediate: [...incoming, ...oldUnits], final }
+
+    const incoming = this.#materializeRange(next.start, previous.start)
+    const retained = this.#activeUnits.filter(unit => unit.messageIndex < next.end)
+    const final = [...incoming, ...retained]
+    return {
+      direction: 'backward',
+      previous,
+      next: { ...next },
+      intermediate: [...incoming, ...this.#activeUnits],
+      final,
+    }
   }
 
+  /** Same optimization for forward shifts: project only the new tail slice. */
   planShiftForward(): ShiftPlan | null {
     const previous = { ...this.range }
     const next = this.segment.shiftForward()
     if (next.start === previous.start) return null
-    const oldUnits = [...this.#activeUnits]
-    const final = this.#materialize(next)
-    const incoming = final.filter(unit => unit.messageIndex >= previous.end)
-    return { direction: 'forward', previous, next: { ...next }, intermediate: [...oldUnits, ...incoming], final }
+
+    const incoming = this.#materializeRange(previous.end, next.end)
+    const retained = this.#activeUnits.filter(unit => unit.messageIndex >= next.start)
+    const final = [...retained, ...incoming]
+    return {
+      direction: 'forward',
+      previous,
+      next: { ...next },
+      intermediate: [...this.#activeUnits, ...incoming],
+      final,
+    }
   }
 
   applyIntermediate(units: readonly RenderUnit[], shiftMode: boolean): void {
@@ -197,15 +216,13 @@ export class ConversationSessionRuntime {
     this.#stateNotifier.markDirty()
   }
 
-  replaceActiveFromCurrentRange(): void {
-    this.#activeUnits = this.#materialize(this.range)
-    this.#refreshPageEstimates()
-    this.projection.replace(this.displayUnits)
-    this.#stateNotifier.markDirty()
+  #materialize(range: SegmentRange): RenderUnit[] {
+    return this.#materializeRange(range.start, range.end)
   }
 
-  #materialize(range: SegmentRange): RenderUnit[] {
-    return projectMessages([...this.adapter.loadRange(range.start, range.end - range.start)])
+  #materializeRange(start: number, end: number): RenderUnit[] {
+    if (end <= start) return []
+    return projectMessages([...this.adapter.loadRange(start, end - start)])
   }
 
   #refreshPageEstimates(): void {
