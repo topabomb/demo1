@@ -1,0 +1,239 @@
+.conversation-meta-strip {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+}
+
+.virtual-canvas { margin-top: 0; }
+
+.message-card.role-user {
+  border-color: #314254;
+  background: #111a24;
+}
+
+.message-card.continuation {
+  margin-top: -5px;
+  border-top-color: rgba(38, 49, 62, .45);
+}
+
+.message-card.has-next-part {
+  border-bottom-left-radius: 5px;
+  border-bottom-right-radius: 5px;
+}
+
+.message-author,
+.compact-kind-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.message-author small,
+.compact-kind-head small {
+  margin-left: auto;
+  color: #5f6d7b;
+  font-weight: 500;
+}
+
+.author-mark {
+  display: grid;
+  place-items: center;
+  width: 19px;
+  height: 19px;
+  border-radius: 6px;
+  background: #1d2a38;
+  color: #8bc6ff;
+  font-size: 9px;
+}
+
+.role-user .author-mark {
+  background: #243226;
+  color: #9ee6a8;
+}
+
+.streaming-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #7ee787;
+  font-weight: 600;
+}
+
+.streaming-label i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #3fb950;
+  box-shadow: 0 0 0 3px rgba(63, 185, 80, .10);
+}
+
+.thinking-card,
+.tool-card {
+  background: #0d131a;
+  border-color: #222d38;
+}
+
+.disclosure-head,
+.tool-summary {
+  width: 100%;
+  display: grid;
+  align-items: center;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #aab7c4;
+  text-align: left;
+}
+
+.disclosure-head {
+  grid-template-columns: 22px 1fr auto;
+  gap: 8px;
+  padding: 9px 11px;
+}
+
+.thinking-icon {
+  color: #b7a5ff;
+  font-size: 15px;
+}
+
+.disclosure-copy,
+.tool-title {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.disclosure-copy strong,
+.tool-title strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #aebaca;
+  font-size: 10px;
+}
+
+.disclosure-copy small,
+.tool-title small {
+  color: #607080;
+  font-size: 9px;
+}
+
+.chevron {
+  color: #627181;
+  transition: transform .15s ease;
+}
+
+.chevron.open { transform: rotate(180deg); }
+
+.thinking-body {
+  padding: 2px 14px 12px 41px;
+  border-top: 1px solid #1d2731;
+}
+
+.thinking-body p {
+  margin: 9px 0;
+  padding: 0;
+  color: #8796a7;
+  font-size: 11px;
+  line-height: 1.65;
+}
+
+.tool-summary {
+  grid-template-columns: 24px minmax(0, 1fr) auto 18px;
+  gap: 8px;
+  padding: 9px 11px;
+}
+
+.tool-icon {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: #18212b;
+  color: #86b9ea;
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  font-size: 8px;
+  line-height: 1;
+}
+
+.status i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.status.running { background: #16283a; color: #79c0ff; }
+.status.success { background: #173022; color: #7ee787; }
+.status.error { background: #3a2022; color: #ff9b94; }
+
+.tool-detail {
+  border-top: 1px solid #1f2934;
+  padding: 9px 11px 11px 43px;
+}
+
+.tool-pane {
+  overflow: hidden;
+  border: 1px solid #202b36;
+  border-radius: 7px;
+  background: #090e14;
+}
+
+.tool-pane-label {
+  display: block;
+  padding: 6px 9px;
+  border-bottom: 1px solid #1e2832;
+  color: #657586;
+  font-size: 8px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+
+.tool-pane pre {
+  max-height: 360px;
+  overflow: auto;
+  margin: 0;
+  padding: 9px;
+  color: #aab8c6;
+  font: 10px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.code-card pre,
+.diff-card pre {
+  max-height: 620px;
+}
+
+.shiki-host {
+  max-height: 620px;
+  overflow: auto;
+  background: #090e14;
+}
+
+.shiki-host .shiki {
+  margin: 0 !important;
+  padding: 12px 14px !important;
+  background: #090e14 !important;
+  font: 11px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace !important;
+}
+
+.diff-ellipsis { color: #657586; }
+
+@media (max-width: 1100px) {
+  .tool-detail { padding-left: 11px; }
+}
