@@ -3,7 +3,7 @@ import { ConversationWorkspaceRuntime } from '../conversation/workspace-runtime'
 
 /**
  * Thin Vue bridge. Business state stays in framework-free runtime classes; Vue
- * receives only revision signals and asks the runtime for immutable/current data.
+ * receives only revision signals and asks the runtime for current projections.
  */
 export function useWorkspaceRuntime() {
   const workspace = new ConversationWorkspaceRuntime()
@@ -34,12 +34,8 @@ export function useWorkspaceRuntime() {
   onBeforeUnmount(() => {
     unsubscribeSession?.()
     unsubscribeWorkspace()
+    workspace.dispose()
   })
 
-  return {
-    workspace,
-    activeSession,
-    workspaceRevision,
-    activeRevision,
-  }
+  return { workspace, activeSession, workspaceRevision, activeRevision }
 }
