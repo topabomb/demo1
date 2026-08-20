@@ -29,8 +29,21 @@ const streamRate = ref(20)
 const streamTicks = ref(0)
 const streamTarget = ref<string | null>(null)
 const streamChars = ref(0)
+const diagnosticsOpen = ref(true)
+const composerText = ref('')
 let streamTimer: number | null = null
 let scrollFrame = 0
+
+const sessions = [
+  ['Million-message stress session', 'now'],
+  ['DSH transport architecture', '14m'],
+  ['Virtualized tool-call rendering', '1h'],
+  ['Agent event normalization', '2h'],
+  ['Dynamic height edge cases', '4h'],
+  ['Workspace filesystem design', '1d'],
+  ['Android client protocol notes', '2d'],
+  ['Long context cache analysis', '3d'],
+]
 
 const { fps, frameP95, longTasks, heapMb } = usePerformanceMetrics()
 
@@ -234,6 +247,12 @@ function stopStreaming(clear = true) {
   streamTarget.value = null
 }
 
+function sendComposer() {
+  if (!composerText.value.trim()) return
+  composerText.value = ''
+  startStreaming()
+}
+
 function forcePrepend() { void shiftBackward() }
 function forceForward() { void shiftForward() }
 
@@ -244,16 +263,95 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="lab">
-    <aside class="control-panel">
-      <div class="brand-block">
-        <span class="eyebrow">Million Message Lab</span>
-        <h1>Agent conversation stress rig</h1>
-        <p>1,000,000 logical messages without a million Vue objects or DOM rows.</p>
+  <section class="agent-app" :class="{ 'diagnostics-closed': !diagnosticsOpen }">
+    <nav class="workspace-rail" aria-label="Primary navigation">
+      <div class="app-mark">N</div>
+      <button class="rail-button active" title="Chat">✦</button>
+      <button class="rail-button" title="Workspaces">▦</button>
+      <button class="rail-button" title="Files">◇</button>
+      <button class="rail-button" title="Agents">⌁</button>
+      <div class="rail-spacer" />
+      <button class="rail-button" title="Settings">⚙</button>
+      <div class="avatar">T</div>
+    </nav>
+
+    <aside class="session-sidebar">
+      <div class="sidebar-head">
+        <div class="product-name">CodeNomad Lab</div>
+        <button class="icon-button">⌘</button>
+      </div>
+      <button class="workspace-picker"><span class="workspace-dot" /> million-message-workspace <span>⌄</span></button>
+      <button class="new-session">＋ New session</button>
+      <div class="session-search">⌕ <span>Search sessions</span><kbd>⌘K</kbd></div>
+      <div class="session-section-label">Recent</div>
+      <div class="session-list">
+        <button v-for="(session, index) in sessions" :key="session[0]" class="session-row" :class="{ active: index === 0 }">
+          <span class="session-glyph">{{ index === 0 ? '✦' : '○' }}</span>
+          <span class="session-copy"><strong>{{ session[0] }}</strong><small>{{ index === 0 ? 'Running · synthetic backend' : 'Completed' }}</small></span>
+          <time>{{ session[1] }}</time>
+        </button>
+      </div>
+      <div class="sidebar-footer">
+        <span class="status-led" /> Runtime connected
+        <span class="sidebar-version">Vue / virtual</span>
+      </div>
+    </aside>
+
+    <main class="conversation-shell">
+      <header class="conversation-header">
+        <div class="conversation-title">
+          <strong>Million-message stress session</strong>
+          <span>million-message-workspace / main</span>
+        </div>
+        <div class="header-chips">
+          <button class="model-chip">Synthetic Agent · 1M context⌄</button>
+          <span class="run-status"><i /> running</span>
+          <button class="header-icon" title="Search">⌕</button>
+          <button class="header-icon" title="Diagnostics" @click="diagnosticsOpen = !diagnosticsOpen">◫</button>
+        </div>
+      </header>
+
+      <div ref="parentRef" class="scrollport" data-testid="scrollport" @scroll.passive="onScroll">
+        <div class="conversation-meta-strip">
+          <span>Loaded segment <strong data-testid="segment-range">{{ segmentStart.toLocaleString() }} – {{ (segmentEnd - 1).toLocaleString() }}</strong></span>
+          <span>Reader <strong data-testid="reader-position">#{{ currentLogicalPosition.toLocaleString() }}</strong></span>
+          <span>{{ mountedRows }} physical rows</span>
+        </div>
+        <div class="virtual-canvas" :style="{ height: `${totalSize}px` }">
+          <div
+            v-for="virtualRow in virtualRows"
+            :key="virtualRow.key"
+            :ref="measureElement"
+            :data-index="virtualRow.index"
+            :data-render-unit="activeUnits[virtualRow.index]?.id"
+            class="virtual-row"
+            :style="{ transform: `translateY(${virtualRow.start}px)` }"
+          >
+            <RenderUnitView v-if="unitAt(virtualRow.index)" :unit="unitAt(virtualRow.index)!" />
+          </div>
+        </div>
+      </div>
+
+      <footer class="composer-shell">
+        <div class="composer-box">
+          <textarea v-model="composerText" rows="2" placeholder="Ask the agent anything…" @keydown.enter.exact.prevent="sendComposer" />
+          <div class="composer-actions">
+            <div><button class="composer-icon">＋</button><button class="mode-button">Agent ▾</button></div>
+            <div><span class="context-meter">1,000,000 synthetic messages</span><button class="send-button" :disabled="!composerText.trim()" @click="sendComposer">↑</button></div>
+          </div>
+        </div>
+        <span class="composer-hint">Enter to send · output streams into the visible virtualized conversation</span>
+      </footer>
+    </main>
+
+    <aside v-if="diagnosticsOpen" class="diagnostics-panel">
+      <div class="diagnostics-head">
+        <div><span class="eyebrow">Performance lab</span><strong>Conversation diagnostics</strong></div>
+        <button class="icon-button" @click="diagnosticsOpen = false">×</button>
       </div>
 
       <div class="control-group">
-        <label>Logical messages</label>
+        <label>Logical history</label>
         <div class="segmented" data-testid="count-selector">
           <button :class="{ active: logicalCount === 10_000 }" @click="configureCount(10_000)">10K</button>
           <button :class="{ active: logicalCount === 100_000 }" @click="configureCount(100_000)">100K</button>
@@ -262,7 +360,7 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="control-group">
-        <label for="jump">Jump to logical message</label>
+        <label for="jump">Jump to global message</label>
         <div class="inline-control">
           <input id="jump" v-model.number="jumpInput" data-testid="jump-input" type="number" min="0" :max="logicalCount - 1" />
           <button data-testid="jump-button" @click="jumpToMessage()">Jump</button>
@@ -271,7 +369,7 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="control-group">
-        <label>Segment operations</label>
+        <label>History window</label>
         <div class="inline-control">
           <button class="secondary" data-testid="prepend-button" @click="forcePrepend">← prepend 512</button>
           <button class="secondary" @click="forceForward">append 512 →</button>
@@ -293,9 +391,9 @@ onBeforeUnmount(() => {
 
       <div class="metrics" data-testid="metrics">
         <div><span>logical</span><strong data-testid="logical-count">{{ logicalCount.toLocaleString() }}</strong></div>
-        <div><span>active messages</span><strong>{{ (segmentEnd - segmentStart).toLocaleString() }}</strong></div>
-        <div><span>active render units</span><strong data-testid="active-units">{{ activeUnitCount.toLocaleString() }}</strong></div>
-        <div><span>mounted rows</span><strong data-testid="mounted-rows">{{ mountedRows }}</strong></div>
+        <div><span>hot messages</span><strong>{{ (segmentEnd - segmentStart).toLocaleString() }}</strong></div>
+        <div><span>render units</span><strong data-testid="active-units">{{ activeUnitCount.toLocaleString() }}</strong></div>
+        <div><span>DOM rows</span><strong data-testid="mounted-rows">{{ mountedRows }}</strong></div>
         <div><span>FPS</span><strong>{{ fps }}</strong></div>
         <div><span>frame p95</span><strong>{{ frameP95 }} ms</strong></div>
         <div><span>long tasks</span><strong>{{ longTasks }}</strong></div>
@@ -304,43 +402,12 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="architecture-note">
-        <strong>Bounded hot path</strong>
-        <span>Physical virtualizer: {{ activeUnitCount.toLocaleString() }} units</span>
-        <span>Global pages: {{ pageHeights.pageCount.toLocaleString() }}</span>
-        <span>Estimated logical height: {{ Math.round(estimatedTotalHeight / 1_000_000).toLocaleString() }}M px</span>
+        <strong>Bounded rendering path</strong>
+        <span>{{ logicalCount.toLocaleString() }} logical messages stay outside Vue reactivity.</span>
+        <span>Physical virtualizer: {{ activeUnitCount.toLocaleString() }} hot RenderUnits.</span>
+        <span>Global page index: {{ pageHeights.pageCount.toLocaleString() }} Fenwick leaves.</span>
+        <span>Estimated logical height: {{ Math.round(estimatedTotalHeight / 1_000_000).toLocaleString() }}M px, never emitted as one DOM height.</span>
       </div>
     </aside>
-
-    <main class="conversation-shell">
-      <div class="conversation-header">
-        <div>
-          <span>Segment</span>
-          <strong data-testid="segment-range">{{ segmentStart.toLocaleString() }} – {{ (segmentEnd - 1).toLocaleString() }}</strong>
-        </div>
-        <div>
-          <span>Reader position</span>
-          <strong data-testid="reader-position">#{{ currentLogicalPosition.toLocaleString() }}</strong>
-        </div>
-        <div class="legend">
-          <span>dynamic height</span><span>semantic anchor</span><span>bounded DOM</span>
-        </div>
-      </div>
-
-      <div ref="parentRef" class="scrollport" data-testid="scrollport" @scroll.passive="onScroll">
-        <div class="virtual-canvas" :style="{ height: `${totalSize}px` }">
-          <div
-            v-for="virtualRow in virtualRows"
-            :key="virtualRow.key"
-            :ref="measureElement"
-            :data-index="virtualRow.index"
-            :data-render-unit="activeUnits[virtualRow.index]?.id"
-            class="virtual-row"
-            :style="{ transform: `translateY(${virtualRow.start}px)` }"
-          >
-            <RenderUnitView v-if="unitAt(virtualRow.index)" :unit="unitAt(virtualRow.index)!" />
-          </div>
-        </div>
-      </div>
-    </main>
   </section>
 </template>
