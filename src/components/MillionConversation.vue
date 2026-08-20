@@ -164,6 +164,12 @@ function escapeTailFollow() {
   }
 }
 
+function resumeTailFollow() {
+  if (!streamTarget.value || followTail.value) return
+  followTail.value = true
+  tailIntentGeneration += 1
+}
+
 function markUserScrollIntent(direction: -1 | 0 | 1) {
   userScrollIntentUntil = performance.now() + USER_SCROLL_INTENT_MS
   if (direction !== 0) userScrollDirection = direction
@@ -187,16 +193,20 @@ function onUserPointerDown() {
 function onVirtualScroll(offset: number) {
   const inferredDirection: -1 | 0 | 1 = offset < lastScrollOffset ? -1 : offset > lastScrollOffset ? 1 : 0
   lastScrollOffset = offset
-  if (performance.now() < userScrollIntentUntil && inferredDirection !== 0) userScrollDirection = inferredDirection
+  const hasUserIntent = performance.now() < userScrollIntentUntil
+  if (hasUserIntent && inferredDirection !== 0) userScrollDirection = inferredDirection
 
   updateLogicalPosition(offset)
   refreshMountedRows()
 
+  // Tail following is reader intent, not a geometric side effect. A stale
+  // programmatic scroll event near the bottom must never re-enable follow after
+  // the user has started scrolling upward. Follow resumes only when a user-driven
+  // downward scroll explicitly returns to the bottom threshold.
+  if (!streamTarget.value || !hasUserIntent) return
   const remaining = remainingToBottom()
-  if (streamTarget.value) {
-    if (performance.now() < userScrollIntentUntil && remaining > FOLLOW_THRESHOLD_PX) escapeTailFollow()
-    else if (remaining < 32) followTail.value = true
-  }
+  if (userScrollDirection < 0) escapeTailFollow()
+  else if (userScrollDirection > 0 && remaining < 32) resumeTailFollow()
 }
 
 function onVirtualScrollEnd() {
@@ -535,7 +545,7 @@ onBeforeUnmount(() => {
           <span>Loaded <strong data-testid="segment-range">{{ segmentStart.toLocaleString() }} – {{ (segmentEnd - 1).toLocaleString() }}</strong></span>
           <span>Reader <strong data-testid="reader-position">#{{ currentLogicalPosition.toLocaleString() }}</strong></span>
           <span>{{ mountedRows }} DOM rows</span>
-          <span v-if="streamTarget">{{ followTail ? 'following tail' : 'tail paused' }}</span>
+          <span v-if="streamTarget" data-testid="follow-state">{{ followTail ? 'following tail' : 'tail paused' }}</span>
         </div>
       </div>
 
@@ -573,7 +583,7 @@ onBeforeUnmount(() => {
       <div class="control-group">
         <label>Live LLM output</label>
         <div class="inline-control">
-          <select v-model.number="streamRate"><option :value="5">5 Hz ingress</option><option :value="20">20 Hz ingress</option><option :value="60">60 Hz ingress</option></select>
+          <select v-model.number="streamRate" data-testid="stream-rate"><option :value="5">5 Hz ingress</option><option :value="20">20 Hz ingress</option><option :value="60">60 Hz ingress</option></select>
           <button data-testid="stream-start" @click="startStreaming(true)">Restart</button><button class="secondary" @click="stopStreaming(false)">Pause</button>
         </div>
       </div>
