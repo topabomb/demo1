@@ -1,4 +1,5 @@
 import type { RenderUnit } from '../core/types'
+import type { ConversationProjectionStore } from './contracts'
 import { BatchedNotifier, type Unsubscribe } from './notifier'
 
 /**
@@ -8,7 +9,7 @@ import { BatchedNotifier, type Unsubscribe } from './notifier'
  * changes replace one node by stable key and notify only subscribers of that key.
  * This is the same render-economics principle we wanted to borrow from DSH.
  */
-export class KeyedConversationProjection {
+export class KeyedConversationProjection implements ConversationProjectionStore {
   #order: readonly string[] = Object.freeze([] as string[])
   #nodes = new Map<string, RenderUnit>()
   #orderNotifier = new BatchedNotifier()
