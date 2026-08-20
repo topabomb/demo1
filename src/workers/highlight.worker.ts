@@ -1,5 +1,3 @@
-/// <reference lib="webworker" />
-
 import { createHighlighterCoreSync } from '@shikijs/core'
 import { createJavaScriptRegexEngine } from '@shikijs/engine-javascript'
 import bash from '@shikijs/langs/bash'
@@ -7,6 +5,16 @@ import javascript from '@shikijs/langs/javascript'
 import json from '@shikijs/langs/json'
 import typescript from '@shikijs/langs/typescript'
 import darkPlus from '@shikijs/themes/dark-plus'
+
+interface WorkerPort {
+  onmessage: ((event: MessageEvent<{ id: number; code: string; language: string }>) => void) | null
+  postMessage(data: { id: number; html?: string; error?: string }): void
+}
+
+// Keep this source in the application's normal DOM TypeScript program. Vite still
+// bundles it as a dedicated Worker via new Worker(new URL(...)); this narrow port
+// avoids globally loading lib.webworker alongside lib.dom.
+const port = globalThis as unknown as WorkerPort
 
 const highlighter = createHighlighterCoreSync({
   themes: [darkPlus],
@@ -25,13 +33,13 @@ const aliases: Record<string, string> = {
   shell: 'bash',
 }
 
-self.onmessage = (event: MessageEvent<{ id: number; code: string; language: string }>) => {
+port.onmessage = (event) => {
   const { id, code, language } = event.data
   try {
     const lang = aliases[language] ?? 'typescript'
     const html = highlighter.codeToHtml(code, { lang, theme: 'dark-plus' })
-    self.postMessage({ id, html })
+    port.postMessage({ id, html })
   } catch (error) {
-    self.postMessage({ id, error: error instanceof Error ? error.message : String(error) })
+    port.postMessage({ id, error: error instanceof Error ? error.message : String(error) })
   }
 }
