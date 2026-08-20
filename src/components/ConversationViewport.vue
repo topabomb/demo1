@@ -39,6 +39,7 @@ let unsubscribeState: (() => void) | null = null
 interface LayoutAnchor {
   id: string
   offsetPx: number
+  viewportTopPx: number
 }
 
 let pendingComposerAnchor: LayoutAnchor | null = null
@@ -74,6 +75,15 @@ function itemProps({ item, index }: { item: string; index: number }) {
   }
 }
 
+function renderedRow(id: string): HTMLElement | null {
+  const stage = scrollStageRef.value
+  if (!stage) return null
+  for (const row of stage.querySelectorAll<HTMLElement>('[data-render-unit]')) {
+    if (row.dataset.renderUnit === id) return row
+  }
+  return null
+}
+
 function refreshMountedRows(): void {
   if (metricsFrame) return
   metricsFrame = requestAnimationFrame(() => {
@@ -97,7 +107,6 @@ function updateReader(offset = listRef.value?.scrollOffset ?? 0): void {
     props.runtime.setReaderPosition(props.runtime.logicalCount - 1, true)
     return
   }
-
   const bottomProbe = Math.max(0, Math.min(list.scrollSize - 1, offset + Math.max(1, list.viewportSize - 2)))
   const index = Math.max(0, Math.min(order.value.length - 1, list.findItemIndex(bottomProbe)))
   const node = nodeFor(order.value[index]!)
@@ -106,20 +115,45 @@ function updateReader(offset = listRef.value?.scrollOffset ?? 0): void {
 
 function captureListAnchor(): LayoutAnchor | null {
   const list = listRef.value
-  if (!list || order.value.length === 0) return null
+  const stage = scrollStageRef.value
+  if (!list || !stage || order.value.length === 0) return null
   const index = Math.max(0, Math.min(order.value.length - 1, list.findItemIndex(list.scrollOffset + 1)))
   const id = order.value[index]
   if (!id) return null
-  return { id, offsetPx: list.getItemOffset(index) - list.scrollOffset }
+  const row = renderedRow(id)
+  const viewportTopPx = row
+    ? row.getBoundingClientRect().top - stage.getBoundingClientRect().top
+    : list.getItemOffset(index) - list.scrollOffset
+  return { id, offsetPx: list.getItemOffset(index) - list.scrollOffset, viewportTopPx }
 }
 
+/**
+ * Same-data viewport resize is the one place where a DOM geometry correction is
+ * appropriate. Virtua remains the source of size truth; after its normal indexed
+ * scroll, we reconcile the already-rendered stable row to the exact pre-resize Y.
+ */
 async function restoreListAnchor(anchor: LayoutAnchor): Promise<void> {
   const list = listRef.value
   if (!list) return
   const index = order.value.indexOf(anchor.id)
   if (index < 0) return
   list.scrollToIndex(index, { align: 'start', offset: -anchor.offsetPx })
-  await settleFrames(2)
+
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    await settleFrames(1)
+    const currentList = listRef.value
+    const stage = scrollStageRef.value
+    const row = renderedRow(anchor.id)
+    if (!currentList || !stage || !row) {
+      currentList?.scrollToIndex(index, { align: 'start', offset: -anchor.offsetPx })
+      continue
+    }
+    const currentTop = row.getBoundingClientRect().top - stage.getBoundingClientRect().top
+    const delta = currentTop - anchor.viewportTopPx
+    if (Math.abs(delta) < 0.75) break
+    currentList.scrollBy(delta)
+  }
+  await settleFrames(1)
 }
 
 async function pinMeasuredEnd(maxFrames = 6): Promise<void> {
@@ -149,7 +183,6 @@ function clearUserIntent(): void {
 function onUserWheel(event: WheelEvent): void {
   const direction: -1 | 0 | 1 = event.deltaY < 0 ? -1 : event.deltaY > 0 ? 1 : 0
   markUserIntent(direction)
-
   if (direction < 0 && props.runtime.streamTarget && props.runtime.followTail) {
     event.preventDefault()
     props.runtime.setFollowTail(false)
@@ -171,10 +204,8 @@ function onVirtualScroll(offset: number): void {
   lastScrollOffset = offset
   const hasIntent = performance.now() < userScrollIntentUntil
   if (hasIntent && userScrollDirection === 0 && inferred !== 0) userScrollDirection = inferred
-
   updateReader(offset)
   refreshMountedRows()
-
   if (!hasIntent || !props.runtime.streamTarget) return
   if (userScrollDirection < 0) props.runtime.setFollowTail(false)
   else if (userScrollDirection > 0 && remainingToBottom() < 32) props.runtime.setFollowTail(true)
@@ -240,12 +271,6 @@ function targetIsMounted(target: number): boolean {
   return Boolean(scrollStageRef.value?.querySelector(`[data-message-index="${target}"]`))
 }
 
-/**
- * Imperative navigation is verified after several frames. A global jump changes
- * the VList key/epoch, so a scroll issued against the old handle may briefly work
- * and then be overwritten by the newly mounted virtualizer. We only finish after
- * the target remains mounted across the remount/measurement boundary.
- */
 async function scrollToLogical(target: number, align: 'start' | 'center' | 'end' = 'center'): Promise<void> {
   for (let attempt = 0; attempt < 10; attempt += 1) {
     await settleFrames(1)
@@ -253,12 +278,9 @@ async function scrollToLogical(target: number, align: 'start' | 'center' | 'end'
     if (!list) continue
     const index = findMessageUnitIndex(target, align === 'end')
     if (index < 0) continue
-
     list.scrollToIndex(index, { align })
     await settleFrames(2)
     if (!targetIsMounted(target)) continue
-
-    // Ensure a late epoch remount or ResizeObserver correction does not undo it.
     await settleFrames(2)
     if (targetIsMounted(target)) {
       lastScrollOffset = listRef.value?.scrollOffset ?? 0
@@ -266,7 +288,6 @@ async function scrollToLogical(target: number, align: 'start' | 'center' | 'end'
       return
     }
   }
-
   lastScrollOffset = listRef.value?.scrollOffset ?? 0
   updateReader(lastScrollOffset)
 }
@@ -295,7 +316,6 @@ async function jumpToLatest(): Promise<void> {
   clearUserIntent()
   const last = props.runtime.logicalCount - 1
   const streamRunning = props.stream.running
-
   if (props.runtime.range.end !== props.runtime.logicalCount) {
     const previousEpoch = uiState.value.virtualEpoch
     const previousHandle = listRef.value
@@ -306,7 +326,6 @@ async function jumpToLatest(): Promise<void> {
     props.runtime.refreshProjection()
     await settleFrames(1)
   }
-
   await scrollToLogical(last, 'end')
   await pinMeasuredEnd()
   const physicallyAtBottom = remainingToBottom() < 32
@@ -314,17 +333,9 @@ async function jumpToLatest(): Promise<void> {
   props.runtime.setFollowTail(streamRunning && physicallyAtBottom)
 }
 
-function restartStream(): void {
-  props.stream.start(true)
-}
-
-function pauseStream(): void {
-  props.stream.stop(false)
-}
-
-function setStreamRate(rate: number): void {
-  props.stream.setRate(rate)
-}
+function restartStream(): void { props.stream.start(true) }
+function pauseStream(): void { props.stream.stop(false) }
+function setStreamRate(rate: number): void { props.stream.setRate(rate) }
 
 function resizeComposer(): void {
   const input = composerInputRef.value
@@ -357,12 +368,10 @@ function scheduleViewportResizeReconcile(): void {
   viewportResizeFrame = requestAnimationFrame(async () => {
     viewportResizeFrame = 0
     await nextTick()
-
     const pin = pendingComposerPinned || (pendingComposerAnchor === null && (props.runtime.atVisualBottom || props.runtime.followTail))
     const anchor = pendingComposerAnchor
     pendingComposerPinned = false
     pendingComposerAnchor = null
-
     if (pin && props.runtime.range.end === props.runtime.logicalCount) {
       await pinMeasuredEnd()
     } else if (anchor) {
@@ -391,7 +400,6 @@ async function restoreSnapshot(): Promise<void> {
   await settleFrames(3)
   const list = listRef.value
   if (!list) return
-
   if (snapshot.atVisualBottom && props.runtime.range.end === props.runtime.logicalCount) {
     props.runtime.refreshProjection()
     await settleFrames(1)
@@ -410,9 +418,7 @@ async function restoreSnapshot(): Promise<void> {
   refreshMountedRows()
 }
 
-function formatAfter(count: number): string {
-  return count.toLocaleString('en-US')
-}
+function formatAfter(count: number): string { return count.toLocaleString('en-US') }
 
 function attachViewportObserver(): void {
   viewportObserver?.disconnect()
@@ -435,7 +441,6 @@ onMounted(() => {
       })
     }
   })
-
   resizeComposer()
   void restoreSnapshot().then(attachViewportObserver)
 })
@@ -450,25 +455,13 @@ onBeforeUnmount(() => {
   if (viewportResizeFrame) cancelAnimationFrame(viewportResizeFrame)
 })
 
-defineExpose({
-  captureSnapshot,
-  jumpToMessage,
-  jumpToLatest,
-  shiftBackward,
-  shiftForward,
-  restartStream,
-  pauseStream,
-  setStreamRate,
-})
+defineExpose({ captureSnapshot, jumpToMessage, jumpToLatest, shiftBackward, shiftForward, restartStream, pauseStream, setStreamRate })
 </script>
 
 <template>
   <main class="conversation-shell" :data-session-id="runtime.id">
     <header class="conversation-header">
-      <div class="conversation-title">
-        <strong>{{ runtime.title }}</strong>
-        <span>million-message-workspace / {{ runtime.id }}</span>
-      </div>
+      <div class="conversation-title"><strong>{{ runtime.title }}</strong><span>million-message-workspace / {{ runtime.id }}</span></div>
       <div class="header-chips">
         <button class="model-chip">Synthetic Agent · canonical runtime⌄</button>
         <span class="run-status"><i :class="{ idle: !uiState.streamTarget }" /> {{ uiState.streamTarget ? 'streaming' : runtime.status }}</span>
@@ -496,21 +489,11 @@ defineExpose({
         @scroll="onVirtualScroll"
         @scroll-end="onVirtualScrollEnd"
       >
-        <template #default="{ item }">
-          <ConversationNodeSeat :runtime="runtime" :node-id="item" />
-        </template>
+        <template #default="{ item }"><ConversationNodeSeat :runtime="runtime" :node-id="item" /></template>
       </VList>
 
-      <button
-        v-if="showLatest"
-        class="jump-latest"
-        data-testid="jump-latest"
-        type="button"
-        @click="jumpToLatest"
-      >
-        <span>↓</span>
-        <strong>Latest</strong>
-        <em v-if="messagesAfter > 0" data-testid="messages-after">{{ formatAfter(messagesAfter) }}</em>
+      <button v-if="showLatest" class="jump-latest" data-testid="jump-latest" type="button" @click="jumpToLatest">
+        <span>↓</span><strong>Latest</strong><em v-if="messagesAfter > 0" data-testid="messages-after">{{ formatAfter(messagesAfter) }}</em>
       </button>
     </div>
 
