@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import { VList, type VListHandle } from 'virtua/vue'
 import type { ViewportSnapshot } from '../conversation/contracts'
-import type { ConversationSessionRuntime, ShiftPlan } from '../conversation/session-runtime'
+import type { ConversationSessionRuntime, SessionUiSnapshot, ShiftPlan } from '../conversation/session-runtime'
 import type { SyntheticStreamController } from '../conversation/stream-controller'
 import ConversationNodeSeat from './ConversationNodeSeat.vue'
 
@@ -26,25 +26,10 @@ const order = shallowRef<string[]>([...props.runtime.projection.order])
 const composerText = ref(props.runtime.draftText)
 const shifting = ref(false)
 
-function readUiState() {
-  return {
-    rangeStart: props.runtime.range.start,
-    rangeEnd: props.runtime.range.end,
-    reader: props.runtime.currentLogicalPosition,
-    followTail: props.runtime.followTail,
-    atVisualBottom: props.runtime.atVisualBottom,
-    mountedRows: props.runtime.mountedRows,
-    streamTarget: props.runtime.streamTarget,
-    streamTicks: props.runtime.streamRenderTicks,
-    messagesAfter: props.runtime.messagesAfterCurrent,
-    virtualEpoch: props.runtime.virtualEpoch,
-  }
-}
-
-// One immutable snapshot per runtime notification prevents Vue from rendering
-// reader/count/status fields from different revisions of a mutable domain object.
-const uiState = shallowRef(readUiState())
-let lastStreamTick = uiState.value.streamTicks
+// Conversation structure and session UI state are separate channels. Node/order
+// changes stay fine-grained; one state notification publishes one immutable snapshot.
+const uiState = shallowRef<SessionUiSnapshot>(props.runtime.uiSnapshot)
+let lastStreamTick = uiState.value.streamRenderTicks
 let userScrollIntentUntil = 0
 let userScrollDirection: -1 | 0 | 1 = 0
 let lastScrollOffset = 0
@@ -139,6 +124,26 @@ async function restoreListAnchor(anchor: LayoutAnchor): Promise<void> {
   if (index < 0) return
   list.scrollToIndex(index, { align: 'start', offset: -anchor.offsetPx })
   await settleFrames(2)
+}
+
+/**
+ * `scrollToIndex(last, end)` can stop on an estimate while dynamic rows/viewport
+ * size are still being measured. For a true logical tail, converge a few frames
+ * against Virtua's own measured scrollSize/viewportSize instead of maintaining
+ * parallel item-height math in application code.
+ */
+async function pinMeasuredEnd(maxFrames = 6): Promise<void> {
+  for (let attempt = 0; attempt < maxFrames; attempt += 1) {
+    await nextTick()
+    await frame()
+    const list = listRef.value
+    if (!list) return
+    list.scrollTo(Math.max(0, list.scrollSize - list.viewportSize))
+    await frame()
+    if (remainingToBottom() < 1) break
+  }
+  lastScrollOffset = listRef.value?.scrollOffset ?? 0
+  updateReader(lastScrollOffset)
 }
 
 function markUserIntent(direction: -1 | 0 | 1): void {
@@ -286,8 +291,8 @@ async function jumpToLatest(): Promise<void> {
   }
 
   await scrollToLogical(last, 'end')
-  await settleFrames(2)
-  const physicallyAtBottom = remainingToBottom() < 48
+  await pinMeasuredEnd()
+  const physicallyAtBottom = remainingToBottom() < 32
   props.runtime.setReaderPosition(last, physicallyAtBottom)
   props.runtime.setFollowTail(streamRunning && physicallyAtBottom)
 }
@@ -343,9 +348,7 @@ function scheduleViewportResizeReconcile(): void {
     pendingComposerAnchor = null
 
     if (pin && props.runtime.range.end === props.runtime.logicalCount) {
-      const last = props.runtime.logicalCount - 1
-      await scrollToLogical(last, 'end')
-      if (remainingToBottom() < 48) props.runtime.setReaderPosition(last, true)
+      await pinMeasuredEnd()
     } else if (anchor) {
       await restoreListAnchor(anchor)
       updateReader()
@@ -377,7 +380,7 @@ async function restoreSnapshot(): Promise<void> {
     props.runtime.refreshProjection()
     await settleFrames(1)
     await scrollToLogical(props.runtime.logicalCount - 1, 'end')
-    if (remainingToBottom() < 48) props.runtime.setReaderPosition(props.runtime.logicalCount - 1, true)
+    await pinMeasuredEnd()
   } else if (snapshot.anchorUnitId) {
     const index = order.value.indexOf(snapshot.anchorUnitId)
     if (index >= 0) list.scrollToIndex(index, { align: 'start', offset: -snapshot.anchorOffsetPx })
@@ -407,19 +410,18 @@ onMounted(() => {
     order.value = [...props.runtime.projection.order]
   })
   unsubscribeState = props.runtime.subscribeState(() => {
-    const next = readUiState()
+    const next = props.runtime.uiSnapshot
     uiState.value = next
-    if (next.streamTicks !== lastStreamTick) {
-      lastStreamTick = next.streamTicks
+    if (next.streamRenderTicks !== lastStreamTick) {
+      lastStreamTick = next.streamRenderTicks
       if (next.followTail) void nextTick().then(() => {
         listRef.value?.scrollToIndex(Math.max(0, order.value.length - 1), { align: 'end' })
       })
     }
   })
 
-  // Establish the restored draft height first, then restore semantic viewport,
-  // and only then start observing future layout changes. This avoids mount-time
-  // composer geometry racing session restoration.
+  // Establish restored composer height first, restore semantic viewport second,
+  // then observe future layout changes. This avoids mount-time geometry races.
   resizeComposer()
   void restoreSnapshot().then(attachViewportObserver)
 })
