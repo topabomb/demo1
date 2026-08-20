@@ -1,16 +1,23 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import type { RenderUnit } from '../../core/types'
+import { useFoldState } from './fold-state'
+
 const props = defineProps<{ unit: RenderUnit }>()
 const lines = computed(() => (props.unit.payload.lines as string[] | undefined) ?? [])
-const collapsed = ref(lines.value.length > 55)
+const open = useFoldState(props.unit.id, Boolean(props.unit.payload.defaultOpen))
+const visibleLines = computed(() => open.value || lines.value.length <= 30 ? lines.value : lines.value.slice(0, 28))
 </script>
+
 <template>
-  <article class="message-card diff-card">
-    <header>
+  <article class="message-card diff-card" data-testid="diff-block">
+    <header class="compact-kind-head">
       <span><span class="kind-dot diff-dot" />Diff · {{ unit.payload.file }}</span>
-      <button class="mini" @click="collapsed = !collapsed">{{ collapsed ? 'expand' : 'collapse' }}</button>
+      <span class="head-actions">
+        <small>{{ lines.length }} lines</small>
+        <button v-if="lines.length > 30" class="mini" type="button" @click="open = !open">{{ open ? 'collapse' : 'expand' }}</button>
+      </span>
     </header>
-    <pre :class="{ collapsed }"><span v-for="(line, i) in lines" :key="i" :class="line.startsWith('+') ? 'add' : line.startsWith('-') ? 'del' : ''">{{ line }}\n</span></pre>
+    <pre><span v-for="(line, i) in visibleLines" :key="i" :class="line.startsWith('+') ? 'add' : line.startsWith('-') ? 'del' : ''">{{ line }}\n</span><span v-if="!open && lines.length > visibleLines.length" class="diff-ellipsis">… {{ lines.length - visibleLines.length }} lines hidden\n</span></pre>
   </article>
 </template>
