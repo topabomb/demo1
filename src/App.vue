@@ -1,4 +1,7 @@
 <script setup lang="ts">
-import MillionConversation from './components/MillionConversation.vue'
+import AgentWorkspace from './components/AgentWorkspace.vue'
 </script>
-<template><MillionConversation /></template>
+
+<template>
+  <AgentWorkspace />
+</template>
