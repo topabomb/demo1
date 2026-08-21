@@ -18,16 +18,21 @@ export function splitMarkdown(source: string, targetChars = 6000): MarkdownChunk
   for (const line of lines) {
     const trimmed = line.trimStart()
     const marker = trimmed.match(/^(```+|~~~+)/)?.[1] ?? null
-    if (marker) {
-      if (!fence) fence = marker[0]!
-      else if (marker[0] === fence) fence = null
-    }
 
+    // Decide whether to flush using the state *before* this line. In particular,
+    // a closing-fence line belongs to the currently open chunk and must never be
+    // separated from its opener.
     const wouldOverflow = buffer.length > 0 && buffer.length + line.length > targetChars
     const cleanBoundary = !fence && /\n\s*$/.test(buffer)
     if (wouldOverflow && cleanBoundary) {
       chunks.push(buffer)
       buffer = ''
+    }
+
+    if (marker) {
+      const markerChar = marker[0]!
+      if (!fence) fence = markerChar
+      else if (markerChar === fence) fence = null
     }
     buffer += line
   }
