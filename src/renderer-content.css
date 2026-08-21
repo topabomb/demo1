@@ -1,0 +1,48 @@
+/*
+ * Renderer containment contract.
+ * These rules belong to renderer surfaces, not viewport/session algorithms.
+ * They may be restyled, but a renderer must never expand the page/virtual item
+ * beyond its available inline size.
+ */
+.message-card,
+.markdown-body,
+.tool-detail,
+.tool-pane,
+.code-card,
+.diff-card,
+.image-card,
+.attachment-card,
+.audio-card,
+.html-card,
+.unknown-card { min-width: 0; max-width: 100%; box-sizing: border-box; }
+
+.markdown-body { overflow-wrap: anywhere; word-break: normal; }
+.markdown-body > *:first-child { margin-top: 0; }
+.markdown-body > *:last-child { margin-bottom: 0; }
+.markdown-body h1,.markdown-body h2,.markdown-body h3,.markdown-body h4 { line-height: 1.25; }
+.markdown-body p,.markdown-body li,.markdown-body blockquote { line-height: 1.65; }
+.markdown-body blockquote { margin-inline: 0; padding-left: 12px; border-left: 2px solid #394a5c; color: #8fa0b1; }
+.markdown-body pre { max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; }
+.markdown-body code { overflow-wrap: normal; word-break: normal; }
+.markdown-body table { display: block; width: max-content; max-width: 100%; overflow-x: auto; border-collapse: collapse; overscroll-behavior-inline: contain; }
+.markdown-body th,.markdown-body td { padding: 6px 9px; border: 1px solid #2b3744; white-space: nowrap; text-align: left; }
+.markdown-body input[type="checkbox"] { margin-right: 6px; }
+.markdown-body .markdown-inline-artifact { display:flex;gap:6px;flex-wrap:wrap;padding:8px;border:1px solid #293949;border-radius:7px;background:#101821; }
+
+.code-card pre,.diff-card pre,.tool-pane pre,.unknown-card pre,.shiki-host { max-width:100%; overflow:auto; overscroll-behavior:contain; }
+.code-card code,.diff-card code,.tool-pane code { white-space:pre; overflow-wrap:normal; word-break:normal; }
+
+.image-card img,
+.attachment-image img { display:block; width:100%; max-width:100%; height:auto; object-fit:contain; }
+.attachment-grid,.attachment-files,.attachment-file,.audio-waveform,.audio-transcript { min-width:0;max-width:100%;box-sizing:border-box; }
+.audio-card audio { max-width:100%;box-sizing:border-box; }
+.html-card > div { max-width:100%; overflow-x:auto; }
+.synthetic-html { max-width:100%; }
+.synthetic-html .html-chip { min-width:0; overflow-wrap:anywhere; }
+
+@media (max-width: 560px) {
+  .markdown-body { font-size: 11px; }
+  .markdown-body th,.markdown-body td { padding:5px 7px; }
+  .tool-detail { padding-left: 10px; }
+  .code-card pre,.diff-card pre,.shiki-host { max-height: 520px; }
+}
