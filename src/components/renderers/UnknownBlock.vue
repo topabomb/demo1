@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { RenderUnit } from '../../core/types'
+import type { RenderUnit } from '../../presentation/render-unit'
 defineProps<{ unit: RenderUnit }>()
 </script>
 
