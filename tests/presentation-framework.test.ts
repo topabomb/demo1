@@ -6,7 +6,7 @@ import { splitMarkdown } from '../src/presentation/markdown-chunks'
 import { createMixedDemoTurn, MARKDOWN_COMPATIBILITY_FIXTURES } from '../src/presentation/demo-fixtures'
 
 function message(blocks: LogicalMessage['blocks'], revision = 0): LogicalMessage {
-  return { id: 's:m-1', index: 1, turnId: 's:t-1', role: 'assistant', blocks, seed: 7, intensity: 5, revision }
+  return { id: 's:m-1', index: 1, turnId: 's:t-1', stepId: 's:t-1:step-0', role: 'assistant', blocks, seed: 7, intensity: 5, revision }
 }
 
 describe('Agent presentation framework', () => {
@@ -16,6 +16,7 @@ describe('Agent presentation framework', () => {
     expect(new Set(units.map(unit => unit.kind))).toEqual(new Set(['thinking', 'markdown', 'html']))
     expect(units.every(unit => unit.id.startsWith('s:m-1:'))).toBe(true)
     expect(units.every(unit => unit.estimatePx <= 1800)).toBe(true)
+    expect(units.every(unit => unit.turnId === 's:t-1' && unit.stepId === 's:t-1:step-0')).toBe(true)
   })
 
   it('keeps settled Markdown prefix chunks stable while only the streaming tail changes', () => {
@@ -43,6 +44,7 @@ describe('Agent presentation framework', () => {
     const registry = new ContentProjectorRegistry()
     registry.register('citation', ({ message: owner, block: contentBlock }) => [{
       id: `${owner.id}:${contentBlock.id}:citation`, messageId: owner.id, messageIndex: owner.index,
+      turnId: owner.turnId, stepId: owner.stepId, blockId: contentBlock.id,
       kind: 'citation', revision: 0, estimatePx: 64, payload: { href: 'https://example.com' },
     }])
     const customBlock = { id: 'cite-1', type: 'citation', data: { href: 'https://example.com' } } as never
