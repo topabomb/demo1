@@ -158,7 +158,7 @@ async function injectAgentScenarios(): Promise<void> {
       <div class="sidebar-footer"><span class="status-led" /><span>{{ runningSessionCount }} working</span><span v-if="blockedSessionCount">· {{ blockedSessionCount }} blocked</span><span v-if="failedSessionCount">· {{ failedSessionCount }} failed</span><span class="sidebar-version">{{ hotSessionCount }}/3 hot</span></div>
     </aside>
 
-    <ConversationViewport :key="activeSession.id" ref="viewportRef" :runtime="activeSession" :stream="activeStream" :diagnostics="diagnosticsOpen" />
+    <ConversationViewport :key="activeSession.id" ref="viewportRef" :runtime="activeSession" :stream="activeStream" :ui-state="activeUiState" :diagnostics="diagnosticsOpen" />
 
     <aside v-show="diagnosticsOpen" class="diagnostics-panel">
       <div class="diagnostics-head"><div><span class="eyebrow">Architecture proof</span><strong>Session diagnostics</strong></div><button class="icon-button" @click="diagnosticsOpen = false">×</button></div>
