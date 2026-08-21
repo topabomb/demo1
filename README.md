@@ -10,7 +10,7 @@ Executable reference template for production-style Agent workspaces with **very 
 - Template review: [`docs/template-review.md`](docs/template-review.md)
 - Verification contract: [`docs/verification.md`](docs/verification.md)
 
-The claim is not “Vue can render one million messages”. The framework separates facts, presentation and physical layout so normal work remains **`O(changed + hot + visible)`**, independent of total history.
+The claim is not “Vue can render one million messages”. The framework separates facts, bounded presentation and physical layout so normal work remains **`O(changed + hot + visible)`**, independent of total history.
 
 ```text
 Backend / Runtime Ports
@@ -28,9 +28,41 @@ Physical List Adapter
 Renderer / Product Adapter
 ```
 
-## Stable framework surface
+## Physical ownership
 
-Framework-neutral consumers import from `src/engine/index.ts`. That public surface includes:
+The repository has two source ownership trees. This is an enforced architecture boundary, not a naming convention:
+
+```text
+src/
+├── engine/                    reusable implementation
+│   ├── core/                  small algorithm primitives
+│   ├── model/                 canonical messages/blocks + mutations
+│   ├── conversation/          session contracts/kernel/semantics
+│   ├── presentation/          projection + keyed RenderUnits
+│   ├── viewport/              framework-neutral viewport policy
+│   ├── runtime/               bounded hot-session composition
+│   ├── vue/                   Vue/Virtua adapter + renderer registry
+│   │   ├── renderers/
+│   │   ├── viewport-navigation-controller.ts
+│   │   └── engine.css
+│   └── workers/
+│
+└── demo/                      executable proof only
+    ├── components/            workspace shell, diagnostics, architecture page
+    ├── styles/
+    ├── vue/
+    ├── synthetic.ts           lazy million-message source
+    ├── stream-controller.ts   demo playback/rate/telemetry
+    ├── scenarios.ts           heterogeneous fixtures
+    ├── workspace-fixtures.ts  seeded sessions
+    └── workspace-runtime.ts   demo composition + hot-runtime LRU
+```
+
+`engine/**` may never import `demo/**`. Demo code may consume Engine APIs. `tests/architecture-boundaries.test.ts` verifies both the physical split and internal dependency direction.
+
+## Stable Engine surface
+
+Framework-neutral consumers import from `src/engine/index.ts`. It exposes:
 
 - canonical `LogicalMessage + ContentBlock[]` and stable Message/Turn/Step/Block identity;
 - backend/history/execution ports and `ConversationSessionKernel`;
@@ -38,7 +70,7 @@ Framework-neutral consumers import from `src/engine/index.ts`. That public surfa
 - semantic viewport contracts;
 - `ConversationSessionRuntime` and bounded hot-window behavior.
 
-Demo fixtures, synthetic execution, Vue components and diagnostics are intentionally excluded. `src/demo/` owns fake history/scenarios/workspace composition; `src/vue/` and `src/components/` are reference frontend adapters.
+Synthetic playback is deliberately outside that surface. Rate, pause/resume controls and ingress/publish counters belong to `demo/stream-controller.ts`, not the SessionKernel, execution port or UI snapshot. The generic Engine only sees semantic execution (`submit`, `abort`, interaction resolution) and an ordered event revision.
 
 ## State lifetimes
 
@@ -50,6 +82,17 @@ Demo fixtures, synthetic execution, Vue components and diagnostics are intention
 | ephemeral physical | DOM, measured heights, renderer caches | mounted/render lifetime only |
 
 A running SessionKernel is not the same thing as a hot presentation runtime or a mounted viewport.
+
+## Cohesion, not file-count minimization
+
+The template intentionally keeps Fenwick indexing, page-height indexing, segment management, notifier primitives and renderer-per-kind modules small. Those are stable algorithm/extension seams; merging them would create mixed responsibilities.
+
+The review split only files with proven mixed ownership:
+
+- workspace fixture data was removed from `DemoWorkspaceRuntime`;
+- canonical message mutation helpers were removed from `ConversationSessionKernel`;
+- demo diagnostics were removed from the workspace shell;
+- mounted geometry, scroll intent, anchor restoration, tail pinning and latest-wins navigation were consolidated into one `ViewportNavigationController` instead of many tiny composables.
 
 ## Content and extension contract
 
@@ -73,12 +116,13 @@ The template adopts the scene-relevant parts of [DeepSeek Harness](https://githu
 
 ## CSS / host boundary
 
-There are only two application style surfaces:
+There are three owned style surfaces:
 
-- `src/styles/engine.css` — conversation engine + renderer + virtualizer/composer rules, scoped from `[data-conversation-engine].conversation-shell`;
-- `src/styles/demo.css` — demo shell, diagnostics and the only stylesheet allowed to style `html`, `body` or `#app`.
+- `src/engine/vue/engine.css` — conversation Engine + renderer + virtualizer/composer rules, host-scoped from `[data-conversation-engine].conversation-shell`;
+- `src/demo/styles/demo.css` — demo shell/diagnostics and the only stylesheet allowed to style `html`, `body` or `#app`;
+- `src/demo/styles/architecture.css` — standalone architecture page.
 
-`src/architecture.css` is isolated to the architecture page. Old mixed product/renderer/virtualizer stylesheets were removed. CI includes a hostile-host CSS browser test where later global element rules attempt to override buttons, inputs, images and tables; engine geometry must remain correct.
+CI includes a hostile-host CSS browser test where later global element rules attempt to override buttons, inputs, images and tables; Engine geometry must remain correct.
 
 ## What CI proves
 
