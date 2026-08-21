@@ -2,18 +2,31 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import { VList, type VListHandle } from 'virtua/vue'
 import type { ViewportSnapshot } from '../conversation/contracts'
+import {
+  billedInputTokens,
+  cacheHitPercent,
+  contextOccupancyPercent,
+  deriveSessionIndicator,
+  formatTokens,
+  sessionIndicatorLabel,
+} from '../conversation/session-semantics'
 import type { ConversationSessionRuntime, SessionUiSnapshot, ShiftPlan } from '../conversation/session-runtime'
 import type { SyntheticStreamController } from '../conversation/stream-controller'
+import {
+  VIEWPORT_POLICY,
+  isMessageCommittedVisible,
+  remainingToBottom as remainingToBottomForPort,
+  selectCommittedAnchor,
+  type CommittedViewportAnchor,
+  type ViewportRowSample,
+} from '../viewport/contracts'
 import ConversationNodeSeat from './ConversationNodeSeat.vue'
 
 const props = defineProps<{ runtime: ConversationSessionRuntime; stream: SyntheticStreamController; diagnostics?: boolean }>()
 
-const EDGE_THRESHOLD_PX = 900
-const USER_SCROLL_INTENT_MS = 650
+// Virtua adapter tuning: these are physical-renderer hints, not semantic state.
 const VIRTUAL_BUFFER_PX = 900
 const VIRTUAL_ITEM_HINT_PX = 180
-const COMPOSER_MIN_PX = 56
-const COMPOSER_MAX_PX = 180
 
 const listRef = ref<VListHandle | null>(null)
 const scrollStageRef = ref<HTMLElement | null>(null)
@@ -33,19 +46,17 @@ let viewportObserver: ResizeObserver | null = null
 let unsubscribeOrder: (() => void) | null = null
 let unsubscribeState: (() => void) | null = null
 
-interface LayoutAnchor { id: string; offsetPx: number; viewportTopPx: number }
-let pendingComposerAnchor: LayoutAnchor | null = null
+let pendingComposerAnchor: CommittedViewportAnchor | null = null
 let pendingComposerPinned = false
 
 const messagesAfter = computed(() => uiState.value.messagesAfter)
 const showLatest = computed(() => props.runtime.logicalCount > 0 && (!uiState.value.atVisualBottom || messagesAfter.value > 0))
 const followLabel = computed(() => uiState.value.followTail ? 'following tail' : 'tail paused')
-const statusLabel = computed(() => {
-  if (uiState.value.pendingInteraction) return 'needs input'
-  if (uiState.value.sessionStatus === 'working') return 'working'
-  if (uiState.value.sessionStatus === 'interrupted') return 'interrupted'
-  return 'idle'
+const sessionIndicator = computed(() => {
+  void uiState.value.streamRenderTicks
+  return deriveSessionIndicator(props.runtime.kernel.summary)
 })
+const statusLabel = computed(() => sessionIndicatorLabel(sessionIndicator.value))
 const canSend = computed(() => Boolean(composerText.value.trim()) && !uiState.value.pendingInteraction)
 const sendLabel = computed(() => uiState.value.sessionStatus === 'working' ? 'Queue prompt' : 'Send prompt')
 const composerPlaceholder = computed(() => uiState.value.pendingInteraction
@@ -53,13 +64,29 @@ const composerPlaceholder = computed(() => uiState.value.pendingInteraction
   : uiState.value.sessionStatus === 'working'
     ? 'Queue a follow-up while the agent is working…'
     : 'Ask the agent anything…')
+const tokenUsage = computed(() => {
+  void uiState.value.streamRenderTicks
+  return props.runtime.kernel.usage
+})
+const billedInput = computed(() => billedInputTokens(tokenUsage.value))
+const cacheHit = computed(() => cacheHitPercent(tokenUsage.value))
+const contextPercent = computed(() => contextOccupancyPercent(props.runtime.kernel.context))
+const interactionPrimary = computed(() => uiState.value.pendingInteraction?.kind === 'question' ? 'Continue' : 'Approve')
+const interactionSecondary = computed(() => uiState.value.pendingInteraction?.kind === 'question' ? 'Skip' : 'Deny')
 
 function frame(): Promise<void> { return new Promise(resolve => requestAnimationFrame(() => resolve())) }
 async function settleFrames(count = 2): Promise<void> { for (let i = 0; i < count; i += 1) { await nextTick(); await frame() } }
 function nodeFor(id: string) { return props.runtime.projection.getNode(id) }
 function itemProps({ item, index }: { item: string; index: number }) {
   const node = nodeFor(item)
-  return { class: 'virtua-row', 'data-index': index, 'data-message-index': node?.messageIndex ?? -1, 'data-render-unit': item, 'data-session-id': props.runtime.id }
+  return {
+    class: 'virtua-row',
+    'data-virtual-item': 'true',
+    'data-index': index,
+    'data-message-index': node?.messageIndex ?? -1,
+    'data-render-unit': item,
+    'data-session-id': props.runtime.id,
+  }
 }
 function renderedRow(id: string): HTMLElement | null {
   const stage = scrollStageRef.value
@@ -67,40 +94,43 @@ function renderedRow(id: string): HTMLElement | null {
   for (const row of stage.querySelectorAll<HTMLElement>('[data-render-unit]')) if (row.dataset.renderUnit === id) return row
   return null
 }
+function sampleRows(): ViewportRowSample[] {
+  const stage = scrollStageRef.value
+  if (!stage) return []
+  return [...stage.querySelectorAll<HTMLElement>('[data-virtual-item="true"]')].flatMap(row => {
+    const id = row.dataset.renderUnit ?? ''
+    const node = nodeFor(id)
+    if (!node) return []
+    const rect = row.getBoundingClientRect()
+    return [{ id, messageIndex: node.messageIndex, top: rect.top, bottom: rect.bottom }]
+  })
+}
 
-/** Mounted DOM is not viewport truth: exclude Virtua measurement probes. */
-function captureCommittedAnchor(): LayoutAnchor | null {
+/** DOM measurement is an adapter input; committed-anchor selection is pure policy. */
+function captureCommittedAnchor(): CommittedViewportAnchor | null {
   const stage = scrollStageRef.value
   if (!stage) return null
   const viewport = stage.getBoundingClientRect()
-  const reader = uiState.value.reader
-  const candidates = [...stage.querySelectorAll<HTMLElement>('[data-render-unit]')]
-    .map(row => ({ row, node: nodeFor(row.dataset.renderUnit ?? ''), rect: row.getBoundingClientRect() }))
-    .filter(entry => entry.node && entry.node.messageIndex <= reader + 1 && entry.rect.bottom > viewport.top && entry.rect.top < viewport.bottom)
-    .sort((a, b) => a.rect.top - b.rect.top)
-  const first = candidates[0]
-  if (!first) return null
-  const top = first.rect.top - viewport.top
-  return { id: first.row.dataset.renderUnit ?? '', offsetPx: top, viewportTopPx: top }
+  return selectCommittedAnchor(sampleRows(), viewport.top, viewport.bottom, uiState.value.reader)
 }
 
 function refreshMountedRows(): void {
   if (metricsFrame) return
   metricsFrame = requestAnimationFrame(() => {
     metricsFrame = 0
-    props.runtime.mountedRows = scrollStageRef.value?.querySelectorAll('.virtua-row').length ?? 0
+    props.runtime.mountedRows = scrollStageRef.value?.querySelectorAll('[data-virtual-item="true"]').length ?? 0
     props.runtime.markStateDirty()
   })
 }
 function remainingToBottom(): number {
   const list = listRef.value
   if (!list) return Number.POSITIVE_INFINITY
-  return Math.max(0, list.scrollSize - list.scrollOffset - list.viewportSize)
+  return remainingToBottomForPort(list)
 }
 function updateReader(offset = listRef.value?.scrollOffset ?? 0): void {
   const list = listRef.value
   if (!list || order.value.length === 0 || props.runtime.logicalCount <= 0) return
-  const atBottom = remainingToBottom() < 32 && props.runtime.range.end === props.runtime.logicalCount
+  const atBottom = remainingToBottom() < VIEWPORT_POLICY.bottomTolerancePx && props.runtime.range.end === props.runtime.logicalCount
   if (atBottom) { props.runtime.setReaderPosition(props.runtime.logicalCount - 1, true); return }
   const bottomProbe = Math.max(0, Math.min(list.scrollSize - 1, offset + Math.max(1, list.viewportSize - 2)))
   const index = Math.max(0, Math.min(order.value.length - 1, list.findItemIndex(bottomProbe)))
@@ -108,13 +138,13 @@ function updateReader(offset = listRef.value?.scrollOffset ?? 0): void {
   if (node) props.runtime.setReaderPosition(node.messageIndex, false)
 }
 
-async function restoreListAnchor(anchor: LayoutAnchor): Promise<void> {
+async function restoreListAnchor(anchor: CommittedViewportAnchor): Promise<void> {
   const list = listRef.value
   if (!list) return
   const index = order.value.indexOf(anchor.id)
   if (index < 0) return
   list.scrollToIndex(index, { align: 'start', offset: -anchor.offsetPx })
-  for (let attempt = 0; attempt < 6; attempt += 1) {
+  for (let attempt = 0; attempt < VIEWPORT_POLICY.restoreAttempts; attempt += 1) {
     await settleFrames(1)
     const currentList = listRef.value
     const stage = scrollStageRef.value
@@ -122,13 +152,13 @@ async function restoreListAnchor(anchor: LayoutAnchor): Promise<void> {
     if (!currentList || !stage || !row) { currentList?.scrollToIndex(index, { align: 'start', offset: -anchor.offsetPx }); continue }
     const currentTop = row.getBoundingClientRect().top - stage.getBoundingClientRect().top
     const delta = currentTop - anchor.viewportTopPx
-    if (Math.abs(delta) < 0.75) break
+    if (Math.abs(delta) < VIEWPORT_POLICY.anchorTolerancePx) break
     currentList.scrollBy(delta)
   }
   await settleFrames(1)
 }
 
-async function pinMeasuredEnd(maxFrames = 6): Promise<void> {
+async function pinMeasuredEnd(maxFrames = VIEWPORT_POLICY.restoreAttempts): Promise<void> {
   if (props.runtime.logicalCount <= 0) return
   for (let attempt = 0; attempt < maxFrames; attempt += 1) {
     await nextTick(); await frame()
@@ -141,7 +171,10 @@ async function pinMeasuredEnd(maxFrames = 6): Promise<void> {
   lastScrollOffset = listRef.value?.scrollOffset ?? 0
   updateReader(lastScrollOffset)
 }
-function markUserIntent(direction: -1 | 0 | 1): void { userScrollIntentUntil = performance.now() + USER_SCROLL_INTENT_MS; if (direction !== 0) userScrollDirection = direction }
+function markUserIntent(direction: -1 | 0 | 1): void {
+  userScrollIntentUntil = performance.now() + VIEWPORT_POLICY.userIntentMs
+  if (direction !== 0) userScrollDirection = direction
+}
 function clearUserIntent(): void { userScrollIntentUntil = 0; userScrollDirection = 0 }
 function onUserWheel(event: WheelEvent): void {
   const direction: -1 | 0 | 1 = event.deltaY < 0 ? -1 : event.deltaY > 0 ? 1 : 0
@@ -160,13 +193,13 @@ function onVirtualScroll(offset: number): void {
   updateReader(offset); refreshMountedRows()
   if (!hasIntent || !uiState.value.streamTarget) return
   if (userScrollDirection < 0) props.runtime.setFollowTail(false)
-  else if (userScrollDirection > 0 && remainingToBottom() < 32) props.runtime.setFollowTail(true)
+  else if (userScrollDirection > 0 && remainingToBottom() < VIEWPORT_POLICY.bottomTolerancePx) props.runtime.setFollowTail(true)
 }
 function onVirtualScrollEnd(): void {
   refreshMountedRows()
   if (shifting.value || performance.now() >= userScrollIntentUntil) return
-  if (userScrollDirection < 0 && (listRef.value?.scrollOffset ?? Infinity) < EDGE_THRESHOLD_PX) void shiftBackward()
-  else if (userScrollDirection > 0 && remainingToBottom() < EDGE_THRESHOLD_PX) void shiftForward()
+  if (userScrollDirection < 0 && (listRef.value?.scrollOffset ?? Infinity) < VIEWPORT_POLICY.edgeThresholdPx) void shiftBackward()
+  else if (userScrollDirection > 0 && remainingToBottom() < VIEWPORT_POLICY.edgeThresholdPx) void shiftForward()
 }
 
 async function applyShift(plan: ShiftPlan): Promise<void> {
@@ -193,15 +226,11 @@ function targetIsCommittedVisible(target: number): boolean {
   const stage = scrollStageRef.value
   if (!stage) return false
   const viewport = stage.getBoundingClientRect()
-  for (const row of stage.querySelectorAll<HTMLElement>(`[data-message-index="${target}"]`)) {
-    const rect = row.getBoundingClientRect()
-    if (rect.bottom > viewport.top && rect.top < viewport.bottom) return true
-  }
-  return false
+  return isMessageCommittedVisible(sampleRows(), target, viewport.top, viewport.bottom)
 }
 async function scrollToLogical(target: number, align: 'start' | 'center' | 'end' = 'center'): Promise<void> {
   if (props.runtime.logicalCount <= 0) return
-  for (let attempt = 0; attempt < 10; attempt += 1) {
+  for (let attempt = 0; attempt < VIEWPORT_POLICY.jumpAttempts; attempt += 1) {
     await settleFrames(1)
     const list = listRef.value
     if (!list) continue
@@ -215,7 +244,7 @@ async function scrollToLogical(target: number, align: 'start' | 'center' | 'end'
   lastScrollOffset = listRef.value?.scrollOffset ?? 0; updateReader(lastScrollOffset)
 }
 async function waitForJumpEpoch(previousEpoch: number, previousHandle: VListHandle | null, target: number): Promise<void> {
-  for (let attempt = 0; attempt < 12; attempt += 1) {
+  for (let attempt = 0; attempt < VIEWPORT_POLICY.jumpAttempts + 2; attempt += 1) {
     await settleFrames(1)
     const epochReady = uiState.value.virtualEpoch > previousEpoch && uiState.value.virtualEpoch === props.runtime.virtualEpoch
     const orderReady = findMessageUnitIndex(target) >= 0
@@ -238,7 +267,7 @@ async function jumpToLatest(): Promise<void> {
     props.runtime.jump(last); props.runtime.refreshProjection(); await waitForJumpEpoch(previousEpoch, previousHandle, last)
   } else { props.runtime.refreshProjection(); await settleFrames(1) }
   await scrollToLogical(last, 'end'); await pinMeasuredEnd()
-  const physicallyAtBottom = remainingToBottom() < 32
+  const physicallyAtBottom = remainingToBottom() < VIEWPORT_POLICY.bottomTolerancePx
   props.runtime.setReaderPosition(last, physicallyAtBottom); props.runtime.setFollowTail(props.stream.running && physicallyAtBottom)
 }
 
@@ -248,13 +277,13 @@ function setStreamRate(rate: number): void { props.stream.setRate(rate) }
 function abortRun(): void { props.stream.abort() }
 function resolveInteraction(approved: boolean): void { props.stream.resolveInteraction(approved) }
 
+/** Product CSS owns min/max composer height; JS only asks for intrinsic content height. */
 function resizeComposer(): void {
   const input = composerInputRef.value
   if (!input) return
   input.style.height = '0px'
-  const next = Math.max(COMPOSER_MIN_PX, Math.min(COMPOSER_MAX_PX, input.scrollHeight))
-  input.style.height = `${next}px`
-  input.style.overflowY = input.scrollHeight > COMPOSER_MAX_PX ? 'auto' : 'hidden'
+  input.style.height = `${Math.max(1, input.scrollHeight)}px`
+  input.style.overflowY = input.scrollHeight > input.clientHeight ? 'auto' : 'hidden'
 }
 function onComposerInput(): void {
   props.runtime.setDraftText(composerText.value)
@@ -335,10 +364,10 @@ defineExpose({ captureSnapshot, jumpToMessage, jumpToLatest, shiftBackward, shif
 <template>
   <main class="conversation-shell" :data-session-id="runtime.id">
     <header class="conversation-header">
-      <div class="conversation-title"><strong>{{ runtime.title }}</strong><span>million-message-workspace / {{ runtime.id }}</span></div>
+      <div class="conversation-title"><strong>{{ runtime.title }}</strong><span>workspace / {{ runtime.id }}</span></div>
       <div class="header-chips">
         <button class="model-chip">Synthetic Agent</button><button class="model-chip secondary-model">Reasoning · balanced</button>
-        <span class="run-status" :class="`run-${uiState.sessionStatus}`"><i /> {{ statusLabel }}</span>
+        <span class="run-status" :class="`indicator-${sessionIndicator}`" :title="runtime.kernel.lastFailure?.message"><i /> {{ statusLabel }}</span>
         <button v-if="uiState.sessionStatus === 'working'" class="header-stop" data-testid="abort-run" title="Stop run" @click="abortRun">■</button>
         <button class="header-icon" title="Search conversation">⌕</button>
       </div>
@@ -361,19 +390,28 @@ defineExpose({ captureSnapshot, jumpToMessage, jumpToLatest, shiftBackward, shif
     </div>
 
     <footer ref="composerShellRef" class="composer-shell" data-testid="composer-shell">
-      <div v-if="uiState.pendingInteraction" class="pending-interaction" data-testid="pending-interaction">
+      <div v-if="uiState.pendingInteraction" class="pending-interaction" data-testid="pending-interaction" :data-kind="uiState.pendingInteraction.kind">
         <div class="pending-icon">!</div><div><strong>{{ uiState.pendingInteraction.title }}</strong><p>{{ uiState.pendingInteraction.detail }}</p></div>
-        <div class="pending-actions"><button class="secondary" data-testid="deny-interaction" @click="resolveInteraction(false)">Deny</button><button data-testid="approve-interaction" @click="resolveInteraction(true)">Approve</button></div>
+        <div class="pending-actions"><button class="secondary" data-testid="deny-interaction" @click="resolveInteraction(false)">{{ interactionSecondary }}</button><button data-testid="approve-interaction" @click="resolveInteraction(true)">{{ interactionPrimary }}</button></div>
       </div>
+      <div v-else-if="sessionIndicator === 'failed'" class="turn-outcome-banner failure" data-testid="last-turn-failure"><strong>Last turn failed</strong><span>{{ runtime.kernel.lastFailure?.code }} · {{ runtime.kernel.lastFailure?.message }}</span></div>
+      <div v-else-if="sessionIndicator === 'max-tokens'" class="turn-outcome-banner warning"><strong>Last turn reached the output-token limit</strong><span>You can continue this session with another prompt.</span></div>
       <div v-if="uiState.queuedPrompts > 0" class="queue-banner" data-testid="queue-banner">{{ uiState.queuedPrompts }} follow-up{{ uiState.queuedPrompts === 1 ? '' : 's' }} queued for this session</div>
       <div class="composer-box">
         <textarea ref="composerInputRef" v-model="composerText" data-testid="composer-input" rows="1" :placeholder="composerPlaceholder" :disabled="Boolean(uiState.pendingInteraction)" @input="onComposerInput" @keydown.enter.exact.prevent="sendComposer" />
         <div class="composer-actions">
           <div><button class="composer-icon" title="Attach">＋</button><button class="mode-button">Agent ▾</button><button class="mode-button">Model ▾</button></div>
-          <div><span class="context-meter">{{ runtime.logicalCount.toLocaleString() }} messages</span><button v-if="uiState.sessionStatus === 'working'" class="stop-button" data-testid="composer-stop" title="Stop run" @click="abortRun">■</button><button class="send-button" :class="{ queued: uiState.sessionStatus === 'working' }" :disabled="!canSend" :title="sendLabel" @click="sendComposer">{{ uiState.sessionStatus === 'working' ? '↗' : '↑' }}</button></div>
+          <div><span class="context-meter" data-testid="stats-context">{{ contextPercent ?? 0 }}% context</span><button v-if="uiState.sessionStatus === 'working'" class="stop-button" data-testid="composer-stop" title="Stop run" @click="abortRun">■</button><button class="send-button" :class="{ queued: uiState.sessionStatus === 'working' }" :disabled="!canSend" :title="sendLabel" @click="sendComposer">{{ uiState.sessionStatus === 'working' ? '↗' : '↑' }}</button></div>
         </div>
       </div>
-      <span class="composer-hint">Enter to send · background runs survive session switches · drafts are session-scoped</span>
+      <div class="session-stats-line" data-testid="session-stats-line">
+        <span>{{ runtime.kernel.turnCount.toLocaleString() }} turns · {{ runtime.kernel.stepCount.toLocaleString() }} steps</span>
+        <span v-if="cacheHit !== null" data-testid="stats-cache-hit">cache {{ cacheHit }}%</span>
+        <span data-testid="stats-input-tokens">in {{ formatTokens(billedInput) }}</span>
+        <span data-testid="stats-output-tokens">out {{ formatTokens(tokenUsage.outputTokens) }}</span>
+        <span v-if="tokenUsage.reasoningTokens > 0">reasoning {{ formatTokens(tokenUsage.reasoningTokens) }}</span>
+      </div>
+      <span class="composer-hint">Enter to send · background runs survive session switches · drafts and blockers are session-scoped</span>
     </footer>
   </main>
 </template>
