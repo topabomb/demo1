@@ -149,20 +149,12 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       MERGED_BRANCH: ${{ github.event.pull_request.head.ref }}
     steps:
-      - name: Delete merged and stale development branches
+      - name: Delete merged development branch
         run: |
-          delete_branch() {
-            branch="$1"
-            [ -n "$branch" ] || return 0
-            [ "$branch" != main ] || return 0
-            if gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${branch}" >/dev/null 2>&1; then
-              echo "Deleting ${branch}"
-              gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/${branch}"
-            fi
-          }
-
-          delete_branch "$MERGED_BRANCH"
-          # One-time cleanup for historical branches superseded by main.
-          delete_branch 'feat/million-message-lab'
-          delete_branch 'refactor/engine-boundaries'
-          delete_branch 'chore/release-evidence-status'
+          branch="$MERGED_BRANCH"
+          [ -n "$branch" ] || exit 0
+          [ "$branch" != main ] || exit 0
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${branch}" >/dev/null 2>&1; then
+            echo "Deleting ${branch}"
+            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/${branch}"
+          fi
