@@ -1,6 +1,10 @@
 import type { ConversationDescriptor, PendingInteraction } from '../engine/conversation/contracts'
 
-export interface DemoSessionSeed extends ConversationDescriptor {
+export interface DemoSessionDescriptor extends ConversationDescriptor {
+  age: string
+}
+
+export interface DemoSessionSeed extends DemoSessionDescriptor {
   seedOffset: number
   liveTail?: boolean
 }
