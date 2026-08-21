@@ -67,24 +67,26 @@ test('runtime ContentBlock fixtures use the canonical projector and renderer reg
   await expect(page.getByTestId('logical-count')).toHaveText('180,025')
 
   await jump(page, 180_001)
-  await expect(page.getByTestId('thinking-block')).toBeVisible()
-  await expect(page.getByTestId('diff-block')).toBeVisible()
-  await expect(page.getByTestId('markdown-block')).toBeVisible()
+  const mixedOne = page.locator('[data-message-index="180001"]').first()
+  await expect(mixedOne.getByTestId('thinking-block')).toBeVisible()
+  await expect(mixedOne.getByTestId('diff-block')).toBeVisible()
+  await expect(mixedOne.getByTestId('markdown-block')).toBeVisible()
 
   await jump(page, 180_002)
-  await expect(page.getByTestId('tool-block')).toBeVisible()
+  await expect(page.locator('[data-message-index="180002"]').first().getByTestId('tool-block')).toBeVisible()
 
   await jump(page, 180_006)
-  await expect(page.getByTestId('image-block')).toBeVisible()
+  await expect(page.locator('[data-message-index="180006"]').first().getByTestId('image-block')).toBeVisible()
 
   await jump(page, 180_011)
-  const html = page.locator('[data-message-index="180011"]').locator('.html-card')
+  const html = page.locator('[data-message-index="180011"]').first().locator('.html-card')
   await expect(html).toBeVisible()
   expect(await html.locator('script').count()).toBe(0)
 
   await jump(page, 180_016)
-  await expect(page.getByTestId('code-block')).toBeVisible()
-  await expect(page.getByTestId('code-block').locator('.shiki')).toBeVisible({ timeout: 15_000 })
+  const code = page.locator('[data-message-index="180016"]').first().getByTestId('code-block')
+  await expect(code).toBeVisible()
+  await expect(code.locator('.shiki')).toBeVisible({ timeout: 15_000 })
 
   expect(numeric(await page.getByTestId('mounted-rows').textContent())).toBeLessThan(180)
   await assertNoRowOverlap(page)
@@ -118,9 +120,27 @@ test('Markdown compatibility gallery covers GFM structures, sanitization and lon
   expect(await page.evaluate(() => (window as unknown as { __markdownUnsafe?: boolean }).__markdownUnsafe)).toBeUndefined()
 
   await jump(page, 180_005)
-  await expect(page.locator('[data-message-index="180005"]').first().locator('.markdown-body h3')).toBeVisible()
+  await expect(page.locator('[data-message-index="180005"]').first().locator('.markdown-body h3').first()).toBeVisible()
   expect(await page.locator('[data-message-index="180005"]').count()).toBeGreaterThan(1)
   await assertNoRowOverlap(page)
+})
+
+test('live Markdown uses incremental projection rather than full-project work per publish', async ({ page }) => {
+  await openApp(page)
+  await expect(page.getByTestId('active-session-id')).toHaveText('million')
+  const fullBefore = numeric(await page.getByTestId('projection-full-projects').textContent())
+  const incrementalBefore = numeric(await page.getByTestId('projection-incremental').textContent())
+  const ticksBefore = numeric(await page.getByTestId('stream-ticks').textContent())
+
+  await page.locator('.control-group select').selectOption('60')
+  await page.getByTestId('stream-start').click()
+  await expect.poll(async () => numeric(await page.getByTestId('stream-ticks').textContent()), { timeout: 15_000 }).toBeGreaterThan(ticksBefore + 20)
+  const incrementalAfter = numeric(await page.getByTestId('projection-incremental').textContent())
+  const fullAfter = numeric(await page.getByTestId('projection-full-projects').textContent())
+
+  expect(incrementalAfter).toBeGreaterThan(incrementalBefore + 15)
+  expect(fullAfter - fullBefore).toBeLessThan(4)
+  expect(numeric(await page.getByTestId('projection-cache').textContent())).toBeLessThanOrEqual(4096)
 })
 
 test('responsive reflow preserves containment, semantic anchor and mobile session access', async ({ page }) => {
@@ -159,10 +179,9 @@ test('responsive reflow preserves containment, semantic anchor and mobile sessio
   expect(await bodyOverflow(page)).toBeLessThanOrEqual(1)
 
   await page.getByTestId('inject-mixed-five').click()
-  // Gallery used ordinal 1; mixed fixtures therefore begin with ordinal 2 at index 180006.
-  // Ordinal 2's rich assistant message is the image message at 180007.
+  // Gallery used ordinal 1; mixed fixtures begin with ordinal 2 at index 180006.
   await jump(page, 180_007)
-  const image = page.getByTestId('image-block').locator('img')
+  const image = page.locator('[data-message-index="180007"]').first().getByTestId('image-block').locator('img')
   await expect(image).toBeVisible()
   const imageFits = await image.evaluate(element => {
     const row = element.closest<HTMLElement>('[data-virtual-item="true"]')!
