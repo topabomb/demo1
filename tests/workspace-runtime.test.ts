@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { ConversationWorkspaceRuntime, HOT_SESSION_LIMIT } from '../src/conversation/workspace-runtime'
+import { DemoWorkspaceRuntime, HOT_SESSION_LIMIT } from '../src/demo/workspace-runtime'
 
-describe('ConversationWorkspaceRuntime v2 lifecycle split', () => {
+describe('DemoWorkspaceRuntime lifecycle split', () => {
   it('bounds heavyweight runtimes even when multiple kernels are working', () => {
-    const workspace = new ConversationWorkspaceRuntime()
+    const workspace = new DemoWorkspaceRuntime()
     try {
       for (const id of ['dsh-transport', 'event-normalization', 'workspace-files']) {
         workspace.executionFor(id).submit(`run ${id}`)
@@ -19,7 +19,7 @@ describe('ConversationWorkspaceRuntime v2 lifecycle split', () => {
   })
 
   it('evicts a working viewport without destroying its execution kernel', async () => {
-    const workspace = new ConversationWorkspaceRuntime()
+    const workspace = new DemoWorkspaceRuntime()
     try {
       workspace.activate('dsh-transport')
       workspace.executionFor('dsh-transport').submit('keep running offscreen')
@@ -37,7 +37,7 @@ describe('ConversationWorkspaceRuntime v2 lifecycle split', () => {
   })
 
   it('persists approval state and can create a resumable empty session', () => {
-    const workspace = new ConversationWorkspaceRuntime()
+    const workspace = new DemoWorkspaceRuntime()
     try {
       expect(workspace.kernelFor('tool-rendering').pendingInteraction?.kind).toBe('approval')
       workspace.activate('tool-rendering')
