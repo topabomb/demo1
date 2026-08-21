@@ -12,8 +12,6 @@ import {
 interface ProjectionCacheEntry {
   revision: number
   units: readonly RenderUnit[]
-  markdownBlockId: string | null
-  markdownSource: string | null
 }
 
 export interface ProjectionEngineStats {
@@ -28,7 +26,8 @@ export interface ProjectionEngineStats {
  * Owns rebuildable presentation work for one hot conversation runtime.
  *
  * The registry is semantic policy; this engine adds bounded message-level memoization
- * and a true append-only Markdown fast path. Session/domain state never depends on it.
+ * and incremental paths for high-frequency LLM Markdown/reasoning output. Session
+ * and domain state never depend on this cache.
  */
 export class ProjectionEngine {
   readonly registry: ContentProjectorRegistry
@@ -76,28 +75,25 @@ export class ProjectionEngine {
   }
 
   /**
-   * Append-only Markdown fast path used by live LLM output.
-   * Only the previous mutable tail plus the new delta is re-chunked; settled prefix
-   * RenderUnit objects remain byte/identity stable. Multi-block or non-append updates
-   * intentionally fall back to the general projector.
+   * Append-only Markdown fast path. Only the previous mutable Markdown tail plus
+   * the new delta is re-chunked. Other blocks in the same message keep their
+   * RenderUnit identity, which lets reasoning + answer coexist in one live message.
    */
   appendMarkdownDelta(message: LogicalMessage, blockId: string, delta: string): readonly RenderUnit[] {
     const cached = this.#cache.get(message.id)
     const contentBlock = message.blocks?.find(entry => entry.id === blockId && entry.type === 'markdown') as ContentBlock<'markdown'> | undefined
-    if (!cached || !contentBlock || !delta || cached.markdownBlockId !== blockId || cached.markdownSource === null) {
-      return this.projectMessage(message)
-    }
+    if (!cached || !contentBlock || !delta) return this.projectMessage(message)
 
+    const indexes = cached.units.flatMap((unit, index) => unit.blockId === blockId ? [index] : [])
+    if (indexes.length === 0 || !isContiguous(indexes)) return this.projectMessage(message)
+    const first = indexes[0]!
+    const last = indexes[indexes.length - 1]!
+    const blockUnits = cached.units.slice(first, last + 1)
+    const previousSource = blockUnits.map(unit => String(unit.payload.markdown ?? '')).join('')
     const currentSource = contentBlock.data.markdown
-    // The SessionKernel event is authoritative that this is append-only. Length +
-    // suffix validation protects callers that accidentally route a replacement here
-    // without rescanning the already-settled prefix.
-    if (currentSource.length !== cached.markdownSource.length + delta.length || !currentSource.endsWith(delta)) {
+    if (currentSource.length !== previousSource.length + delta.length || !currentSource.endsWith(delta)) {
       return this.projectMessage(message)
     }
-
-    const blockUnits = cached.units.filter(unit => unit.payload.blockId === blockId)
-    if (blockUnits.length === 0 || blockUnits.length !== cached.units.length) return this.projectMessage(message)
 
     const oldTail = blockUnits[blockUnits.length - 1]!
     const oldTailText = String(oldTail.payload.markdown ?? '')
@@ -117,7 +113,43 @@ export class ProjectionEngine {
       )
     })
 
-    const units = [...settledPrefix, ...tailUnits]
+    const units = [
+      ...cached.units.slice(0, first),
+      ...settledPrefix,
+      ...tailUnits,
+      ...cached.units.slice(last + 1),
+    ]
+    this.#incrementalPatches += 1
+    return this.#remember(message, units)
+  }
+
+  /**
+   * Reasoning text is one stable presentation node. An append replaces only that
+   * node while preserving every sibling block in the live assistant message.
+   */
+  appendReasoningDelta(message: LogicalMessage, blockId: string, delta: string): readonly RenderUnit[] {
+    const cached = this.#cache.get(message.id)
+    const contentBlock = message.blocks?.find(entry => entry.id === blockId && entry.type === 'reasoning') as ContentBlock<'reasoning'> | undefined
+    if (!cached || !contentBlock || !delta) return this.projectMessage(message)
+
+    const index = cached.units.findIndex(unit => unit.blockId === blockId)
+    if (index < 0 || cached.units.some((unit, candidate) => candidate !== index && unit.blockId === blockId)) return this.projectMessage(message)
+    const previous = cached.units[index]!
+    const previousText = String(previous.payload.text ?? '')
+    const currentText = contentBlock.data.text
+    if (currentText.length !== previousText.length + delta.length || !currentText.endsWith(delta)) return this.projectMessage(message)
+
+    const data = contentBlock.data
+    const estimate = data.defaultOpen ? Math.min(720, 110 + currentText.length * 0.14) : 72
+    const next = makeRenderUnit(message, contentBlock, 'thinking', 'thinking', estimate, {
+      text: currentText,
+      tokenCount: data.tokenCount ?? Math.round(currentText.length / 3.8),
+      durationMs: data.durationMs ?? 0,
+      defaultOpen: data.defaultOpen ?? false,
+      status: data.status ?? (message.live ? 'streaming' : 'complete'),
+    })
+    const units = [...cached.units]
+    units[index] = next
     this.#incrementalPatches += 1
     return this.#remember(message, units)
   }
@@ -126,15 +158,7 @@ export class ProjectionEngine {
 
   #remember(message: LogicalMessage, units: readonly RenderUnit[]): readonly RenderUnit[] {
     const ownedUnits = Object.freeze([...units])
-    const markdownBlocks = message.blocks?.filter(entry => entry.type === 'markdown') ?? []
-    const singleMarkdown = markdownBlocks.length === 1 && ownedUnits.length > 0 && ownedUnits.every(unit => unit.payload.blockId === markdownBlocks[0]!.id)
-    const markdownBlock = singleMarkdown ? markdownBlocks[0] as ContentBlock<'markdown'> : null
-    const entry: ProjectionCacheEntry = {
-      revision: message.revision ?? 0,
-      units: ownedUnits,
-      markdownBlockId: markdownBlock?.id ?? null,
-      markdownSource: markdownBlock?.data.markdown ?? null,
-    }
+    const entry: ProjectionCacheEntry = { revision: message.revision ?? 0, units: ownedUnits }
     this.#touch(message.id, entry)
     while (this.#cache.size > this.maxMessages) {
       const oldest = this.#cache.keys().next().value as string | undefined
@@ -149,4 +173,9 @@ export class ProjectionEngine {
     this.#cache.delete(id)
     this.#cache.set(id, entry)
   }
+}
+
+function isContiguous(indexes: readonly number[]): boolean {
+  for (let i = 1; i < indexes.length; i += 1) if (indexes[i] !== indexes[i - 1]! + 1) return false
+  return true
 }
