@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ConversationSessionKernel } from '../src/conversation/session-kernel'
+import { ConversationSessionKernel } from '../src/engine/conversation/session-kernel'
 import { SyntheticHistoryAdapter } from '../src/demo/history-adapter'
 import { SyntheticStreamController } from '../src/demo/stream-controller'
 
