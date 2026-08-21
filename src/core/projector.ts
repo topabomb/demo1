@@ -1,7 +1,8 @@
+/** @deprecated Compatibility path. Import presentation APIs from `presentation/`. */
 export {
   ContentProjectorRegistry,
+  createDefaultContentProjectors,
   defaultContentProjectors,
-  legacyBlocksForMessage,
   projectMessage,
   projectMessages,
   type ContentProjectionContext,
