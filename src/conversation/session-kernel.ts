@@ -1,11 +1,25 @@
 import { hash32 } from '../core/prng'
 import type { LogicalMessage } from '../core/types'
-import type { ConversationDescriptor, ConversationHistoryAdapter, PendingInteraction, SessionStatus } from './contracts'
+import type {
+  ConversationDescriptor,
+  ConversationHistoryAdapter,
+  LlmFailure,
+  PendingInteraction,
+  SessionContextStats,
+  SessionStatus,
+  TokenUsage,
+  TurnEndReasonKind,
+} from './contracts'
+import { defaultTurnReason, normalizeTokenUsage } from './session-semantics'
 import { BatchedNotifier, type Unsubscribe } from './notifier'
 
-export type SessionKernelEventKind = 'content' | 'append' | 'status' | 'queue' | 'interaction' | 'foreground'
+export type SessionKernelEventKind = 'content' | 'append' | 'status' | 'queue' | 'interaction' | 'foreground' | 'usage'
 export interface SessionKernelEvent { kind: SessionKernelEventKind; messageIndex?: number }
 
+/**
+ * Lightweight durable session state. It owns canonical appended turns, execution
+ * semantics and whole-session projections, but never owns Vue, DOM or a virtualizer.
+ */
 export class ConversationSessionKernel {
   readonly id: string
   readonly title: string
@@ -23,6 +37,16 @@ export class ConversationSessionKernel {
   #notifier = new BatchedNotifier()
   #lastEvent: SessionKernelEvent = { kind: 'status' }
   #currentAssistantIndex: number | null = null
+  #lastTurnReason: TurnEndReasonKind | null
+  #lastFailure: LlmFailure | null
+  #usage: TokenUsage
+  #context: SessionContextStats
+  #turnCount: number
+  #stepCount: number
+  #runStartedAt = 0
+  #firstOutputAt = 0
+  #lastTurnDurationMs = 0
+  #lastTtftMs = 0
 
   streamRate = 20
   streamIngressTicks = 0
@@ -36,9 +60,19 @@ export class ConversationSessionKernel {
     this.seedOffset = seedOffset
     this.#status = descriptor.status
     this.#pendingInteraction = descriptor.pendingInteraction ?? null
+    this.#lastTurnReason = descriptor.lastTurnReason ?? defaultTurnReason(descriptor.status)
+    this.#lastFailure = descriptor.lastFailure ?? null
+    this.#usage = normalizeTokenUsage(descriptor.usage)
+    this.#context = descriptor.context
+      ? { ...descriptor.context }
+      : { projectedTokens: Math.min(96_000, Math.max(0, Math.round(backend.count / 20))), contextWindow: 128_000 }
+    this.#turnCount = Math.max(0, Math.floor(descriptor.turnCount ?? Math.max(1, Math.round(backend.count / 12))))
+    this.#stepCount = Math.max(this.#turnCount, Math.floor(descriptor.stepCount ?? this.#turnCount * 2))
 
     if (descriptor.status === 'working' && backend.count > 0) {
       this.#currentAssistantIndex = backend.count - 1
+      this.#lastTurnReason = null
+      this.#runStartedAt = now()
       const tail = backend.loadRange(backend.count - 1, 1)[0]
       if (tail) {
         this.#overrides.set(tail.index, {
@@ -60,6 +94,14 @@ export class ConversationSessionKernel {
   get count(): number { return this.backend.count + this.#appended.length }
   get unread(): boolean { return this.#unread }
   get foreground(): boolean { return this.#foreground }
+  get lastTurnReason(): TurnEndReasonKind | null { return this.#lastTurnReason }
+  get lastFailure(): LlmFailure | null { return this.#lastFailure ? { ...this.#lastFailure } : null }
+  get usage(): TokenUsage { return { ...this.#usage } }
+  get context(): SessionContextStats { return { ...this.#context } }
+  get turnCount(): number { return this.#turnCount }
+  get stepCount(): number { return this.#stepCount }
+  get lastTurnDurationMs(): number { return this.#lastTurnDurationMs }
+  get lastTtftMs(): number { return this.#lastTtftMs }
 
   get summary(): ConversationDescriptor {
     return {
@@ -71,6 +113,12 @@ export class ConversationSessionKernel {
       unread: this.#unread,
       queuedPrompts: this.queuedPrompts,
       pendingInteraction: this.#pendingInteraction,
+      lastTurnReason: this.#lastTurnReason,
+      lastFailure: this.#lastFailure,
+      usage: this.usage,
+      context: this.context,
+      turnCount: this.#turnCount,
+      stepCount: this.#stepCount,
     }
   }
 
@@ -138,6 +186,13 @@ export class ConversationSessionKernel {
     })
     this.#currentAssistantIndex = assistantIndex
     this.#status = 'working'
+    this.#lastTurnReason = null
+    this.#lastFailure = null
+    this.#turnCount += 1
+    this.#stepCount += 1
+    this.#accountPrompt(text)
+    this.#runStartedAt = now()
+    this.#firstOutputAt = 0
     this.streamIngressTicks = 0
     this.streamRenderTicks = 0
     this.#touchUnread()
@@ -172,6 +227,15 @@ export class ConversationSessionKernel {
     }
     if (index < this.backend.count) this.#overrides.set(index, next)
     else this.#appended[index - this.backend.count] = next
+
+    const output = estimateTokens(delta)
+    this.#usage.outputTokens += output
+    if (this.streamIngressTicks % 5 === 0) this.#usage.reasoningTokens += Math.max(1, Math.round(output * 0.18))
+    this.#context.projectedTokens = Math.min(this.#context.contextWindow, this.#context.projectedTokens + output)
+    if (this.#firstOutputAt === 0) {
+      this.#firstOutputAt = now()
+      this.#lastTtftMs = Math.max(0, this.#firstOutputAt - this.#runStartedAt)
+    }
     this.streamRenderTicks += 1
     this.#touchUnread()
     this.#emit({ kind: 'content', messageIndex: index })
@@ -190,9 +254,7 @@ export class ConversationSessionKernel {
       if (index < this.backend.count) this.#overrides.set(index, next)
       else this.#appended[index - this.backend.count] = next
     }
-    this.#currentAssistantIndex = null
-    this.#status = 'idle'
-    this.#touchUnread()
+    this.#finishRun('completed', null)
     this.#emit({ kind: 'status', messageIndex: index ?? undefined })
   }
 
@@ -209,10 +271,21 @@ export class ConversationSessionKernel {
       if (index < this.backend.count) this.#overrides.set(index, next)
       else this.#appended[index - this.backend.count] = next
     }
-    this.#currentAssistantIndex = null
     this.#status = 'interrupted'
     this.#queuedPrompts = []
-    this.#touchUnread()
+    this.#finishRun('aborted', null, false)
+    this.#emit({ kind: 'status', messageIndex: index ?? undefined })
+  }
+
+  failCurrent(failure: LlmFailure): void {
+    const index = this.#currentAssistantIndex
+    if (index !== null) {
+      const current = this.getMessage(index)
+      const next = { ...current, revision: (current.revision ?? 0) + 1, live: false }
+      if (index < this.backend.count) this.#overrides.set(index, next)
+      else this.#appended[index - this.backend.count] = next
+    }
+    this.#finishRun('error', failure)
     this.#emit({ kind: 'status', messageIndex: index ?? undefined })
   }
 
@@ -220,6 +293,8 @@ export class ConversationSessionKernel {
     if (!this.#pendingInteraction) return
     this.#pendingInteraction = null
     this.#status = approved ? 'idle' : 'interrupted'
+    this.#lastTurnReason = approved ? 'completed' : 'aborted'
+    this.#lastFailure = null
     this.#touchUnread()
     this.#emit({ kind: 'interaction' })
   }
@@ -231,6 +306,28 @@ export class ConversationSessionKernel {
 
   incrementIngress(): void { this.streamIngressTicks += 1 }
 
+  #accountPrompt(text: string): void {
+    const promptTokens = Math.max(1, estimateTokens(text))
+    const reusable = Math.min(this.#context.projectedTokens, Math.round(this.#context.projectedTokens * 0.82))
+    const uncached = Math.max(promptTokens + 64, Math.round(this.#context.projectedTokens * 0.03))
+    const cacheWrite = Math.max(0, Math.round(uncached * 0.12))
+    this.#usage.inputTokens += uncached
+    this.#usage.cacheReadTokens += reusable
+    this.#usage.cacheWriteTokens += cacheWrite
+    this.#context.projectedTokens = Math.min(this.#context.contextWindow, this.#context.projectedTokens + promptTokens + 32)
+  }
+
+  #finishRun(reason: TurnEndReasonKind, failure: LlmFailure | null, setIdle = true): void {
+    if (setIdle) this.#status = 'idle'
+    this.#lastTurnReason = reason
+    this.#lastFailure = failure ? { ...failure } : null
+    this.#currentAssistantIndex = null
+    if (this.#runStartedAt > 0) this.#lastTurnDurationMs = Math.max(0, now() - this.#runStartedAt)
+    this.#runStartedAt = 0
+    this.#firstOutputAt = 0
+    this.#touchUnread()
+  }
+
   #touchUnread(): void {
     if (!this.#foreground) this.#unread = true
   }
@@ -240,4 +337,12 @@ export class ConversationSessionKernel {
     if (markUnread) this.#touchUnread()
     this.#notifier.markDirty()
   }
+}
+
+function estimateTokens(text: string): number {
+  return Math.max(1, Math.ceil(text.length / 4))
+}
+
+function now(): number {
+  return typeof performance !== 'undefined' ? performance.now() : Date.now()
 }
