@@ -22,15 +22,16 @@ describe('DemoWorkspaceRuntime lifecycle split', () => {
     const workspace = new DemoWorkspaceRuntime()
     try {
       workspace.activate('dsh-transport')
-      workspace.executionFor('dsh-transport').submit('keep running offscreen')
-      const before = workspace.kernelFor('dsh-transport').streamRenderTicks
+      const execution = workspace.executionFor('dsh-transport')
+      execution.submit('keep running offscreen')
+      const before = execution.publishTicks
       workspace.activate('event-normalization')
       workspace.activate('workspace-files')
       workspace.activate('dynamic-heights')
       expect(workspace.hasHotRuntime('dsh-transport')).toBe(false)
       expect(workspace.kernelFor('dsh-transport').status).toBe('working')
       await new Promise(resolve => setTimeout(resolve, 80))
-      expect(workspace.kernelFor('dsh-transport').streamRenderTicks).toBeGreaterThan(before)
+      expect(execution.publishTicks).toBeGreaterThan(before)
     } finally {
       workspace.dispose()
     }

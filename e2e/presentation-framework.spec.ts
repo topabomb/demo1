@@ -148,10 +148,9 @@ test('live Markdown uses incremental projection rather than full-project work pe
   await page.locator('.control-group select').selectOption('60')
   await page.getByTestId('stream-start').click()
   await expect.poll(async () => numeric(await page.getByTestId('stream-ticks').textContent()), { timeout: 15_000 }).toBeGreaterThan(ticksBefore + 20)
-  const incrementalAfter = numeric(await page.getByTestId('projection-incremental').textContent())
+  await expect.poll(async () => numeric(await page.getByTestId('projection-incremental').textContent()), { timeout: 15_000 }).toBeGreaterThan(incrementalBefore + 15)
   const fullAfter = numeric(await page.getByTestId('projection-full-projects').textContent())
 
-  expect(incrementalAfter).toBeGreaterThan(incrementalBefore + 15)
   expect(fullAfter - fullBefore).toBeLessThan(4)
   expect(numeric(await page.getByTestId('projection-cache').textContent())).toBeLessThanOrEqual(4096)
 })

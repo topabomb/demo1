@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { ConversationSessionRuntime, SHIFT_MESSAGES, WINDOW_MESSAGES } from '../src/runtime/session-runtime'
-import { ConversationSessionKernel } from '../src/conversation/session-kernel'
+import { ConversationSessionRuntime, SHIFT_MESSAGES, WINDOW_MESSAGES } from '../src/engine/runtime/session-runtime'
+import { ConversationSessionKernel } from '../src/engine/conversation/session-kernel'
 import { SyntheticHistoryAdapter } from '../src/demo/history-adapter'
 
 function runtimeAt(position: number, status: 'idle' | 'working' = 'idle') {

@@ -1,4 +1,4 @@
-import { block, type AppendCanonicalMessage, type ContentBlock } from '../model/conversation'
+import { block, type AppendCanonicalMessage, type ContentBlock } from '../engine/model/conversation'
 
 export interface DemoScenarioMessage extends AppendCanonicalMessage {
   /** Demo/test locator only; never enters the canonical message model. */

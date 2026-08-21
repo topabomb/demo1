@@ -1,9 +1,14 @@
 <script setup lang="ts">
+const ownership = [
+  ['src/engine/**', 'Reusable Engine', 'Canonical model, session semantics, bounded projection/runtime, semantic viewport, Vue/Virtua adapter and renderers. Engine never imports Demo.'],
+  ['src/demo/**', 'Executable proof', 'Synthetic million-message history, playback/telemetry, scenarios, seeded workspace, diagnostics and architecture page. Demo consumes Engine.'],
+]
+
 const stateClasses = [
   ['Durable domain state', 'Canonical history · execution · queue/blockers · turn outcome · usage/context', 'Must remain correct with zero mounted viewports. Provider persistence can replace the demo memory implementation.'],
   ['Session interaction memory', 'semantic reader/anchor/follow checkpoint · draft · user-touched disclosure preferences', 'Survives Recent switching; small and session-scoped. It is not canonical conversation history.'],
   ['Rebuildable presentation state', '~2K hot logical window · ProjectionEngine LRU · keyed RenderUnits · page estimates', 'May be evicted at any time and reconstructed from canonical state. Never becomes the source of truth.'],
-  ['Ephemeral physical state', 'Virtua measurements · mounted DOM · ResizeObserver samples · Markdown/Shiki render caches', 'Exists only to paint efficiently. Bounded, replaceable and safe to discard.'],
+  ['Ephemeral physical state', 'ViewportNavigationController · Virtua measurements · mounted DOM · renderer caches', 'Exists only to navigate/paint efficiently. Bounded, replaceable and safe to discard.'],
 ]
 
 const contracts = [
@@ -12,14 +17,14 @@ const contracts = [
   ['03', 'Session + Workspace Kernel', 'session lifetime', 'Runs, resumable Turns, queue, blockers, unread, outcomes, usage and session routing.', 'Execution survives hot-runtime and viewport eviction.'],
   ['04', 'Projection Runtime', 'rebuildable hot lifetime', 'Projector Registry + bounded ProjectionEngine cache + keyed hot RenderUnit store.', 'Projection cost scales with incoming/changed hot content, never total history.'],
   ['05', 'Semantic Viewport Policy', 'interaction lifetime', 'Reader, exact Latest count, semantic anchor, follow intent and restoration policy.', 'Requested navigation and committed reader are different states.'],
-  ['06', 'Physical List Adapter', 'mounted lifetime', 'Virtua/Vue handle, ResizeObserver, DOM row samples and measurement reconciliation.', 'Replaceable adapter; layout events cannot redefine semantics.'],
-  ['07', 'Renderer + Product Adapter', 'replaceable presentation', 'Renderer registry, Markdown/reasoning/tool/media components, containment, responsive layout and theme.', 'A product redesign must not require changing session or viewport algorithms.'],
+  ['06', 'Physical List Adapter', 'mounted lifetime', 'ViewportNavigationController + Virtua/Vue handle + ResizeObserver + DOM measurement reconciliation.', 'Replaceable adapter; layout events cannot redefine semantics.'],
+  ['07', 'Renderer + Product Adapter', 'replaceable presentation', 'Renderer registry, Markdown/reasoning/tool/media components, containment, responsive layout and theme.', 'A product redesign must not require changing session or semantic viewport algorithms.'],
 ]
 
 const harnessLessons = [
   ['Turn / Step coordinates', 'A Turn and a model request are not the same lifetime.', 'Keep turnId required, stepId producer-owned/optional, and expose both on renderer-ready nodes.'],
   ['Stable business correlation', 'Separate records must not be attached to “the latest unfinished row”.', 'Tool call/result share a producer-owned callId; artifacts link through explicit provenance.'],
-  ['Apply semantics, coalesce paint', 'Event order and UI publication cadence are separate concerns.', 'Keep canonical mutations ordered; coalesce streaming/render publication without deriving business state from render count.'],
+  ['Apply semantics, coalesce paint', 'Event order and UI publication cadence are separate concerns.', 'SessionKernel emits every semantic mutation in order; summary/render publication may coalesce independently.'],
   ['Scenario-triggered abstraction', 'A generic node/plugin engine is not free architecture.', 'Add a cross-event assembler only when review/job/deliverable state genuinely spans durable records.'],
 ]
 
@@ -31,7 +36,7 @@ const hotPaths = [
   ['History shift', 'O(incoming 512 slice)', 'Retained RenderUnit objects survive; only the incoming neighboring slice is projected.'],
   ['Far jump', 'O(hot window)', 'Rebase around target; requested jump does not become reader state until the physical target is stably committed.'],
   ['Session switch', 'O(1) hot / O(window) cold', 'SessionKernel keeps running; only disposable presentation state is reused or rehydrated.'],
-  ['Responsive reflow', 'O(mounted measurements)', 'Freeze semantic anchor, remeasure visible physical rows, reconcile after the latest navigation transaction commits.'],
+  ['Responsive reflow', 'O(mounted measurements)', 'Navigation controller freezes the semantic anchor, remeasures physical rows and restores the coordinate after the latest transaction commits.'],
   ['Latest count', 'O(1)', 'logicalCount - 1 - committed reader; never inferred from scrollbar remainder.'],
 ]
 
@@ -84,6 +89,12 @@ const failures = [
       <div class="hero-proof"><span>Normal hot path</span><strong>O(changed + hot + visible)</strong><p>Total history and cold-session count must not enter streaming, rendering or scrolling complexity.</p><div><b>Provider-neutral model</b><b>Stable business identity</b><b>Semantic viewport</b><b>Replaceable UI</b></div></div>
     </section>
 
+    <section class="architecture-section">
+      <header class="section-heading"><span>00 · Physical ownership</span><h2>Engine and Demo are separate source products, not comments inside one tree</h2><p>The repository can be read and extracted by ownership: reusable implementation points inward; the executable proof depends on it from outside.</p></header>
+      <div class="invariant-grid state-grid"><article v-for="entry in ownership" :key="entry[0]"><strong>{{ entry[0] }}</strong><span>{{ entry[1] }}</span><p>{{ entry[2] }}</p></article></div>
+      <div class="workspace-band"><span>Enforced dependency</span><strong>Demo → Engine · never Engine → Demo</strong><p>Architecture tests reject legacy parallel roots and prevent synthetic playback telemetry from leaking back into Engine contracts.</p></div>
+    </section>
+
     <section id="state" class="architecture-section">
       <header class="section-heading"><span>01 · State taxonomy</span><h2>Four state lifetimes answer one question: what is safe to throw away?</h2><p>A store boundary is correct only when its lifetime matches the truth it owns.</p></header>
       <div class="invariant-grid state-grid">
@@ -132,7 +143,7 @@ Semantic Viewport
 requested navigation → committed reader
         │
         ▼
-Physical List Port
+ViewportNavigationController + Physical List
         │
         ▼
 Renderer Registry</pre></div>

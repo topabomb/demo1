@@ -1,5 +1,14 @@
 import { BatchedNotifier, type Unsubscribe } from '../core/notifier'
-import { block, type AppendCanonicalMessage, type ContentBlock, type LogicalMessage } from '../model/conversation'
+import { block, type AppendCanonicalMessage, type LogicalMessage } from '../model/conversation'
+import {
+  appendMarkdownContent,
+  appendReasoningContent,
+  cloneBlocks,
+  estimateTokens,
+  markdownText,
+  replaceMarkdownContent,
+  settleReasoning,
+} from '../model/message-mutations'
 import type {
   ConversationDescriptor,
   ConversationHistoryAdapter,
@@ -22,11 +31,7 @@ export interface SessionKernelEvent {
   contentPatch?: SessionKernelContentPatch
 }
 
-/**
- * Lightweight session truth. It owns canonical appended history, execution semantics,
- * blockers/queue and provider-neutral usage. It never owns Vue, DOM, RenderUnits,
- * virtualizer measurements or demo source generation.
- */
+/** Canonical session truth. Provider playback/debug telemetry belongs outside this kernel. */
 export class ConversationSessionKernel {
   readonly id: string
   readonly title: string
@@ -55,11 +60,6 @@ export class ConversationSessionKernel {
   #lastTurnDurationMs = 0
   #lastTtftMs = 0
 
-  /** Reference execution telemetry; real execution adapters may drive the same normalized mutations. */
-  streamRate = 20
-  streamIngressTicks = 0
-  streamRenderTicks = 0
-
   constructor(descriptor: ConversationDescriptor, backend: ConversationHistoryAdapter) {
     this.id = descriptor.id
     this.title = descriptor.title
@@ -83,14 +83,11 @@ export class ConversationSessionKernel {
     }
   }
 
-  /** Coalesced session-summary notification for workspace/UI consumers. */
   subscribe(listener: () => void): Unsubscribe { return this.#notifier.subscribe(listener) }
-  /** Ordered semantic mutation feed for hot incremental consumers. No event is collapsed. */
   subscribeEvents(listener: (event: SessionKernelEvent) => void): Unsubscribe {
     this.#eventListeners.add(listener)
     return () => this.#eventListeners.delete(listener)
   }
-  /** Compatibility/debug snapshot only; incremental code should subscribeEvents(). */
   get lastEvent(): SessionKernelEvent { return this.#lastEvent }
   get status(): SessionStatus { return this.#status }
   get pendingInteraction(): PendingInteraction | null { return this.#pendingInteraction }
@@ -156,7 +153,6 @@ export class ConversationSessionKernel {
     return out
   }
 
-  /** Canonical ingestion seam. Demo fixtures and real adapters use the same path. */
   appendCanonicalMessages(entries: readonly AppendCanonicalMessage[]): readonly number[] {
     if (entries.length === 0) return []
     const indexes: number[] = []
@@ -180,27 +176,17 @@ export class ConversationSessionKernel {
     }
     this.#turnCount += turns.size
     this.#stepCount += steps.size > 0 ? steps.size : entries.length
-    this.#touchUnread()
     this.#emit({ kind: 'append', messageIndex: indexes[indexes.length - 1] })
     return indexes
   }
 
-  /** Convenience normalized mutation used by the reference execution adapter. */
   beginTurn(prompt: string): number | null {
     const text = prompt.trim()
     if (!text || this.#pendingInteraction) return null
     const userIndex = this.count
     const turnId = `${this.id}:runtime-turn-${userIndex}`
     const stepId = `${turnId}:step-0`
-    this.#appended.push({
-      id: `${this.id}:m-${userIndex}`,
-      index: userIndex,
-      turnId,
-      stepId,
-      role: 'user',
-      blocks: [block('prompt', 'markdown', { markdown: text })],
-      revision: 0,
-    })
+    this.#appended.push({ id: `${this.id}:m-${userIndex}`, index: userIndex, turnId, stepId, role: 'user', blocks: [block('prompt', 'markdown', { markdown: text })], revision: 0 })
     const assistantIndex = this.count
     this.#appended.push({
       id: `${this.id}:m-${assistantIndex}`,
@@ -224,9 +210,6 @@ export class ConversationSessionKernel {
     this.#accountPrompt(text)
     this.#runStartedAt = now()
     this.#firstOutputAt = 0
-    this.streamIngressTicks = 0
-    this.streamRenderTicks = 0
-    this.#touchUnread()
     this.#emit({ kind: 'append', messageIndex: assistantIndex })
     return assistantIndex
   }
@@ -235,7 +218,6 @@ export class ConversationSessionKernel {
     const text = prompt.trim()
     if (!text || this.#pendingInteraction) return false
     this.#queuedPrompts.push(text)
-    this.#touchUnread()
     this.#emit({ kind: 'queue' })
     return true
   }
@@ -249,33 +231,25 @@ export class ConversationSessionKernel {
   appendCurrentReasoningDelta(delta: string): void {
     const index = this.#currentAssistantIndex
     if (index === null || !delta) return
-    const current = this.getMessage(index)
-    const patched = appendReasoningContent(current, delta, Math.max(0, now() - this.#runStartedAt))
+    const patched = appendReasoningContent(this.getMessage(index), delta, Math.max(0, now() - this.#runStartedAt))
     if (!patched) return
     this.#writeMessage(index, patched.message)
-
     const reasoning = estimateTokens(delta)
     this.#usage.reasoningTokens += reasoning
     this.#context.projectedTokens = Math.min(this.#context.contextWindow, this.#context.projectedTokens + reasoning)
     this.#recordFirstOutput()
-    this.streamRenderTicks += 1
-    this.#touchUnread()
     this.#emit({ kind: 'content', messageIndex: index, contentPatch: { kind: 'append-reasoning', blockId: patched.blockId, delta } })
   }
 
   appendAssistantDelta(delta: string): void {
     const index = this.#currentAssistantIndex
     if (index === null || !delta) return
-    const current = this.getMessage(index)
-    const patched = appendMarkdownContent(current, delta)
+    const patched = appendMarkdownContent(this.getMessage(index), delta)
     this.#writeMessage(index, patched.message)
-
     const output = estimateTokens(delta)
     this.#usage.outputTokens += output
     this.#context.projectedTokens = Math.min(this.#context.contextWindow, this.#context.projectedTokens + output)
     this.#recordFirstOutput()
-    this.streamRenderTicks += 1
-    this.#touchUnread()
     this.#emit({ kind: 'content', messageIndex: index, contentPatch: { kind: 'append-markdown', blockId: patched.blockId, delta } })
   }
 
@@ -320,12 +294,8 @@ export class ConversationSessionKernel {
     this.#status = approved ? 'idle' : 'interrupted'
     this.#lastTurnReason = approved ? 'completed' : 'aborted'
     this.#lastFailure = null
-    this.#touchUnread()
     this.#emit({ kind: 'interaction' })
   }
-
-  setStreamRate(rate: number): void { this.streamRate = Math.max(1, Math.floor(rate)); this.#emit({ kind: 'status' }, false) }
-  incrementIngress(): void { this.streamIngressTicks += 1 }
 
   #writeMessage(index: number, message: LogicalMessage): void {
     if (index < this.backend.count) this.#overrides.set(index, message)
@@ -357,7 +327,6 @@ export class ConversationSessionKernel {
     if (this.#runStartedAt > 0) this.#lastTurnDurationMs = Math.max(0, now() - this.#runStartedAt)
     this.#runStartedAt = 0
     this.#firstOutputAt = 0
-    this.#touchUnread()
   }
 
   #touchUnread(): void { if (!this.#foreground) this.#unread = true }
@@ -369,61 +338,4 @@ export class ConversationSessionKernel {
   }
 }
 
-function cloneBlocks(blocks: readonly ContentBlock[]): ContentBlock[] {
-  return blocks.map(contentBlock => ({ ...contentBlock, data: { ...contentBlock.data } })) as ContentBlock[]
-}
-
-function appendReasoningContent(message: LogicalMessage, delta: string, durationMs: number): { message: LogicalMessage; blockId: string } | null {
-  const blocks = cloneBlocks(message.blocks)
-  const targetIndex = blocks.findIndex(entry => entry.type === 'reasoning')
-  if (targetIndex < 0) return null
-  const current = blocks[targetIndex] as ContentBlock<'reasoning'>
-  const text = `${current.data.text}${delta}`
-  blocks[targetIndex] = block(current.id, 'reasoning', { ...current.data, text, tokenCount: estimateTokens(text), durationMs, status: 'streaming' }, (current.revision ?? 0) + 1)
-  return { blockId: current.id, message: { ...message, blocks, revision: (message.revision ?? 0) + 1, live: true } }
-}
-
-function appendMarkdownContent(message: LogicalMessage, delta: string): { message: LogicalMessage; blockId: string } {
-  const blocks = cloneBlocks(message.blocks)
-  let targetIndex = -1
-  for (let index = blocks.length - 1; index >= 0; index -= 1) if (blocks[index]?.type === 'markdown') { targetIndex = index; break }
-  if (targetIndex < 0) {
-    const created = block(message.role === 'user' ? 'prompt' : 'answer', 'markdown', { markdown: delta }, 1)
-    return { blockId: created.id, message: { ...message, blocks: [...blocks, created], revision: (message.revision ?? 0) + 1, live: true } }
-  }
-
-  const current = blocks[targetIndex] as ContentBlock<'markdown'>
-  blocks[targetIndex] = block(current.id, 'markdown', { ...current.data, markdown: `${current.data.markdown}${delta}` }, (current.revision ?? 0) + 1)
-  return { blockId: current.id, message: { ...message, blocks, revision: (message.revision ?? 0) + 1, live: true } }
-}
-
-function replaceMarkdownContent(message: LogicalMessage, markdown: string, live: boolean): LogicalMessage {
-  const blocks = cloneBlocks(message.blocks)
-  let targetIndex = -1
-  for (let index = blocks.length - 1; index >= 0; index -= 1) if (blocks[index]?.type === 'markdown') { targetIndex = index; break }
-  const id = targetIndex >= 0 ? blocks[targetIndex]!.id : (message.role === 'user' ? 'prompt' : 'answer')
-  const previousRevision = targetIndex >= 0 ? blocks[targetIndex]!.revision ?? 0 : 0
-  const nextBlock = block(id, 'markdown', { markdown }, previousRevision + 1)
-  if (targetIndex >= 0) blocks[targetIndex] = nextBlock
-  else blocks.push(nextBlock)
-  return { ...message, blocks, revision: (message.revision ?? 0) + 1, live }
-}
-
-function settleReasoning(message: LogicalMessage, status: 'complete' | 'interrupted'): LogicalMessage {
-  if (!message.blocks.some(entry => entry.type === 'reasoning')) return message
-  const blocks = cloneBlocks(message.blocks).map(entry => entry.type === 'reasoning'
-    ? block(entry.id, 'reasoning', { ...entry.data, status }, (entry.revision ?? 0) + 1)
-    : entry)
-  return { ...message, blocks, revision: (message.revision ?? 0) + 1 }
-}
-
-function markdownText(message: LogicalMessage): string {
-  for (let index = message.blocks.length - 1; index >= 0; index -= 1) {
-    const contentBlock = message.blocks[index]
-    if (contentBlock?.type === 'markdown') return contentBlock.data.markdown
-  }
-  return ''
-}
-
-function estimateTokens(text: string): number { return Math.max(1, Math.ceil(text.length / 4)) }
 function now(): number { return typeof performance !== 'undefined' ? performance.now() : Date.now() }

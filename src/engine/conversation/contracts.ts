@@ -68,20 +68,11 @@ export interface ConversationHistoryAdapter extends ConversationBackend {}
 
 export type SubmitDisposition = 'started' | 'queued' | 'blocked'
 
-/** Execution port. Provider/runtime-specific drivers implement this interface outside the session kernel. */
+/** Runtime-neutral command port. Playback/debug controls belong to demo/provider adapters. */
 export interface ConversationExecutionController {
   readonly running: boolean
-  start(reset?: boolean): void
-  stop(clear?: boolean): void
   abort(): void
   submit(prompt: string): SubmitDisposition
   resolveInteraction(approved: boolean): void
-  setRate(rate: number): void
   dispose?(): void
-}
-
-export interface StreamDelta {
-  sessionId: string
-  nodeId: string
-  textDelta: string
 }

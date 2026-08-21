@@ -1,6 +1,6 @@
 import { onBeforeUnmount, shallowRef } from 'vue'
-import { DemoWorkspaceRuntime } from '../demo/workspace-runtime'
-import type { ConversationSessionRuntime, SessionUiSnapshot } from '../runtime/session-runtime'
+import { DemoWorkspaceRuntime } from '../workspace-runtime'
+import type { ConversationSessionRuntime, SessionUiSnapshot } from '../../engine/runtime/session-runtime'
 
 /** Demo-only Vue bridge. Reusable engine consumers compose their own workspace/session owner. */
 export function useWorkspaceRuntime() {

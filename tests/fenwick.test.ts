@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { FenwickTree } from '../src/core/fenwick'
-import { PageHeightIndex } from '../src/core/page-index'
+import { FenwickTree } from '../src/engine/core/fenwick'
+import { PageHeightIndex } from '../src/engine/core/page-index'
 
 describe('FenwickTree', () => {
   it('updates and resolves prefix positions in logarithmic index space', () => {

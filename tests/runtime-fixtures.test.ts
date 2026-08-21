@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { ConversationSessionKernel } from '../src/conversation/session-kernel'
+import { ConversationSessionKernel } from '../src/engine/conversation/session-kernel'
 import { SyntheticHistoryAdapter } from '../src/demo/history-adapter'
 import { createMarkdownGalleryTurn, createMixedDemoTurns, MARKDOWN_COMPATIBILITY_FIXTURES } from '../src/demo/scenarios'
-import { projectMessage } from '../src/presentation/projector-registry'
+import { projectMessage } from '../src/engine/presentation/projector-registry'
 
 describe('runtime heterogeneous fixture path', () => {
   it('appends canonical ContentBlock messages and re-projects them through the normal pipeline', () => {

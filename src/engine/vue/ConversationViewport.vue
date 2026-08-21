@@ -12,19 +12,12 @@ import {
 } from '../conversation/session-semantics'
 import type { ConversationSessionRuntime, SessionUiSnapshot, ShiftPlan } from '../runtime/session-runtime'
 import type { SessionViewMemory } from '../viewport/state'
-import {
-  VIEWPORT_POLICY,
-  isMessageCommittedVisible,
-  remainingToBottom as remainingToBottomForPort,
-  selectCommittedAnchor,
-  type CommittedViewportAnchor,
-  type ViewportRowSample,
-} from '../viewport/contracts'
+import { VIEWPORT_POLICY, type CommittedViewportAnchor } from '../viewport/contracts'
 import ConversationNodeSeat from './ConversationNodeSeat.vue'
+import { ViewportNavigationController } from './viewport-navigation-controller'
 
 const props = defineProps<{ runtime: ConversationSessionRuntime; stream: ConversationExecutionController; uiState: SessionUiSnapshot; diagnostics?: boolean }>()
 
-// Virtua adapter tuning: physical renderer hints, never semantic state.
 const VIRTUAL_BUFFER_PX = 900
 const VIRTUAL_ITEM_HINT_PX = 180
 
@@ -36,32 +29,20 @@ const order = shallowRef<string[]>([...props.runtime.projection.order])
 const composerText = ref(props.runtime.draftText)
 const shifting = ref(false)
 const uiState = computed(() => props.uiState)
-let userScrollIntentUntil = 0
-let userScrollDirection: -1 | 0 | 1 = 0
-let lastScrollOffset = 0
 let metricsFrame = 0
 let viewportResizeFrame = 0
 let viewportResizeRunning = false
 let viewportResizeQueued = false
 let viewportObserver: ResizeObserver | null = null
 let unsubscribeOrder: (() => void) | null = null
-let navigationRevision = 0
-let navigationRunning = false
-
 let pendingComposerAnchor: CommittedViewportAnchor | null = null
 let pendingComposerPinned = false
-/**
- * Last user/programmatic navigation coordinate that was semantically committed.
- * Layout-induced Virtua scroll events must never overwrite it before resize
- * reconciliation, otherwise the adapter preserves the already-drifted position.
- */
-let lastCommittedAnchor: CommittedViewportAnchor | null = null
 
 const messagesAfter = computed(() => uiState.value.messagesAfter)
 const showLatest = computed(() => props.runtime.logicalCount > 0 && (!uiState.value.atVisualBottom || messagesAfter.value > 0))
 const followLabel = computed(() => uiState.value.followTail ? 'following tail' : 'tail paused')
 const sessionIndicator = computed(() => {
-  void uiState.value.streamRenderTicks
+  void uiState.value.eventRevision
   return deriveSessionIndicator(props.runtime.kernel.summary)
 })
 const statusLabel = computed(() => sessionIndicatorLabel(sessionIndicator.value))
@@ -73,7 +54,7 @@ const composerPlaceholder = computed(() => uiState.value.pendingInteraction
     ? 'Queue a follow-up while the agent is working…'
     : 'Ask the agent anything…')
 const tokenUsage = computed(() => {
-  void uiState.value.streamRenderTicks
+  void uiState.value.eventRevision
   return props.runtime.kernel.usage
 })
 const billedInput = computed(() => billedInputTokens(tokenUsage.value))
@@ -85,17 +66,6 @@ const interactionSecondary = computed(() => uiState.value.pendingInteraction?.ki
 function frame(): Promise<void> { return new Promise(resolve => requestAnimationFrame(() => resolve())) }
 async function settleFrames(count = 2): Promise<void> { for (let i = 0; i < count; i += 1) { await nextTick(); await frame() } }
 function nodeFor(id: string) { return props.runtime.projection.getNode(id) }
-function beginNavigation(): number {
-  navigationRevision += 1
-  navigationRunning = true
-  return navigationRevision
-}
-function navigationIsCurrent(revision?: number): boolean { return revision === undefined || revision === navigationRevision }
-function finishNavigation(revision: number): void {
-  if (!navigationIsCurrent(revision)) return
-  navigationRunning = false
-  if (viewportResizeQueued) scheduleViewportResizeReconcile()
-}
 function itemProps({ item, index }: { item: string; index: number }) {
   const node = nodeFor(item)
   return {
@@ -107,36 +77,16 @@ function itemProps({ item, index }: { item: string; index: number }) {
     'data-session-id': props.runtime.id,
   }
 }
-function renderedRow(id: string): HTMLElement | null {
-  const stage = scrollStageRef.value
-  if (!stage) return null
-  for (const row of stage.querySelectorAll<HTMLElement>('[data-render-unit]')) if (row.dataset.renderUnit === id) return row
-  return null
-}
-function sampleRows(): ViewportRowSample[] {
-  const stage = scrollStageRef.value
-  if (!stage) return []
-  return [...stage.querySelectorAll<HTMLElement>('[data-virtual-item="true"]')].flatMap(row => {
-    const id = row.dataset.renderUnit ?? ''
-    const node = nodeFor(id)
-    if (!node) return []
-    const rect = row.getBoundingClientRect()
-    return [{ id, messageIndex: node.messageIndex, top: rect.top, bottom: rect.bottom }]
-  })
-}
 
-/** DOM measurement is adapter input; anchor selection itself stays pure policy. */
-function captureCommittedAnchor(): CommittedViewportAnchor | null {
-  const stage = scrollStageRef.value
-  if (!stage) return null
-  const viewport = stage.getBoundingClientRect()
-  return selectCommittedAnchor(sampleRows(), viewport.top, viewport.bottom, props.runtime.currentLogicalPosition)
-}
-function rememberCommittedAnchor(): void {
-  if (props.runtime.atVisualBottom || props.runtime.followTail) { lastCommittedAnchor = null; return }
-  const anchor = captureCommittedAnchor()
-  if (anchor) lastCommittedAnchor = anchor
-}
+const navigation = new ViewportNavigationController({
+  runtime: props.runtime,
+  getOrder: () => order.value,
+  getList: () => listRef.value,
+  getStage: () => scrollStageRef.value,
+  getVirtualEpoch: () => uiState.value.virtualEpoch,
+  settleFrames,
+  onNavigationSettled: () => { if (viewportResizeQueued) scheduleViewportResizeReconcile() },
+})
 
 function refreshMountedRows(): void {
   if (metricsFrame) return
@@ -146,247 +96,88 @@ function refreshMountedRows(): void {
     props.runtime.markStateDirty()
   })
 }
-function remainingToBottom(): number {
-  const element = scrollStageRef.value?.querySelector<HTMLElement>('.conversation-vlist')
-  if (element) return Math.max(0, element.scrollHeight - element.scrollTop - element.clientHeight)
-  const list = listRef.value
-  if (!list) return Number.POSITIVE_INFINITY
-  return remainingToBottomForPort(list)
-}
-function updateReaderFromUserScroll(offset = listRef.value?.scrollOffset ?? 0): void {
-  const list = listRef.value
-  if (!list || order.value.length === 0 || props.runtime.logicalCount <= 0) return
-  const atBottom = remainingToBottom() < VIEWPORT_POLICY.bottomTolerancePx && props.runtime.range.end === props.runtime.logicalCount
-  if (atBottom) {
-    props.runtime.setReaderPosition(props.runtime.logicalCount - 1, true)
-    lastCommittedAnchor = null
-    return
-  }
-  const bottomProbe = Math.max(0, Math.min(list.scrollSize - 1, offset + Math.max(1, list.viewportSize - 2)))
-  const index = Math.max(0, Math.min(order.value.length - 1, list.findItemIndex(bottomProbe)))
-  const node = nodeFor(order.value[index]!)
-  if (node) props.runtime.setReaderPosition(node.messageIndex, false)
-}
 
-async function restoreListAnchor(anchor: CommittedViewportAnchor, revision?: number): Promise<boolean> {
-  if (!navigationIsCurrent(revision)) return false
-  const list = listRef.value
-  if (!list) return false
-  const index = order.value.indexOf(anchor.id)
-  if (index < 0) return false
-  let stableFrames = 0
-  list.scrollToIndex(index, { align: 'start', offset: -anchor.offsetPx })
-  for (let attempt = 0; attempt < VIEWPORT_POLICY.restoreAttempts; attempt += 1) {
-    await settleFrames(1)
-    if (!navigationIsCurrent(revision)) return false
-    const currentList = listRef.value
-    const stage = scrollStageRef.value
-    const row = renderedRow(anchor.id)
-    if (!currentList || !stage || !row) {
-      stableFrames = 0
-      currentList?.scrollToIndex(index, { align: 'start', offset: -anchor.offsetPx })
-      continue
-    }
-    const currentTop = row.getBoundingClientRect().top - stage.getBoundingClientRect().top
-    const delta = currentTop - anchor.viewportTopPx
-    if (Math.abs(delta) < VIEWPORT_POLICY.anchorTolerancePx) {
-      stableFrames += 1
-      if (stableFrames >= VIEWPORT_POLICY.stableLayoutFrames) break
-      continue
-    }
-    stableFrames = 0
-    currentList.scrollBy(delta)
-  }
-  await settleFrames(1)
-  if (!navigationIsCurrent(revision)) return false
-  const stage = scrollStageRef.value
-  const row = renderedRow(anchor.id)
-  if (!stage || !row) return false
-  const drift = Math.abs((row.getBoundingClientRect().top - stage.getBoundingClientRect().top) - anchor.viewportTopPx)
-  if (drift >= VIEWPORT_POLICY.anchorTolerancePx) return false
-  lastCommittedAnchor = anchor
-  return true
-}
-
-async function pinMeasuredEnd(maxFrames = VIEWPORT_POLICY.restoreAttempts, revision?: number): Promise<boolean> {
-  if (props.runtime.logicalCount <= 0 || !navigationIsCurrent(revision)) return false
-  let stableFrames = 0
-  let previousScrollSize = -1
-  let previousViewportSize = -1
-  for (let attempt = 0; attempt < maxFrames; attempt += 1) {
-    await settleFrames(1)
-    if (!navigationIsCurrent(revision)) return false
-    const list = listRef.value
-    if (!list) return false
-    list.scrollTo(list.scrollSize)
-    await settleFrames(1)
-    if (!navigationIsCurrent(revision)) return false
-    const current = listRef.value
-    if (!current) return false
-    const physical = scrollStageRef.value?.querySelector<HTMLElement>('.conversation-vlist')
-    const currentViewportSize = physical?.clientHeight ?? current.viewportSize
-    const geometryStable = Math.abs(current.scrollSize - previousScrollSize) < 0.5
-      && Math.abs(currentViewportSize - previousViewportSize) < 0.5
-    const pinned = remainingToBottom() < 1
-    stableFrames = pinned && geometryStable ? stableFrames + 1 : 0
-    previousScrollSize = current.scrollSize
-    previousViewportSize = currentViewportSize
-    if (stableFrames >= VIEWPORT_POLICY.stableLayoutFrames) break
-  }
-  if (!navigationIsCurrent(revision)) return false
-  lastScrollOffset = listRef.value?.scrollOffset ?? 0
-  const physicallyAtBottom = remainingToBottom() < VIEWPORT_POLICY.bottomTolerancePx
-  if (physicallyAtBottom) {
-    props.runtime.setReaderPosition(props.runtime.logicalCount - 1, true)
-    lastCommittedAnchor = null
-  }
-  return physicallyAtBottom
-}
-function markUserIntent(direction: -1 | 0 | 1): void {
-  userScrollIntentUntil = performance.now() + VIEWPORT_POLICY.userIntentMs
-  if (direction !== 0) userScrollDirection = direction
-}
-function clearUserIntent(): void { userScrollIntentUntil = 0; userScrollDirection = 0 }
 function onUserWheel(event: WheelEvent): void {
   const direction: -1 | 0 | 1 = event.deltaY < 0 ? -1 : event.deltaY > 0 ? 1 : 0
-  markUserIntent(direction)
+  navigation.markUserIntent(direction)
   if (direction < 0 && uiState.value.streamTarget && props.runtime.followTail) {
     event.preventDefault(); props.runtime.setFollowTail(false); const delta = event.deltaY
     requestAnimationFrame(() => { if (!props.runtime.followTail) listRef.value?.scrollBy(delta) })
   }
 }
-function onUserPointerDown(): void { markUserIntent(0) }
+function onUserPointerDown(): void { navigation.markUserIntent(0) }
 function onVirtualScroll(offset: number): void {
-  const inferred: -1 | 0 | 1 = offset < lastScrollOffset ? -1 : offset > lastScrollOffset ? 1 : 0
-  lastScrollOffset = offset
-  const hasIntent = performance.now() < userScrollIntentUntil
-  if (hasIntent && userScrollDirection === 0 && inferred !== 0) userScrollDirection = inferred
-  if (hasIntent) updateReaderFromUserScroll(offset)
+  navigation.recordScrollOffset(offset)
+  const hasIntent = navigation.hasUserIntent()
+  if (hasIntent) navigation.updateReaderFromUserScroll(offset)
   refreshMountedRows()
   if (!hasIntent || !uiState.value.streamTarget) return
-  if (userScrollDirection < 0) props.runtime.setFollowTail(false)
-  else if (userScrollDirection > 0 && remainingToBottom() < VIEWPORT_POLICY.bottomTolerancePx) props.runtime.setFollowTail(true)
+  if (navigation.scrollDirection < 0) props.runtime.setFollowTail(false)
+  else if (navigation.scrollDirection > 0 && navigation.remainingToBottom() < VIEWPORT_POLICY.bottomTolerancePx) props.runtime.setFollowTail(true)
 }
 function onVirtualScrollEnd(): void {
   refreshMountedRows()
-  const hasUserIntent = performance.now() < userScrollIntentUntil
-  if (hasUserIntent) rememberCommittedAnchor()
+  const hasUserIntent = navigation.hasUserIntent()
+  if (hasUserIntent) navigation.rememberCommittedAnchor()
   if (shifting.value || !hasUserIntent) return
-  if (userScrollDirection < 0 && (listRef.value?.scrollOffset ?? Infinity) < VIEWPORT_POLICY.edgeThresholdPx) void shiftBackward()
-  else if (userScrollDirection > 0 && remainingToBottom() < VIEWPORT_POLICY.edgeThresholdPx) void shiftForward()
+  if (navigation.scrollDirection < 0 && (listRef.value?.scrollOffset ?? Infinity) < VIEWPORT_POLICY.edgeThresholdPx) void shiftBackward()
+  else if (navigation.scrollDirection > 0 && navigation.remainingToBottom() < VIEWPORT_POLICY.edgeThresholdPx) void shiftForward()
 }
 
 async function applyShift(plan: ShiftPlan): Promise<void> {
   const readerBefore = props.runtime.currentLogicalPosition
-  const anchor = lastCommittedAnchor ?? captureCommittedAnchor()
+  const anchor = navigation.committedAnchor ?? navigation.captureCommittedAnchor()
   if (plan.direction === 'backward') { props.runtime.applyIntermediate(plan.intermediate, true); await settleFrames(3); props.runtime.commitShift(plan, false); await settleFrames(2) }
   else { props.runtime.applyIntermediate(plan.intermediate, false); await settleFrames(2); props.runtime.commitShift(plan, true); await settleFrames(3) }
   props.runtime.finishShift()
-  if (anchor) await restoreListAnchor(anchor)
+  if (anchor) await navigation.restoreListAnchor(anchor)
   props.runtime.setReaderPosition(readerBefore, false)
   await nextTick(); refreshMountedRows()
 }
-async function shiftBackward(): Promise<void> { if (shifting.value) return; const plan = props.runtime.planShiftBackward(); if (!plan) return; shifting.value = true; clearUserIntent(); props.runtime.setFollowTail(false); await applyShift(plan); shifting.value = false }
-async function shiftForward(): Promise<void> { if (shifting.value) return; const plan = props.runtime.planShiftForward(); if (!plan) return; shifting.value = true; clearUserIntent(); await applyShift(plan); shifting.value = false }
+async function shiftBackward(): Promise<void> { if (shifting.value) return; const plan = props.runtime.planShiftBackward(); if (!plan) return; shifting.value = true; navigation.clearUserIntent(); props.runtime.setFollowTail(false); await applyShift(plan); shifting.value = false }
+async function shiftForward(): Promise<void> { if (shifting.value) return; const plan = props.runtime.planShiftForward(); if (!plan) return; shifting.value = true; navigation.clearUserIntent(); await applyShift(plan); shifting.value = false }
 
-function findMessageUnitIndex(target: number, preferLast = false): number {
-  let found = -1
-  for (let i = 0; i < order.value.length; i += 1) {
-    if (nodeFor(order.value[i]!)?.messageIndex !== target) continue
-    found = i
-    if (!preferLast) break
-  }
-  return found
-}
-function targetIsCommittedVisible(target: number): boolean {
-  const stage = scrollStageRef.value
-  if (!stage) return false
-  const viewport = stage.getBoundingClientRect()
-  return isMessageCommittedVisible(sampleRows(), target, viewport.top, viewport.bottom)
-}
-async function scrollToLogical(target: number, align: 'start' | 'center' | 'end', revision: number): Promise<boolean> {
-  if (props.runtime.logicalCount <= 0 || !navigationIsCurrent(revision)) return false
-  const semanticTailNavigation = align === 'end' && target === props.runtime.logicalCount - 1
-  for (let attempt = 0; attempt < VIEWPORT_POLICY.jumpAttempts; attempt += 1) {
-    await settleFrames(1)
-    if (!navigationIsCurrent(revision)) return false
-    const list = listRef.value
-    if (!list) continue
-    const index = findMessageUnitIndex(target, align === 'end')
-    if (index < 0) continue
-    list.scrollToIndex(index, { align })
-    await settleFrames(2)
-    if (!navigationIsCurrent(revision) || !targetIsCommittedVisible(target)) continue
-    await settleFrames(VIEWPORT_POLICY.stableLayoutFrames)
-    if (!navigationIsCurrent(revision) || !targetIsCommittedVisible(target)) continue
-    const current = listRef.value
-    if (!current) continue
-    lastScrollOffset = current.scrollOffset
-    props.runtime.setReaderPosition(target, semanticTailNavigation && remainingToBottom() < VIEWPORT_POLICY.bottomTolerancePx)
-    if (semanticTailNavigation) lastCommittedAnchor = null
-    else {
-      const anchor = captureCommittedAnchor()
-      if (anchor) lastCommittedAnchor = anchor
-    }
-    return true
-  }
-  return false
-}
-async function waitForJumpEpoch(previousEpoch: number, previousHandle: VListHandle | null, target: number, revision: number): Promise<boolean> {
-  for (let attempt = 0; attempt < VIEWPORT_POLICY.jumpAttempts + 2; attempt += 1) {
-    await settleFrames(1)
-    if (!navigationIsCurrent(revision)) return false
-    const epochReady = uiState.value.virtualEpoch > previousEpoch && uiState.value.virtualEpoch === props.runtime.virtualEpoch
-    const orderReady = findMessageUnitIndex(target) >= 0
-    const handleReady = Boolean(listRef.value) && (listRef.value !== previousHandle || attempt >= 4)
-    if (epochReady && orderReady && handleReady) return true
-  }
-  return false
-}
 async function jumpToMessage(raw = props.runtime.jumpInput): Promise<void> {
   if (props.runtime.logicalCount <= 0) return
-  const revision = beginNavigation()
+  const revision = navigation.begin()
   try {
     const target = Math.max(0, Math.min(props.runtime.logicalCount - 1, Math.floor(Number(raw) || 0)))
-    clearUserIntent()
+    navigation.clearUserIntent()
     const previousEpoch = uiState.value.virtualEpoch
     const previousHandle = listRef.value
     props.runtime.jump(target)
-    if (!await waitForJumpEpoch(previousEpoch, previousHandle, target, revision)) return
-    await scrollToLogical(target, 'center', revision)
+    if (!await navigation.waitForJumpEpoch(previousEpoch, previousHandle, target, revision)) return
+    await navigation.scrollToLogical(target, 'center', revision)
   } finally {
-    finishNavigation(revision)
+    navigation.finish(revision)
   }
 }
 async function jumpToLatest(): Promise<void> {
   if (props.runtime.logicalCount <= 0) return
-  const revision = beginNavigation()
+  const revision = navigation.begin()
   try {
-    clearUserIntent()
+    navigation.clearUserIntent()
     const last = props.runtime.logicalCount - 1
     if (props.runtime.range.end !== props.runtime.logicalCount) {
       const previousEpoch = uiState.value.virtualEpoch
       const previousHandle = listRef.value
       props.runtime.jump(last)
       props.runtime.refreshProjection()
-      if (!await waitForJumpEpoch(previousEpoch, previousHandle, last, revision)) return
+      if (!await navigation.waitForJumpEpoch(previousEpoch, previousHandle, last, revision)) return
     } else {
       props.runtime.refreshProjection()
       await settleFrames(1)
-      if (!navigationIsCurrent(revision)) return
+      if (!navigation.isCurrent(revision)) return
     }
-    if (!await scrollToLogical(last, 'end', revision)) return
-    const pinned = await pinMeasuredEnd(VIEWPORT_POLICY.restoreAttempts, revision)
-    if (!navigationIsCurrent(revision)) return
+    if (!await navigation.scrollToLogical(last, 'end', revision)) return
+    const pinned = await navigation.pinMeasuredEnd(VIEWPORT_POLICY.restoreAttempts, revision)
+    if (!navigation.isCurrent(revision)) return
     props.runtime.setFollowTail(props.stream.running && pinned)
   } finally {
-    finishNavigation(revision)
+    navigation.finish(revision)
   }
 }
 
-function restartStream(): void { props.stream.start(false) }
-function pauseStream(): void { props.stream.stop(false) }
-function setStreamRate(rate: number): void { props.stream.setRate(rate) }
 function abortRun(): void { props.stream.abort() }
 function resolveInteraction(approved: boolean): void { props.stream.resolveInteraction(approved) }
 
@@ -405,8 +196,8 @@ function capturePendingLayoutIntent(): void {
     pendingComposerAnchor = null
     return
   }
-  if (!pendingComposerAnchor) pendingComposerAnchor = lastCommittedAnchor ?? captureCommittedAnchor()
-  if (!lastCommittedAnchor && pendingComposerAnchor) lastCommittedAnchor = pendingComposerAnchor
+  if (!pendingComposerAnchor) pendingComposerAnchor = navigation.committedAnchor ?? navigation.captureCommittedAnchor()
+  if (!navigation.committedAnchor && pendingComposerAnchor) navigation.committedAnchor = pendingComposerAnchor
 }
 function onComposerInput(): void {
   props.runtime.setDraftText(composerText.value)
@@ -425,70 +216,70 @@ async function sendComposer(): Promise<void> {
 }
 function scheduleViewportResizeReconcile(): void {
   viewportResizeQueued = true
-  if (navigationRunning || viewportResizeFrame || viewportResizeRunning) return
+  if (navigation.running || viewportResizeFrame || viewportResizeRunning) return
   viewportResizeFrame = requestAnimationFrame(() => {
     viewportResizeFrame = 0
     void reconcileViewportResize()
   })
 }
 async function reconcileViewportResize(): Promise<void> {
-  if (navigationRunning || viewportResizeRunning) return
+  if (navigation.running || viewportResizeRunning) return
   viewportResizeRunning = true
   try {
-    while (viewportResizeQueued && !navigationRunning) {
+    while (viewportResizeQueued && !navigation.running) {
       viewportResizeQueued = false
       const readerBefore = props.runtime.currentLogicalPosition
       await settleFrames(2)
-      if (navigationRunning) { viewportResizeQueued = true; break }
+      if (navigation.running) { viewportResizeQueued = true; break }
       const pin = pendingComposerPinned || (pendingComposerAnchor === null && (props.runtime.atVisualBottom || props.runtime.followTail))
-      const anchor = pendingComposerAnchor ?? lastCommittedAnchor
+      const anchor = pendingComposerAnchor ?? navigation.committedAnchor
       pendingComposerPinned = false; pendingComposerAnchor = null
-      if (pin && props.runtime.range.end === props.runtime.logicalCount) await pinMeasuredEnd()
+      if (pin && props.runtime.range.end === props.runtime.logicalCount) await navigation.pinMeasuredEnd()
       else if (anchor) {
-        const restored = await restoreListAnchor(anchor)
+        const restored = await navigation.restoreListAnchor(anchor)
         if (restored) props.runtime.setReaderPosition(readerBefore, false)
       } else props.runtime.setReaderPosition(readerBefore, false)
       refreshMountedRows()
     }
   } finally {
     viewportResizeRunning = false
-    if (viewportResizeQueued && !navigationRunning) scheduleViewportResizeReconcile()
+    if (viewportResizeQueued && !navigation.running) scheduleViewportResizeReconcile()
   }
 }
 function captureSnapshot(): SessionViewMemory {
-  const anchor = lastCommittedAnchor ?? captureCommittedAnchor()
-  if (anchor) lastCommittedAnchor = anchor
+  const anchor = navigation.committedAnchor ?? navigation.captureCommittedAnchor()
+  if (anchor) navigation.committedAnchor = anchor
   const snapshot = anchor ? props.runtime.snapshot(anchor.id, anchor.offsetPx) : props.runtime.snapshot()
   props.runtime.rememberSnapshot(snapshot)
   return snapshot
 }
 async function restoreSnapshot(): Promise<void> {
-  const revision = beginNavigation()
+  const revision = navigation.begin()
   try {
     const snapshot = props.runtime.rememberedSnapshot
     await settleFrames(3)
-    if (!navigationIsCurrent(revision)) return
+    if (!navigation.isCurrent(revision)) return
     const list = listRef.value
     if (!list || order.value.length === 0) { refreshMountedRows(); return }
     if (snapshot.atVisualBottom && props.runtime.range.end === props.runtime.logicalCount) {
       props.runtime.refreshProjection()
       await settleFrames(1)
-      if (!navigationIsCurrent(revision)) return
-      if (!await scrollToLogical(props.runtime.logicalCount - 1, 'end', revision)) return
-      await pinMeasuredEnd(VIEWPORT_POLICY.restoreAttempts, revision)
+      if (!navigation.isCurrent(revision)) return
+      if (!await navigation.scrollToLogical(props.runtime.logicalCount - 1, 'end', revision)) return
+      await navigation.pinMeasuredEnd(VIEWPORT_POLICY.restoreAttempts, revision)
     } else if (snapshot.anchorUnitId && order.value.includes(snapshot.anchorUnitId)) {
-      const restored = await restoreListAnchor({ id: snapshot.anchorUnitId, offsetPx: snapshot.anchorOffsetPx, viewportTopPx: snapshot.anchorOffsetPx }, revision)
-      if (restored && navigationIsCurrent(revision)) props.runtime.setReaderPosition(snapshot.logicalPosition, false)
+      const restored = await navigation.restoreListAnchor({ id: snapshot.anchorUnitId, offsetPx: snapshot.anchorOffsetPx, viewportTopPx: snapshot.anchorOffsetPx }, revision)
+      if (restored && navigation.isCurrent(revision)) props.runtime.setReaderPosition(snapshot.logicalPosition, false)
     } else {
-      await scrollToLogical(snapshot.logicalPosition, 'center', revision)
+      await navigation.scrollToLogical(snapshot.logicalPosition, 'center', revision)
     }
-    if (!navigationIsCurrent(revision)) return
+    if (!navigation.isCurrent(revision)) return
     await settleFrames(2)
-    lastScrollOffset = listRef.value?.scrollOffset ?? 0
-    if (!snapshot.atVisualBottom && !lastCommittedAnchor) rememberCommittedAnchor()
+    navigation.setScrollOffset(listRef.value?.scrollOffset ?? 0)
+    if (!snapshot.atVisualBottom && !navigation.committedAnchor) navigation.rememberCommittedAnchor()
     refreshMountedRows()
   } finally {
-    finishNavigation(revision)
+    navigation.finish(revision)
   }
 }
 function formatAfter(count: number): string { return count.toLocaleString('en-US') }
@@ -496,10 +287,10 @@ function attachViewportObserver(): void {
   viewportObserver?.disconnect(); viewportObserver = new ResizeObserver(scheduleViewportResizeReconcile)
   if (scrollStageRef.value) viewportObserver.observe(scrollStageRef.value)
   if (composerShellRef.value) viewportObserver.observe(composerShellRef.value)
-  rememberCommittedAnchor()
+  navigation.rememberCommittedAnchor()
 }
 
-watch(() => props.uiState.streamRenderTicks, (next, previous) => {
+watch(() => props.uiState.eventRevision, (next, previous) => {
   if (next === previous || !props.uiState.followTail) return
   void nextTick().then(() => listRef.value?.scrollToIndex(Math.max(0, order.value.length - 1), { align: 'end' }))
 })
@@ -510,15 +301,14 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  navigationRevision += 1
-  navigationRunning = false
+  navigation.invalidate()
   props.runtime.setDraftText(composerText.value); props.runtime.rememberSnapshot(captureSnapshot())
   unsubscribeOrder?.(); viewportObserver?.disconnect()
   if (metricsFrame) cancelAnimationFrame(metricsFrame)
   if (viewportResizeFrame) cancelAnimationFrame(viewportResizeFrame)
 })
 
-defineExpose({ captureSnapshot, jumpToMessage, jumpToLatest, shiftBackward, shiftForward, restartStream, pauseStream, setStreamRate })
+defineExpose({ captureSnapshot, jumpToMessage, jumpToLatest, shiftBackward, shiftForward })
 </script>
 
 <template>

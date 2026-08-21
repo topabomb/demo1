@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { block, type LogicalMessage } from '../src/model/conversation'
-import { ProjectionEngine } from '../src/presentation/projection-engine'
+import { block, type LogicalMessage } from '../src/engine/model/conversation'
+import { ProjectionEngine } from '../src/engine/presentation/projection-engine'
 
 function live(markdown: string, revision: number): LogicalMessage {
   return {
