@@ -4,9 +4,20 @@ import { ProjectionEngine } from '../src/presentation/projection-engine'
 
 function live(markdown: string, revision: number): LogicalMessage {
   return {
-    id: 's:m-1', index: 1, turnId: 't', role: 'assistant', seed: 1, intensity: 1,
+    id: 's:m-1', index: 1, turnId: 't', stepId: 't:s0', role: 'assistant',
     revision, live: true,
     blocks: [block('answer', 'markdown', { markdown }, revision)],
+  }
+}
+
+function mixed(reasoning: string, markdown: string, revision: number): LogicalMessage {
+  return {
+    id: 's:m-mixed', index: 2, turnId: 't-mixed', stepId: 't-mixed:s0', role: 'assistant',
+    revision, live: true,
+    blocks: [
+      block('reasoning', 'reasoning', { text: reasoning, defaultOpen: false, status: 'streaming' }, revision),
+      block('answer', 'markdown', { markdown }, revision),
+    ],
   }
 }
 
@@ -39,11 +50,43 @@ describe('ProjectionEngine', () => {
     expect(engine.stats.incrementalPatches).toBe(1)
   })
 
+  it('patches reasoning inside a mixed live message without invalidating the answer sibling', () => {
+    const engine = new ProjectionEngine(undefined, 256)
+    const before = engine.projectMessage(mixed('inspect ', 'stable answer', 0))
+    const reasoningBefore = before.find(unit => unit.blockId === 'reasoning')!
+    const answerBefore = before.find(unit => unit.blockId === 'answer')!
+
+    const delta = 'then verify '
+    const after = engine.appendReasoningDelta(mixed(`inspect ${delta}`, 'stable answer', 1), 'reasoning', delta)
+    const reasoningAfter = after.find(unit => unit.blockId === 'reasoning')!
+    const answerAfter = after.find(unit => unit.blockId === 'answer')!
+
+    expect(reasoningAfter.id).toBe(reasoningBefore.id)
+    expect(reasoningAfter).not.toBe(reasoningBefore)
+    expect(reasoningAfter.payload.text).toBe(`inspect ${delta}`)
+    expect(answerAfter).toBe(answerBefore)
+    expect(engine.stats.fullProjects).toBe(1)
+    expect(engine.stats.incrementalPatches).toBe(1)
+  })
+
+  it('patches Markdown inside a mixed live message while preserving reasoning identity', () => {
+    const engine = new ProjectionEngine(undefined, 256)
+    const before = engine.projectMessage(mixed('stable reasoning', 'answer ', 0))
+    const reasoningBefore = before.find(unit => unit.blockId === 'reasoning')!
+    const delta = 'continues'
+    const after = engine.appendMarkdownDelta(mixed('stable reasoning', `answer ${delta}`, 1), 'answer', delta)
+
+    expect(after.find(unit => unit.blockId === 'reasoning')).toBe(reasoningBefore)
+    expect(after.find(unit => unit.blockId === 'answer')?.payload.markdown).toContain('continues')
+    expect(engine.stats.fullProjects).toBe(1)
+    expect(engine.stats.incrementalPatches).toBe(1)
+  })
+
   it('keeps its rebuildable cache bounded independently of total history', () => {
     const engine = new ProjectionEngine(undefined, 128)
     for (let i = 0; i < 300; i += 1) {
       engine.projectMessage({
-        id: `m-${i}`, index: i, turnId: `t-${i}`, role: 'assistant', seed: i, intensity: 1, revision: 0,
+        id: `m-${i}`, index: i, turnId: `t-${i}`, role: 'assistant', revision: 0,
         blocks: [block('answer', 'markdown', { markdown: `message ${i}` })],
       })
     }
