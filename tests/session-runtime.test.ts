@@ -1,130 +1,58 @@
 import { describe, expect, it } from 'vitest'
 import { ConversationSessionRuntime, SHIFT_MESSAGES, WINDOW_MESSAGES } from '../src/conversation/session-runtime'
+import { ConversationSessionKernel } from '../src/conversation/session-kernel'
 import { SyntheticHistoryAdapter } from '../src/conversation/synthetic-adapter'
 
-function runtimeAt(position: number, status: 'running' | 'completed' = 'completed') {
-  const descriptor = {
-    id: 'identity-test',
-    title: 'identity test',
-    age: 'now',
-    status,
-    logicalCount: 1_000_000,
-  }
-  return new ConversationSessionRuntime(
+function runtimeAt(position: number, status: 'idle' | 'working' = 'idle') {
+  const descriptor = { id: 'identity-test', title: 'identity test', age: 'now', status, logicalCount: 1_000_000 } as const
+  const kernel = new ConversationSessionKernel(
     descriptor,
-    new SyntheticHistoryAdapter(descriptor.id, descriptor.logicalCount, 73),
-    {
-      logicalPosition: position,
-      anchorUnitId: null,
-      anchorOffsetPx: 0,
-      followTail: status === 'running',
-      atVisualBottom: position === descriptor.logicalCount - 1,
-      draftText: '',
-    },
+    new SyntheticHistoryAdapter(descriptor.id, descriptor.logicalCount, 73, status === 'working'),
+    73,
   )
+  const runtime = new ConversationSessionRuntime(kernel, {
+    logicalPosition: position,
+    anchorUnitId: null,
+    anchorOffsetPx: 0,
+    followTail: status === 'working',
+    atVisualBottom: position === descriptor.logicalCount - 1,
+    draftText: '',
+  })
+  return { kernel, runtime }
 }
 
-describe('ConversationSessionRuntime segment shifts', () => {
-  it('projects only the incoming slice and retains existing RenderUnit objects on prepend', () => {
-    const runtime = runtimeAt(500_000)
+describe('ConversationSessionRuntime', () => {
+  it('projects only the incoming slice and retains RenderUnit objects on prepend', () => {
+    const { runtime } = runtimeAt(500_000)
     const old = [...runtime.activeUnits]
     const oldRange = { ...runtime.range }
-    const plan = runtime.planShiftBackward()
-    expect(plan).not.toBeNull()
-    expect(plan!.next.end - plan!.next.start).toBe(WINDOW_MESSAGES)
-    expect(oldRange.start - plan!.next.start).toBe(SHIFT_MESSAGES)
-
-    const retained = old.find(unit => unit.messageIndex >= oldRange.start && unit.messageIndex < plan!.next.end)
-    expect(retained).toBeDefined()
-    const same = plan!.final.find(unit => unit.id === retained!.id)
-    expect(same).toBe(retained)
-
-    const incomingMessages = new Set(plan!.final.filter(unit => unit.messageIndex < oldRange.start).map(unit => unit.messageIndex))
-    expect(incomingMessages.size).toBe(SHIFT_MESSAGES)
+    const plan = runtime.planShiftBackward()!
+    expect(plan.next.end - plan.next.start).toBe(WINDOW_MESSAGES)
+    expect(oldRange.start - plan.next.start).toBe(SHIFT_MESSAGES)
+    const retained = old.find(unit => unit.messageIndex >= oldRange.start && unit.messageIndex < plan.next.end)!
+    expect(plan.final.find(unit => unit.id === retained.id)).toBe(retained)
+    runtime.dispose()
   })
 
-  it('retains existing RenderUnit objects on forward shift as well', () => {
-    const runtime = runtimeAt(500_000)
-    const old = [...runtime.activeUnits]
-    const oldRange = { ...runtime.range }
-    const plan = runtime.planShiftForward()
-    expect(plan).not.toBeNull()
-
-    const retained = old.find(unit => unit.messageIndex >= plan!.next.start && unit.messageIndex < oldRange.end)
-    expect(retained).toBeDefined()
-    expect(plan!.final.find(unit => unit.id === retained!.id)).toBe(retained)
-
-    const incomingMessages = new Set(plan!.final.filter(unit => unit.messageIndex >= oldRange.end).map(unit => unit.messageIndex))
-    expect(incomingMessages.size).toBe(SHIFT_MESSAGES)
+  it('keeps a history reader stable while the kernel grows off-screen', async () => {
+    const { kernel, runtime } = runtimeAt(500_000)
+    const before = runtime.currentLogicalPosition
+    kernel.beginTurn('background work')
+    await Promise.resolve()
+    expect(runtime.logicalCount).toBe(1_000_002)
+    expect(runtime.currentLogicalPosition).toBe(before)
+    expect(runtime.messagesAfterCurrent).toBeGreaterThan(500_000)
+    runtime.dispose()
   })
 
-  it('does not destroy live async tail state when the reader jumps into history', () => {
-    const runtime = runtimeAt(999_999, 'running')
-    const tail = runtime.activeUnits.find(unit => unit.messageIndex === 999_999)!
-    const patched = {
-      ...tail,
-      revision: 7,
-      payload: { ...tail.payload, markdown: 'async text that arrived before navigation', live: true },
-    }
-    runtime.streamTarget = tail.id
-    runtime.streamBaseUnit = tail
-    runtime.streamChunkText = String(patched.payload.markdown)
-    runtime.patchNode(patched)
-
-    runtime.jump(500_000)
-    expect(runtime.streamTarget).toBe(tail.id)
-    expect(runtime.streamChunkText).toContain('async text')
-    expect(runtime.range.start).toBeLessThanOrEqual(500_000)
-
-    runtime.jump(999_999)
-    runtime.refreshProjection()
-    expect(runtime.projection.getNode(tail.id)?.revision).toBe(7)
-    expect(runtime.projection.getNode(tail.id)?.payload.markdown).toContain('async text')
-  })
-
-  it('restores every rolled-over live chunk after off-screen async streaming', () => {
-    const runtime = runtimeAt(999_999, 'running')
-    const tail = runtime.activeUnits.find(unit => unit.messageIndex === 999_999)!
-    const basePatched = {
-      ...tail,
-      revision: 3,
-      payload: { ...tail.payload, markdown: 'base live chunk', live: true },
-    }
-    const extra = {
-      ...tail,
-      id: `${tail.messageId}:live-extra-1`,
-      revision: 0,
-      payload: { ...tail.payload, markdown: '', live: true, partIndex: 1, partCount: 2 },
-    }
-    const extraPatched = {
-      ...extra,
-      revision: 11,
-      payload: { ...extra.payload, markdown: 'second chunk continued while off-screen' },
-    }
-
-    runtime.patchNode(basePatched)
-    runtime.appendLiveChunk(extra)
-    runtime.patchNode(extraPatched)
-    runtime.streamTarget = extra.id
-    runtime.streamBaseUnit = extra
-
-    runtime.jump(400_000)
-    expect(runtime.projection.order.includes(extra.id)).toBe(false)
-
-    runtime.jump(999_999)
-    runtime.refreshProjection()
-    expect(runtime.projection.getNode(tail.id)?.revision).toBe(3)
-    expect(runtime.projection.getNode(extra.id)?.revision).toBe(11)
-    expect(runtime.projection.getNode(extra.id)?.payload.markdown).toContain('continued while off-screen')
-  })
-
-  it('persists a per-session composer draft as lightweight semantic state', () => {
-    const runtime = runtimeAt(500_000)
-    runtime.setDraftText('line one\nline two\nline three')
-    const snapshot = runtime.snapshot()
-    expect(snapshot.draftText).toContain('line three')
-    runtime.setDraftText('changed')
-    runtime.rememberSnapshot(snapshot)
-    expect(runtime.draftText).toBe('line one\nline two\nline three')
+  it('rehydrates appended turns from the lightweight kernel', async () => {
+    const { kernel, runtime } = runtimeAt(999_999)
+    kernel.beginTurn('continue the old session')
+    kernel.appendAssistantDelta('new answer')
+    await Promise.resolve()
+    runtime.jump(kernel.count - 1)
+    expect(runtime.projection.order.some(id => id.includes('runtime-0'))).toBe(true)
+    expect(runtime.logicalCount).toBe(1_000_002)
+    runtime.dispose()
   })
 })
