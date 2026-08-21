@@ -4,6 +4,8 @@ export type BuiltinRenderKind =
   | 'thinking'
   | 'code'
   | 'image'
+  | 'attachments'
+  | 'audio'
   | 'html'
   | 'tool'
   | 'diff'
