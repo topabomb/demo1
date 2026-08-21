@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { KeyedConversationProjection } from '../src/conversation/keyed-node-store'
-import type { RenderUnit } from '../src/core/types'
+import { KeyedConversationProjection } from '../src/presentation/keyed-node-store'
+import type { RenderUnit } from '../src/presentation/render-unit'
 
 function node(id: string, revision = 0): RenderUnit {
   return {
