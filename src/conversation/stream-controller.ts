@@ -1,74 +1,73 @@
-import type { RenderUnit } from '../core/types'
-import type { ConversationExecutionController } from './contracts'
-import type { ConversationSessionRuntime } from './session-runtime'
+import type { ConversationExecutionController, SubmitDisposition } from './contracts'
+import type { ConversationSessionKernel } from './session-kernel'
 
-const LIVE_CHUNK_LIMIT = 6500
+const MAX_RUN_PUBLISHES = 1800
 
-/**
- * Reference implementation of the session-scoped execution contract.
- * It is deliberately framework-free: a running session may continue receiving
- * deltas while another Recent session is active or while its reader is in history.
- */
+/** Session-scoped execution. It never owns or depends on a viewport runtime. */
 export class SyntheticStreamController implements ConversationExecutionController {
-  #runtime: ConversationSessionRuntime
+  #kernel: ConversationSessionKernel
   #timer: ReturnType<typeof setInterval> | null = null
   #framePending = false
+  #pendingDelta = ''
+  #runPublishes = 0
 
-  constructor(runtime: ConversationSessionRuntime) {
-    this.#runtime = runtime
+  constructor(kernel: ConversationSessionKernel) {
+    this.#kernel = kernel
   }
 
-  get running(): boolean { return this.#timer !== null }
-
-  start(reset = true): void {
-    const runtime = this.#runtime
-    if (runtime.status !== 'running') return
-    if (reset) this.stop(true)
-    if (runtime.range.end !== runtime.logicalCount) runtime.jump(runtime.logicalCount - 1)
-
-    const tail = [...runtime.activeUnits].reverse().find(unit => unit.messageIndex === runtime.logicalCount - 1)
-    if (!tail) return
-
-    runtime.streamBaseUnit = tail
-    runtime.streamTarget = tail.id
-    runtime.streamChunkText = String(tail.payload.markdown ?? '')
-    runtime.pendingDelta = ''
-    runtime.streamIngressTicks = 0
-    runtime.streamRenderTicks = 0
-    runtime.setFollowTail(true)
-    runtime.markStateDirty()
-
-    this.#timer = setInterval(() => this.#ingest(), Math.max(16, Math.round(1000 / runtime.streamRate)))
+  get running(): boolean {
+    return this.#timer !== null && this.#kernel.status === 'working'
   }
 
-  stop(clear = false): void {
-    if (this.#timer) clearInterval(this.#timer)
-    this.#timer = null
-    this.#framePending = false
-    const runtime = this.#runtime
-    runtime.pendingDelta = ''
-    runtime.streamBaseUnit = null
-    runtime.streamTarget = null
-    runtime.tailIntentGeneration += 1
-    if (clear) runtime.clearLiveTail()
-    runtime.markStateDirty()
+  start(_reset = true): void {
+    if (this.#kernel.status !== 'working' || this.#kernel.currentAssistantIndex === null) return
+    this.#stopTimer()
+    this.#runPublishes = 0
+    this.#timer = setInterval(() => this.#ingest(), Math.max(16, Math.round(1000 / this.#kernel.streamRate)))
+  }
+
+  stop(_clear = false): void {
+    this.#stopTimer()
+  }
+
+  abort(): void {
+    this.#stopTimer()
+    this.#kernel.abortCurrent()
+  }
+
+  submit(prompt: string): SubmitDisposition {
+    if (this.#kernel.pendingInteraction) return 'blocked'
+    if (this.#kernel.status === 'working') return this.#kernel.enqueue(prompt) ? 'queued' : 'blocked'
+    const index = this.#kernel.beginTurn(prompt)
+    if (index === null) return 'blocked'
+    this.start(false)
+    return 'started'
+  }
+
+  resolveInteraction(approved: boolean): void {
+    this.#kernel.resolveInteraction(approved)
   }
 
   setRate(rate: number): void {
-    this.#runtime.streamRate = Math.max(1, Math.floor(rate))
-    if (!this.running) {
-      this.#runtime.markStateDirty()
-      return
-    }
-    this.stop(false)
-    this.start(false)
+    const wasRunning = this.running
+    this.#kernel.setStreamRate(rate)
+    if (wasRunning) this.start(false)
+  }
+
+  dispose(): void {
+    this.#stopTimer()
+  }
+
+  #stopTimer(): void {
+    if (this.#timer) clearInterval(this.#timer)
+    this.#timer = null
+    this.#framePending = false
+    this.#pendingDelta = ''
   }
 
   #ingest(): void {
-    const runtime = this.#runtime
-    runtime.streamIngressTicks += 1
-    runtime.pendingDelta += syntheticDelta(runtime.streamIngressTicks)
-    runtime.markStateDirty()
+    this.#kernel.incrementIngress()
+    this.#pendingDelta += syntheticDelta(this.#kernel.streamIngressTicks)
     if (this.#framePending) return
     this.#framePending = true
     scheduleFrame(() => {
@@ -78,51 +77,33 @@ export class SyntheticStreamController implements ConversationExecutionControlle
   }
 
   #publish(): void {
-    const runtime = this.#runtime
-    if (!runtime.pendingDelta || !runtime.streamTarget || !runtime.streamBaseUnit) return
+    if (!this.#pendingDelta || this.#kernel.currentAssistantIndex === null) return
+    const delta = this.#pendingDelta
+    this.#pendingDelta = ''
+    this.#kernel.appendAssistantDelta(delta)
+    this.#runPublishes += 1
+    if (this.#runPublishes < MAX_RUN_PUBLISHES) return
 
-    if (runtime.streamChunkText.length >= LIVE_CHUNK_LIMIT) {
-      const next = createNextLiveChunk(runtime.streamBaseUnit, runtime.liveTailUnits.length + 1)
-      runtime.appendLiveChunk(next)
-      runtime.streamBaseUnit = next
-      runtime.streamTarget = next.id
-      runtime.streamChunkText = ''
-      runtime.pendingDelta = `${runtime.pendingDelta}\n\n`
+    this.#stopTimer()
+    this.#kernel.completeCurrent()
+    const queued = this.#kernel.dequeue()
+    if (queued !== null) {
+      this.#kernel.beginTurn(queued)
+      this.start(false)
     }
-
-    runtime.streamChunkText += runtime.pendingDelta
-    runtime.pendingDelta = ''
-    const base = runtime.streamBaseUnit
-    const patched: RenderUnit = {
-      ...base,
-      revision: base.revision + runtime.streamRenderTicks + 1,
-      estimatePx: Math.max(base.estimatePx, 180 + Math.min(5200, runtime.streamChunkText.length * 0.12)),
-      payload: { ...base.payload, markdown: runtime.streamChunkText, live: true },
-    }
-    runtime.patchNode(patched)
-  }
-}
-
-function createNextLiveChunk(previous: RenderUnit, chunkIndex: number): RenderUnit {
-  return {
-    ...previous,
-    id: `${previous.messageId}:live-extra-${chunkIndex}`,
-    revision: 0,
-    estimatePx: 180,
-    payload: { ...previous.payload, markdown: '', live: true, partIndex: chunkIndex, partCount: chunkIndex + 1 },
   }
 }
 
 function syntheticDelta(tick: number): string {
   const phrases = [
-    'I inspected the affected render path and preserved stable node identity.',
-    'The next step is validating dynamic measurements before changing the scroll anchor.',
-    'Tool output is folded structurally so hidden payload does not inflate the DOM.',
-    'Streaming deltas are coalesced before UI publication instead of updating for every token.',
-    'Backend events remain normalized behind the canonical conversation boundary.',
+    'I inspected the active workspace state and preserved stable semantic identity.',
+    'The agent can keep running even when its viewport has been evicted from the hot LRU.',
+    'Tool and reasoning output remain structured presentation nodes rather than backend-specific components.',
+    'Streaming deltas are coalesced before publication so framework work stays bounded.',
+    'The next verification step checks restore, queue, and interaction state across session switches.',
   ]
   const phrase = phrases[tick % phrases.length]!
-  if (tick % 11 === 0) return `\n\n### Progress ${Math.floor(tick / 11) + 1}\n\n${phrase} `
+  if (tick % 13 === 0) return `\n\n### Progress ${Math.floor(tick / 13) + 1}\n\n${phrase} `
   return `${phrase} `
 }
 
