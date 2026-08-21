@@ -45,7 +45,7 @@ test('public Agent scenarios entry exposes the canonical gallery without requiri
   await expect(page.getByTestId('logical-count')).toHaveText('180,013')
   const summary = page.locator('[data-message-index="180012"]').getByTestId('markdown-block')
   await expect(summary).toBeVisible({ timeout: 15_000 })
-  await expect(summary).toContainText('Scenario pack complete')
+  await expect(summary).toContainText('Media workflows verified')
 })
 
 test('live reasoning can expand during streaming and collapse without corrupting virtual geometry', async ({ page }) => {
