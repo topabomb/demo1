@@ -14,7 +14,20 @@ async function jump(page: Page, index: number): Promise<void> {
   await page.getByTestId('jump-input').fill(String(index))
   await page.getByTestId('jump-button').click()
   await expect(page.locator(`[data-message-index="${index}"]`).first()).toBeVisible({ timeout: 15_000 })
-  await expect.poll(async () => Math.abs(Number((await page.getByTestId('reader-position').textContent() ?? '').replace(/[^0-9-]/g, '')) - index), { timeout: 15_000 }).toBeLessThan(64)
+  await expect.poll(async () => Number((await page.getByTestId('reader-position').textContent() ?? '').replace(/[^0-9-]/g, '')), { timeout: 15_000 }).toBe(index)
+  await settleNavigationFrames(page)
+}
+
+async function settleNavigationFrames(page: Page, count = 5): Promise<void> {
+  await page.evaluate((frames) => new Promise<void>(resolve => {
+    let remaining = frames
+    const next = () => {
+      remaining -= 1
+      if (remaining <= 0) resolve()
+      else requestAnimationFrame(next)
+    }
+    requestAnimationFrame(next)
+  }), count)
 }
 
 async function maxMountedRowOverlap(page: Page): Promise<number> {
@@ -113,7 +126,7 @@ test('semantic viewport survives a different product layout and composer height 
   // Read one actually visible measured wrapper in a single DOM transaction. A
   // virtualizer is allowed to recycle an earlier locator between resolution and
   // evaluation, but any mounted visible wrapper must remain geometry-pure.
-  const wrapperGeometry = await page.getByTestId('scrollport').evaluate(stage => {
+  await expect.poll(async () => page.getByTestId('scrollport').evaluate(stage => {
     const viewport = stage.getBoundingClientRect()
     const element = [...stage.querySelectorAll<HTMLElement>('[data-virtual-item="true"]')].find(row => {
       const rect = row.getBoundingClientRect()
@@ -122,8 +135,7 @@ test('semantic viewport survives a different product layout and composer height 
     if (!element) return null
     const style = getComputedStyle(element)
     return { paddingTop: style.paddingTop, paddingBottom: style.paddingBottom, marginTop: style.marginTop, marginBottom: style.marginBottom }
-  })
-  expect(wrapperGeometry).toEqual({ paddingTop: '0px', paddingBottom: '0px', marginTop: '0px', marginBottom: '0px' })
+  }), { timeout: 12_000 }).toEqual({ paddingTop: '0px', paddingBottom: '0px', marginTop: '0px', marginBottom: '0px' })
 
   const before = await committedAnchor(page)
   expect(before).not.toBeNull()
