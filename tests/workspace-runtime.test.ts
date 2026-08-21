@@ -1,61 +1,56 @@
 import { describe, expect, it } from 'vitest'
 import { ConversationWorkspaceRuntime, HOT_SESSION_LIMIT } from '../src/conversation/workspace-runtime'
 
-describe('ConversationWorkspaceRuntime', () => {
-  it('scopes message/render identities per session and keeps heavyweight runtimes bounded', () => {
+describe('ConversationWorkspaceRuntime v2 lifecycle split', () => {
+  it('bounds heavyweight runtimes even when multiple kernels are working', () => {
     const workspace = new ConversationWorkspaceRuntime()
     try {
-      const million = workspace.activeSession
-      const millionFirst = million.activeUnits[0]!
-      const millionSnapshot = million.snapshot(millionFirst.id, 12)
-      million.currentLogicalPosition = 500_000
-      workspace.saveSnapshot(million.id, { ...millionSnapshot, logicalPosition: 500_000, followTail: false, atVisualBottom: false })
-
-      const dsh = workspace.activate('dsh-transport')
-      expect(dsh.activeUnits[0]!.id.startsWith('dsh-transport:')).toBe(true)
-      expect(millionFirst.id.startsWith('million:')).toBe(true)
-      expect(dsh.activeUnits[0]!.id).not.toBe(millionFirst.id)
-
-      workspace.activate('tool-rendering')
-      workspace.activate('event-normalization')
+      for (const id of ['dsh-transport', 'event-normalization', 'workspace-files']) {
+        workspace.executionFor(id).submit(`run ${id}`)
+        workspace.activate(id)
+      }
       workspace.activate('dynamic-heights')
+      expect(workspace.runningSessionCount).toBeGreaterThanOrEqual(4)
       expect(workspace.hotSessionCount).toBeLessThanOrEqual(HOT_SESSION_LIMIT)
-      expect(workspace.hasHotRuntime('million')).toBe(true)
-      expect(workspace.isSessionStreaming('million')).toBe(true)
+      expect(workspace.kernelFor('million').status).toBe('working')
     } finally {
       workspace.dispose()
     }
   })
 
-  it('rehydrates an evicted session from semantic viewport and draft state instead of DOM state', () => {
+  it('evicts a working viewport without destroying its execution kernel', async () => {
     const workspace = new ConversationWorkspaceRuntime()
     try {
       workspace.activate('dsh-transport')
-      const dsh = workspace.activeSession
-      dsh.currentLogicalPosition = 90_000
-      dsh.setFollowTail(false)
-      dsh.setDraftText('draft survives eviction\nwith variable composer height')
-      workspace.saveSnapshot('dsh-transport', {
-        logicalPosition: 90_000,
-        anchorUnitId: dsh.activeUnits[Math.floor(dsh.activeUnits.length / 2)]?.id ?? null,
-        anchorOffsetPx: 73,
-        followTail: false,
-        atVisualBottom: false,
-        draftText: dsh.draftText,
-      })
+      workspace.executionFor('dsh-transport').submit('keep running offscreen')
+      const before = workspace.kernelFor('dsh-transport').streamRenderTicks
+      workspace.activate('event-normalization')
+      workspace.activate('workspace-files')
+      workspace.activate('dynamic-heights')
+      expect(workspace.hasHotRuntime('dsh-transport')).toBe(false)
+      expect(workspace.kernelFor('dsh-transport').status).toBe('working')
+      await new Promise(resolve => setTimeout(resolve, 80))
+      expect(workspace.kernelFor('dsh-transport').streamRenderTicks).toBeGreaterThan(before)
+    } finally {
+      workspace.dispose()
+    }
+  })
 
+  it('persists approval state and can create a resumable empty session', () => {
+    const workspace = new ConversationWorkspaceRuntime()
+    try {
+      expect(workspace.kernelFor('tool-rendering').pendingInteraction?.kind).toBe('approval')
       workspace.activate('tool-rendering')
       workspace.activate('event-normalization')
+      workspace.activate('workspace-files')
       workspace.activate('dynamic-heights')
-      expect(workspace.hotSessionCount).toBeLessThanOrEqual(HOT_SESSION_LIMIT)
-      expect(workspace.hasHotRuntime('dsh-transport')).toBe(false)
+      expect(workspace.kernelFor('tool-rendering').pendingInteraction?.kind).toBe('approval')
 
-      const restored = workspace.activate('dsh-transport')
-      expect(restored.currentLogicalPosition).toBe(90_000)
-      expect(restored.followTail).toBe(false)
-      expect(restored.range.start).toBeLessThanOrEqual(90_000)
-      expect(restored.range.end).toBeGreaterThan(90_000)
-      expect(restored.draftText).toContain('variable composer height')
+      const id = workspace.createSession()
+      workspace.activate(id)
+      expect(workspace.activeSession.logicalCount).toBe(0)
+      expect(workspace.executionFor(id).submit('first real prompt')).toBe('started')
+      expect(workspace.kernelFor(id).count).toBe(2)
     } finally {
       workspace.dispose()
     }
