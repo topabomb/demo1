@@ -16,7 +16,7 @@ async function jump(page: Page, index: number): Promise<void> {
   await page.getByTestId('jump-input').fill(String(index))
   await page.getByTestId('jump-button').click()
   await expect(page.locator(`[data-message-index="${index}"]`).first()).toBeVisible({ timeout: 15_000 })
-  await expect.poll(async () => Math.abs(numeric(await page.getByTestId('reader-position').textContent()) - index), { timeout: 15_000 }).toBeLessThan(48)
+  await expect.poll(async () => numeric(await page.getByTestId('reader-position').textContent()), { timeout: 15_000 }).toBe(index)
 }
 
 async function assertNoRowOverlap(page: Page): Promise<void> {
@@ -35,6 +35,18 @@ async function assertNoRowOverlap(page: Page): Promise<void> {
 async function bodyOverflow(page: Page): Promise<number> {
   return page.evaluate(() => Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) - window.innerWidth)
 }
+
+test('public Agent scenarios entry exposes the canonical gallery without requiring diagnostics', async ({ page }) => {
+  await openApp(page)
+  const launch = page.getByTestId('scenario-launch')
+  await expect(launch).toBeVisible()
+  await launch.click()
+  await expect(page.getByTestId('active-session-id')).toHaveText('dsh-transport')
+  await expect(page.getByTestId('logical-count')).toHaveText('180,013')
+  const summary = page.locator('[data-message-index="180012"]').getByTestId('markdown-block')
+  await expect(summary).toBeVisible({ timeout: 15_000 })
+  await expect(summary).toContainText('Scenario pack complete')
+})
 
 test('live reasoning can expand during streaming and collapse without corrupting virtual geometry', async ({ page }) => {
   await openApp(page)
