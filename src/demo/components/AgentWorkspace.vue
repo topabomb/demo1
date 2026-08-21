@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
-import { usePerformanceMetrics } from '../demo/use-performance-metrics'
-import type { ConversationDescriptor } from '../conversation/contracts'
-import type { SessionViewMemory } from '../viewport/state'
+import { usePerformanceMetrics } from '../use-performance-metrics'
+import type { ConversationDescriptor } from '../../engine/conversation/contracts'
+import type { SessionViewMemory } from '../../engine/viewport/state'
 import {
   billedInputTokens,
   cacheHitPercent,
@@ -12,14 +12,14 @@ import {
   sessionIndicatorGlyph,
   sessionIndicatorLabel,
   type SessionIndicator,
-} from '../conversation/session-semantics'
-import { createAgentScenarioPack, createMarkdownGalleryTurn, createMixedDemoTurns } from '../demo/scenarios'
-import { registeredRendererIds } from './renderers/registry'
-import { touchedFoldStateCount } from './renderers/fold-state'
-import { highlightCacheSize } from './renderers/highlight-client'
-import { markdownCacheSize } from './renderers/markdown-cache'
+} from '../../engine/conversation/session-semantics'
+import { createAgentScenarioPack, createMarkdownGalleryTurn, createMixedDemoTurns } from '../scenarios'
+import { registeredRendererIds } from '../../engine/vue/renderers/registry'
+import { touchedFoldStateCount } from '../../engine/vue/renderers/fold-state'
+import { highlightCacheSize } from '../../engine/vue/renderers/highlight-client'
+import { markdownCacheSize } from '../../engine/vue/renderers/markdown-cache'
 import { useWorkspaceRuntime } from '../vue/use-workspace-runtime'
-import ConversationViewport from './ConversationViewport.vue'
+import ConversationViewport from '../../engine/vue/ConversationViewport.vue'
 
 interface ViewportHandle {
   captureSnapshot(): SessionViewMemory
@@ -27,9 +27,6 @@ interface ViewportHandle {
   jumpToLatest(): Promise<void>
   shiftBackward(): Promise<void>
   shiftForward(): Promise<void>
-  restartStream(): void
-  pauseStream(): void
-  setStreamRate(rate: number): void
 }
 
 const { workspace, activeSession, activeUiState, workspaceRevision } = useWorkspaceRuntime()
@@ -56,10 +53,13 @@ const failedSessionCount = computed(() => { void workspaceRevision.value; return
 const foldStateCount = computed(() => { void activeUiState.value; return touchedFoldStateCount() })
 const highlightEntries = computed(() => { void activeUiState.value; return highlightCacheSize() })
 const markdownEntries = computed(() => { void activeUiState.value; return markdownCacheSize() })
-const activeUsage = computed(() => { void activeUiState.value.streamRenderTicks; return activeSession.value.kernel.usage })
+const activeUsage = computed(() => { void activeUiState.value.eventRevision; return activeSession.value.kernel.usage })
 const activeCacheHit = computed(() => cacheHitPercent(activeUsage.value))
 const activeContext = computed(() => contextOccupancyPercent(activeSession.value.kernel.context))
 const canInjectFixtures = computed(() => activeUiState.value.sessionStatus !== 'working' && !activeUiState.value.pendingInteraction)
+const streamRate = computed(() => { void activeUiState.value.eventRevision; return activeStream.value.rate })
+const streamIngressTicks = computed(() => { void activeUiState.value.eventRevision; return activeStream.value.ingressTicks })
+const streamPublishTicks = computed(() => { void activeUiState.value.eventRevision; return activeStream.value.publishTicks })
 
 function switchSession(id: string): void {
   if (id !== activeSession.value.id) {
@@ -100,7 +100,9 @@ function randomJump(): void {
   runtime.jumpInput = next % runtime.logicalCount
   void viewportRef.value?.jumpToMessage(runtime.jumpInput)
 }
-function onRateChange(event: Event): void { viewportRef.value?.setStreamRate(Number((event.target as HTMLSelectElement).value)) }
+function onRateChange(event: Event): void { activeStream.value.setRate(Number((event.target as HTMLSelectElement).value)) }
+function resumeStream(): void { activeStream.value.start(false) }
+function pauseStream(): void { activeStream.value.pause() }
 function indicator(descriptor: ConversationDescriptor): SessionIndicator { return deriveSessionIndicator(descriptor) }
 function indicatorDetail(descriptor: ConversationDescriptor): string {
   const state = indicator(descriptor)
@@ -195,7 +197,7 @@ async function injectAgentScenarios(): Promise<void> {
         <small class="control-note">Canonical scenarios: streaming output, uploads, image generation, TTS/ASR and diverse tool results; no DOM-side fixture shortcut.</small>
       </div>
 
-      <div class="control-group"><label>Live LLM output</label><div class="inline-control"><select :value="activeUiState.streamRate" @change="onRateChange"><option :value="5">5 Hz</option><option :value="20">20 Hz</option><option :value="60">60 Hz</option></select><button data-testid="stream-start" :disabled="activeUiState.sessionStatus !== 'working'" @click="viewportRef?.restartStream()">Resume</button><button class="secondary" :disabled="activeUiState.sessionStatus !== 'working'" @click="viewportRef?.pauseStream()">Pause</button></div></div>
+      <div class="control-group"><label>Live LLM output</label><div class="inline-control"><select :value="streamRate" @change="onRateChange"><option :value="5">5 Hz</option><option :value="20">20 Hz</option><option :value="60">60 Hz</option></select><button data-testid="stream-start" :disabled="activeUiState.sessionStatus !== 'working'" @click="resumeStream">Resume</button><button class="secondary" :disabled="activeUiState.sessionStatus !== 'working'" @click="pauseStream">Pause</button></div></div>
 
       <div class="metrics" data-testid="metrics">
         <div><span>logical</span><strong data-testid="logical-count">{{ activeSession.logicalCount.toLocaleString() }}</strong></div>
@@ -219,7 +221,7 @@ async function injectAgentScenarios(): Promise<void> {
         <div><span>last turn</span><strong data-testid="last-turn-reason">{{ activeSession.kernel.lastTurnReason ?? 'active' }}</strong></div>
         <div><span>failure</span><strong data-testid="last-failure-code">{{ activeSession.kernel.lastFailure?.code ?? '—' }}</strong></div>
         <div><span>FPS</span><strong>{{ fps }}</strong></div><div><span>frame p95</span><strong>{{ frameP95 }} ms</strong></div><div><span>long tasks</span><strong>{{ longTasks }}</strong></div><div><span>JS heap</span><strong>{{ heapMb === null ? 'n/a' : `${heapMb} MB` }}</strong></div>
-        <div><span>stream ingress</span><strong data-testid="stream-ingress">{{ activeUiState.streamIngressTicks }}</strong></div><div><span>UI publishes</span><strong data-testid="stream-ticks">{{ activeUiState.streamRenderTicks }}</strong></div><div><span>live chunks</span><strong data-testid="live-chunks">{{ activeUiState.liveChunkCount }}</strong></div>
+        <div><span>stream ingress</span><strong data-testid="stream-ingress">{{ streamIngressTicks }}</strong></div><div><span>UI publishes</span><strong data-testid="stream-ticks">{{ streamPublishTicks }}</strong></div><div><span>live chunks</span><strong data-testid="live-chunks">{{ activeUiState.liveChunkCount }}</strong></div>
         <div><span>fold state</span><strong>{{ foldStateCount }}</strong></div><div><span>highlight LRU</span><strong>{{ highlightEntries }}</strong></div><div><span>markdown LRU</span><strong>{{ markdownEntries }}</strong></div><div><span>renderer registry</span><strong>{{ registeredRendererIds().length }}</strong></div><div><span>virtual epoch</span><strong>{{ activeUiState.virtualEpoch }}</strong></div>
       </div>
 
