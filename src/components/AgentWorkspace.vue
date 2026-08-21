@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
-import { usePerformanceMetrics } from '../core/perf'
+import { usePerformanceMetrics } from '../demo/use-performance-metrics'
 import type { ConversationDescriptor } from '../conversation/contracts'
 import type { SessionViewMemory } from '../viewport/state'
 import {
