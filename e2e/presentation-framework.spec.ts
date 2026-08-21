@@ -26,7 +26,7 @@ async function visibleAnchor(page: Page): Promise<{ id: string; top: number } | 
     const reader = Number(readerText.replace(/[^0-9-]/g, ''))
     const rows = [...stage.querySelectorAll<HTMLElement>('[data-virtual-item="true"]')]
       .map(row => ({ row, rect: row.getBoundingClientRect(), messageIndex: Number(row.dataset.messageIndex ?? '-1') }))
-      .filter(({ rect, messageIndex }) => rect.bottom > viewport.top && rect.top < viewport.bottom && messageIndex <= reader)
+      .filter(({ rect, messageIndex }) => rect.bottom > viewport.top && rect.top < viewport.bottom && messageIndex <= reader + 1)
       .sort((a, b) => Math.abs(a.rect.top - viewport.top) - Math.abs(b.rect.top - viewport.top))
     const first = rows[0]
     return first?.row.dataset.renderUnit ? { id: first.row.dataset.renderUnit, top: first.rect.top - viewport.top } : null
@@ -67,24 +67,24 @@ test('runtime ContentBlock fixtures use the canonical projector and renderer reg
   await expect(page.getByTestId('logical-count')).toHaveText('180,025')
 
   await jump(page, 180_001)
-  const mixedOne = page.locator('[data-message-index="180001"]').first()
-  await expect(mixedOne.getByTestId('thinking-block')).toBeVisible()
-  await expect(mixedOne.getByTestId('diff-block')).toBeVisible()
-  await expect(mixedOne.getByTestId('markdown-block')).toBeVisible()
+  const mixedOneRows = page.locator('[data-message-index="180001"]')
+  await expect(mixedOneRows.getByTestId('thinking-block')).toBeVisible()
+  await expect(mixedOneRows.getByTestId('diff-block')).toBeVisible()
+  await expect(mixedOneRows.getByTestId('markdown-block')).toBeVisible()
 
   await jump(page, 180_002)
-  await expect(page.locator('[data-message-index="180002"]').first().getByTestId('tool-block')).toBeVisible()
+  await expect(page.locator('[data-message-index="180002"]').getByTestId('tool-block')).toBeVisible()
 
   await jump(page, 180_006)
-  await expect(page.locator('[data-message-index="180006"]').first().getByTestId('image-block')).toBeVisible()
+  await expect(page.locator('[data-message-index="180006"]').getByTestId('image-block')).toBeVisible()
 
   await jump(page, 180_011)
-  const html = page.locator('[data-message-index="180011"]').first().locator('.html-card')
+  const html = page.locator('[data-message-index="180011"]').locator('.html-card')
   await expect(html).toBeVisible()
   expect(await html.locator('script').count()).toBe(0)
 
   await jump(page, 180_016)
-  const code = page.locator('[data-message-index="180016"]').first().getByTestId('code-block')
+  const code = page.locator('[data-message-index="180016"]').getByTestId('code-block')
   await expect(code).toBeVisible()
   await expect(code.locator('.shiki')).toBeVisible({ timeout: 15_000 })
 
@@ -179,9 +179,8 @@ test('responsive reflow preserves containment, semantic anchor and mobile sessio
   expect(await bodyOverflow(page)).toBeLessThanOrEqual(1)
 
   await page.getByTestId('inject-mixed-five').click()
-  // Gallery used ordinal 1; mixed fixtures begin with ordinal 2 at index 180006.
   await jump(page, 180_007)
-  const image = page.locator('[data-message-index="180007"]').first().getByTestId('image-block').locator('img')
+  const image = page.locator('[data-message-index="180007"]').getByTestId('image-block').locator('img')
   await expect(image).toBeVisible()
   const imageFits = await image.evaluate(element => {
     const row = element.closest<HTMLElement>('[data-virtual-item="true"]')!
