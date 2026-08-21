@@ -1,2 +1,4 @@
-/** @deprecated Demo compatibility path. Import from `demo/stream-controller`. */
-export { SyntheticStreamController } from '../demo/stream-controller'
+import type { ConversationExecutionController } from './contracts'
+
+/** @deprecated Compatibility type; engine code should use ConversationExecutionController. */
+export type SyntheticStreamController = ConversationExecutionController
