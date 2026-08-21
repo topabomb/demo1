@@ -1,6 +1,6 @@
 # Verification
 
-This document defines the stable acceptance contract for the reference template. The authoritative pass/fail evidence is GitHub Actions metadata for the exact `main` SHA; this file intentionally does not embed a self-referential release SHA.
+This document defines the stable acceptance contract for the reference template. Authoritative pass/fail evidence is GitHub Actions metadata for the exact `main` SHA; this file intentionally does not embed a self-referential release SHA.
 
 ## Acceptance chain
 
@@ -15,11 +15,14 @@ Feature branches never replace the public demo. A successful Pages upload/deploy
 
 | Area | Required proof |
 |---|---|
-| Dependency direction | model/conversation/presentation/viewport/runtime remain acyclic; engine does not import demo/Vue implementation code |
-| Public API | `src/engine/index.ts` exposes framework-neutral contracts only |
+| Physical ownership | source implementation has exactly `src/engine/**` reusable ownership and `src/demo/**` executable-proof ownership; legacy parallel source roots do not return |
+| Dependency direction | every Engine relative import remains inside Engine; Demo may consume Engine; Engine never consumes Demo |
+| Public API | `src/engine/index.ts` exposes framework-neutral contracts and never imports Vue/Demo implementation |
+| Playback boundary | synthetic rate/pause/resume/ingress/publish telemetry exists only in Demo and does not leak into SessionKernel, execution port or `SessionUiSnapshot` |
 | Session semantics | live execution is separate from last Turn outcome; error history remains resumable |
 | Canonical identity | Message/Turn/Step/Block coordinates are stable; Step may remain absent when the producer does not expose one |
-| Renderer identity | RenderUnits expose message/Turn/Step/Block location directly; renderers need no Session/history scan |
+| Canonical mutation ownership | block clone/append/replace/settle helpers live in the model mutation layer rather than Session lifecycle code |
+| Renderer identity | RenderUnits expose Message/Turn/Step/Block location directly; renderers need no Session/history scan |
 | Ordered mutation feed | every semantic mutation reaches hot projection in producer order while summary/UI refresh remains independently coalesced |
 | Tool correlation | call/result records share one producer-owned `callId`; artifacts reference the producing call through provenance |
 | Tool/artifact boundary | execution metadata stays in Tool Blocks; uploads/generated images/audio are reusable artifact Blocks |
@@ -31,15 +34,17 @@ Feature branches never replace the public demo. A successful Pages upload/deploy
 | Projection cache | bounded cache, stable cache-hit containers and block-specific incremental projection |
 | Segment manager | bounded far jump, reader-ending cold restore and 512-message neighbor shifts |
 | Semantic viewport | exact messages-after; measurement probes cannot become semantic truth; jumps commit after stable measurement |
+| Physical navigation controller | one controller owns mounted sampling, user-scroll intent, committed anchor restoration, latest-wins navigation and physical tail pinning |
 | Physical tail | bottom detection/tail pin follows the actual scroll container across reflow |
 | Core primitives | Fenwick/page index/segment management remain deterministic and framework-neutral |
+| CSS ownership | `engine/vue/engine.css` is host-scoped; global page styling remains Demo-owned |
 
 ## Chromium product / stress matrix
 
 Local production and deployed Pages must both exercise:
 
 - 1,000,000+ logical messages with bounded hot projection and `<180` mounted rows;
-- 60 Hz live output with bounded incremental presentation work;
+- 60 Hz **Demo playback** driving the same Engine semantic mutation path with bounded incremental presentation work;
 - live reasoning collapsed/expanded through large dynamic-height changes;
 - reasoning → Markdown transition in the same assistant Message/Turn/Step;
 - uploads and reusable image/document/audio artifacts;
@@ -99,9 +104,11 @@ Performance counters such as FPS, long tasks and heap remain diagnostics because
 For a release to be called complete, verify on the exact `main` SHA:
 
 ```text
-validate job             Green
+unit / architecture       Green
+strict type + build       Green
+local Chromium            Green
 Pages deployment          Green
-public deployed E2E       Green
+public deployed Chromium  Green
 ```
 
 If any one is missing, cancelled or stale, the release is not accepted.
