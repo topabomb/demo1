@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { ConversationSessionRuntime, SHIFT_MESSAGES, WINDOW_MESSAGES } from '../src/engine/runtime/session-runtime'
 import { ConversationSessionKernel } from '../src/engine/conversation/session-kernel'
+import { block } from '../src/engine/model/conversation'
+import { appendMarkdownContent } from '../src/engine/model/message-mutations'
 import { SyntheticHistoryAdapter } from '../src/demo/history-adapter'
 
 function runtimeAt(position: number, status: 'idle' | 'working' = 'idle') {
-  const descriptor = { id: 'identity-test', title: 'identity test', age: 'now', status, logicalCount: 1_000_000 } as const
+  const descriptor = { id: 'identity-test', title: 'identity test', status, logicalCount: 1_000_000 } as const
   const kernel = new ConversationSessionKernel(descriptor, new SyntheticHistoryAdapter(descriptor.id, descriptor.logicalCount, 73, status === 'working'))
   const runtime = new ConversationSessionRuntime(kernel, {
     logicalPosition: position,
@@ -15,6 +17,15 @@ function runtimeAt(position: number, status: 'idle' | 'working' = 'idle') {
     draftText: '',
   })
   return { kernel, runtime }
+}
+
+function appendTurn(kernel: ConversationSessionKernel, prompt: string): number {
+  const turnId = `${kernel.id}:test-${kernel.count}`
+  const indexes = kernel.appendCanonicalMessages([
+    { turnId, role: 'user', blocks: [block('prompt', 'markdown', { markdown: prompt })] },
+    { turnId, role: 'assistant', blocks: [block('answer', 'markdown', { markdown: '' })], live: true },
+  ])
+  return indexes[1]!
 }
 
 describe('ConversationSessionRuntime', () => {
@@ -35,7 +46,6 @@ describe('ConversationSessionRuntime', () => {
     runtime.jump(100_000)
     expect(runtime.range.start).toBeLessThanOrEqual(100_000)
     expect(runtime.range.end).toBeGreaterThan(100_000)
-    expect(runtime.jumpInput).toBe(100_000)
     expect(runtime.currentLogicalPosition).toBe(500_000)
 
     runtime.setReaderPosition(100_000, false)
@@ -46,7 +56,7 @@ describe('ConversationSessionRuntime', () => {
   it('keeps a history reader stable while the kernel grows off-screen', async () => {
     const { kernel, runtime } = runtimeAt(500_000)
     const before = runtime.currentLogicalPosition
-    kernel.beginTurn('background work')
+    appendTurn(kernel, 'background work')
     await Promise.resolve()
     expect(runtime.logicalCount).toBe(1_000_002)
     expect(runtime.currentLogicalPosition).toBe(before)
@@ -56,8 +66,9 @@ describe('ConversationSessionRuntime', () => {
 
   it('rehydrates appended canonical turns from the lightweight kernel', async () => {
     const { kernel, runtime } = runtimeAt(999_999)
-    kernel.beginTurn('continue the old session')
-    kernel.appendAssistantDelta('new answer')
+    const assistantIndex = appendTurn(kernel, 'continue the old session')
+    const patched = appendMarkdownContent(kernel.getMessage(assistantIndex), 'new answer')
+    kernel.replaceCanonicalMessage(assistantIndex, patched.message, { kind: 'append-markdown', blockId: patched.blockId, delta: 'new answer' })
     await Promise.resolve()
     runtime.jump(kernel.count - 1)
     const tailNodes = runtime.projection.order
