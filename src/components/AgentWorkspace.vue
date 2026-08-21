@@ -1,11 +1,21 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { usePerformanceMetrics } from '../core/perf'
+import type { ConversationDescriptor, ViewportSnapshot } from '../conversation/contracts'
+import {
+  billedInputTokens,
+  cacheHitPercent,
+  contextOccupancyPercent,
+  deriveSessionIndicator,
+  formatTokens,
+  sessionIndicatorGlyph,
+  sessionIndicatorLabel,
+  type SessionIndicator,
+} from '../conversation/session-semantics'
 import { touchedFoldStateCount } from './renderers/fold-state'
 import { highlightCacheSize } from './renderers/highlight-client'
 import { useWorkspaceRuntime } from '../vue/use-workspace-runtime'
 import ConversationViewport from './ConversationViewport.vue'
-import type { ViewportSnapshot } from '../conversation/contracts'
 
 interface ViewportHandle {
   captureSnapshot(): ViewportSnapshot
@@ -35,8 +45,13 @@ const sessionDescriptors = computed(() => {
 const hotSessionIds = computed(() => { void workspaceRevision.value; return workspace.hotSessionIds.join(', ') })
 const hotSessionCount = computed(() => { void workspaceRevision.value; return workspace.hotSessionCount })
 const runningSessionCount = computed(() => { void workspaceRevision.value; return workspace.runningSessionCount })
+const blockedSessionCount = computed(() => { void workspaceRevision.value; return workspace.blockedSessionCount })
+const failedSessionCount = computed(() => { void workspaceRevision.value; return workspace.failedSessionCount })
 const foldStateCount = computed(() => { void activeUiState.value; return touchedFoldStateCount() })
 const highlightEntries = computed(() => { void activeUiState.value; return highlightCacheSize() })
+const activeUsage = computed(() => { void activeUiState.value.streamRenderTicks; return activeSession.value.kernel.usage })
+const activeCacheHit = computed(() => cacheHitPercent(activeUsage.value))
+const activeContext = computed(() => contextOccupancyPercent(activeSession.value.kernel.context))
 
 function switchSession(id: string): void {
   if (id === activeSession.value.id) return
@@ -60,30 +75,29 @@ function randomJump(): void {
   void viewportRef.value?.jumpToMessage(runtime.jumpInput)
 }
 function onRateChange(event: Event): void { viewportRef.value?.setStreamRate(Number((event.target as HTMLSelectElement).value)) }
-function statusLabel(status: string): string {
-  if (status === 'working') return 'Working'
-  if (status === 'waiting') return 'Needs approval'
-  if (status === 'interrupted') return 'Interrupted'
-  return 'Idle'
+function indicator(descriptor: ConversationDescriptor): SessionIndicator { return deriveSessionIndicator(descriptor) }
+function indicatorDetail(descriptor: ConversationDescriptor): string {
+  const state = indicator(descriptor)
+  if (state === 'blocked') return descriptor.pendingInteraction?.kind === 'question' ? 'Question' : 'Approval'
+  if (state === 'failed') return descriptor.lastFailure?.code ?? 'Error'
+  if (descriptor.queuedPrompts) return `${descriptor.queuedPrompts} queued`
+  const hit = descriptor.usage ? cacheHitPercent({
+    inputTokens: descriptor.usage.inputTokens ?? 0,
+    outputTokens: descriptor.usage.outputTokens ?? 0,
+    cacheReadTokens: descriptor.usage.cacheReadTokens ?? 0,
+    cacheWriteTokens: descriptor.usage.cacheWriteTokens ?? 0,
+    reasoningTokens: descriptor.usage.reasoningTokens ?? 0,
+  }) : null
+  if (hit !== null) return `${hit}% cache`
+  return `${descriptor.logicalCount.toLocaleString()} messages`
 }
 </script>
 
 <template>
   <section class="agent-app" :class="{ 'diagnostics-closed': !diagnosticsOpen }">
-    <nav class="workspace-rail" aria-label="Primary navigation">
-      <div class="app-mark">N</div>
-      <button class="rail-button active" title="Chat">✦</button>
-      <button class="rail-button" title="Workspaces">▦</button>
-      <button class="rail-button" title="Files">◇</button>
-      <button class="rail-button" title="Agents">⌁</button>
-      <div class="rail-spacer" />
-      <button class="rail-button" title="Settings">⚙</button>
-      <div class="avatar">T</div>
-    </nav>
-
     <aside class="session-sidebar">
-      <div class="sidebar-head"><div class="product-name">CodeNomad Lab</div><button class="icon-button" title="Workspace menu">⌘</button></div>
-      <button class="workspace-picker"><span class="workspace-dot" /> million-message-workspace <span>⌄</span></button>
+      <div class="sidebar-head"><div class="product-name">Agent Workspace Lab</div><a class="architecture-link" href="#architecture" title="Architecture reference">⌘</a></div>
+      <div class="workspace-context"><span class="workspace-dot" /><span>reference-workspace</span><small>backend-neutral</small></div>
       <button class="new-session" data-testid="new-session" @click="newSession">＋ New session</button>
       <label class="session-search" for="session-filter">⌕
         <input id="session-filter" v-model="sessionQuery" data-testid="session-search" placeholder="Search sessions" />
@@ -95,20 +109,26 @@ function statusLabel(status: string): string {
           v-for="descriptor in sessionDescriptors"
           :key="descriptor.id"
           class="session-row"
-          :class="{ active: descriptor.id === activeSession.id, unread: descriptor.unread }"
+          :class="[`indicator-${indicator(descriptor)}`, { active: descriptor.id === activeSession.id, unread: descriptor.unread }]"
           :data-testid="`session-${descriptor.id}`"
           @click="switchSession(descriptor.id)"
         >
-          <span class="session-glyph" :class="`status-${descriptor.status}`">{{ descriptor.status === 'working' ? '●' : descriptor.status === 'waiting' ? '!' : descriptor.status === 'interrupted' ? '×' : '○' }}</span>
+          <span class="session-glyph" :class="`indicator-${indicator(descriptor)}`">{{ sessionIndicatorGlyph(indicator(descriptor)) }}</span>
           <span class="session-copy">
             <strong>{{ descriptor.title }}</strong>
-            <small><span>{{ statusLabel(descriptor.status) }}</span><span v-if="descriptor.queuedPrompts"> · {{ descriptor.queuedPrompts }} queued</span><span v-else-if="descriptor.status === 'idle'"> · {{ descriptor.logicalCount.toLocaleString() }} messages</span></small>
+            <small><span>{{ sessionIndicatorLabel(indicator(descriptor)) }}</span><span> · {{ indicatorDetail(descriptor) }}</span></small>
           </span>
           <span class="session-row-meta"><i v-if="descriptor.unread" class="unread-dot" /><time>{{ descriptor.age }}</time></span>
         </button>
         <div v-if="sessionDescriptors.length === 0" class="session-empty">No matching sessions</div>
       </div>
-      <div class="sidebar-footer"><span class="status-led" /> Runtime connected <span class="sidebar-version">{{ runningSessionCount }} running · {{ hotSessionCount }}/3 hot</span></div>
+      <div class="sidebar-footer">
+        <span class="status-led" />
+        <span>{{ runningSessionCount }} working</span>
+        <span v-if="blockedSessionCount">· {{ blockedSessionCount }} blocked</span>
+        <span v-if="failedSessionCount">· {{ failedSessionCount }} failed</span>
+        <span class="sidebar-version">{{ hotSessionCount }}/3 hot</span>
+      </div>
     </aside>
 
     <ConversationViewport :key="activeSession.id" ref="viewportRef" :runtime="activeSession" :stream="activeStream" :diagnostics="diagnosticsOpen" />
@@ -137,18 +157,26 @@ function statusLabel(status: string): string {
       <div class="metrics" data-testid="metrics">
         <div><span>logical</span><strong data-testid="logical-count">{{ activeSession.logicalCount.toLocaleString() }}</strong></div>
         <div><span>running kernels</span><strong data-testid="running-kernels">{{ runningSessionCount }}</strong></div>
+        <div><span>blocked sessions</span><strong data-testid="blocked-sessions">{{ blockedSessionCount }}</strong></div>
+        <div><span>failed last turn</span><strong data-testid="failed-sessions">{{ failedSessionCount }}</strong></div>
         <div><span>hot sessions</span><strong data-testid="hot-sessions">{{ hotSessionCount }}</strong></div>
         <div><span>hot messages</span><strong>{{ (activeUiState.rangeEnd - activeUiState.rangeStart).toLocaleString() }}</strong></div>
         <div><span>render units</span><strong data-testid="active-units">{{ activeUiState.projectionSize.toLocaleString() }}</strong></div>
         <div><span>DOM rows</span><strong data-testid="mounted-rows">{{ activeUiState.mountedRows }}</strong></div>
         <div><span>messages after</span><strong data-testid="messages-after-metric">{{ activeUiState.messagesAfter.toLocaleString() }}</strong></div>
         <div><span>queue</span><strong data-testid="queued-prompts">{{ activeUiState.queuedPrompts }}</strong></div>
+        <div><span>input tokens</span><strong data-testid="diagnostic-input-tokens">{{ formatTokens(billedInputTokens(activeUsage)) }}</strong></div>
+        <div><span>output tokens</span><strong data-testid="diagnostic-output-tokens">{{ formatTokens(activeUsage.outputTokens) }}</strong></div>
+        <div><span>cache hit</span><strong data-testid="diagnostic-cache-hit">{{ activeCacheHit === null ? 'n/a' : `${activeCacheHit}%` }}</strong></div>
+        <div><span>context</span><strong data-testid="diagnostic-context">{{ activeContext === null ? 'n/a' : `${activeContext}%` }}</strong></div>
+        <div><span>last turn</span><strong data-testid="last-turn-reason">{{ activeSession.kernel.lastTurnReason ?? 'active' }}</strong></div>
+        <div><span>failure</span><strong data-testid="last-failure-code">{{ activeSession.kernel.lastFailure?.code ?? '—' }}</strong></div>
         <div><span>FPS</span><strong>{{ fps }}</strong></div><div><span>frame p95</span><strong>{{ frameP95 }} ms</strong></div><div><span>long tasks</span><strong>{{ longTasks }}</strong></div><div><span>JS heap</span><strong>{{ heapMb === null ? 'n/a' : `${heapMb} MB` }}</strong></div>
         <div><span>stream ingress</span><strong data-testid="stream-ingress">{{ activeUiState.streamIngressTicks }}</strong></div><div><span>UI publishes</span><strong data-testid="stream-ticks">{{ activeUiState.streamRenderTicks }}</strong></div><div><span>live chunks</span><strong data-testid="live-chunks">{{ activeUiState.liveChunkCount }}</strong></div>
         <div><span>fold state</span><strong>{{ foldStateCount }}</strong></div><div><span>highlight LRU</span><strong>{{ highlightEntries }}</strong></div><div><span>virtual epoch</span><strong>{{ activeUiState.virtualEpoch }}</strong></div>
       </div>
 
-      <div class="architecture-note"><strong>Kernel / viewport split</strong><span>SessionKernel owns execution, queue, pending input and appended turns; hot ConversationRuntime owns only projection/viewport state.</span><span>Hot runtime LRU: <b data-testid="hot-session-ids">{{ hotSessionIds }}</b></span><span>Stable keyed projection: streaming patches only the active assistant message.</span><span>Global page index: {{ activeSession.pageHeights.pageCount.toLocaleString() }} Fenwick leaves.</span></div>
+      <div class="architecture-note"><strong>Durable kernel / disposable viewport</strong><span>SessionKernel owns execution, last-turn outcome, queue, blockers, appended turns and durable token/cache/context projections.</span><span>Hot runtime LRU: <b data-testid="hot-session-ids">{{ hotSessionIds }}</b></span><span>Viewport algorithms consume semantic keys/geometry through an adapter contract; CSS is not a state source.</span><span>Global page index: {{ activeSession.pageHeights.pageCount.toLocaleString() }} Fenwick leaves.</span></div>
     </aside>
 
     <button v-if="!diagnosticsOpen" class="diagnostics-reopen" data-testid="diagnostics-open" title="Architecture diagnostics" @click="diagnosticsOpen = true">◫</button>
