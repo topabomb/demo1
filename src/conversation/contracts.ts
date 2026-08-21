@@ -1,10 +1,10 @@
-import type { LogicalMessage, RenderUnit } from '../core/types'
+import type { LogicalMessage } from '../model/conversation'
+import type { RenderUnit } from '../presentation/render-unit'
 import type { Unsubscribe } from './notifier'
 
-/** Live session execution state. Historical turn outcome is deliberately separate. */
+/** Live execution state. Historical Turn outcome is deliberately separate. */
 export type SessionStatus = 'idle' | 'working' | 'waiting' | 'interrupted'
 
-/** DSH-aligned portable reasons for the most recently settled turn. */
 export type TurnEndReasonKind =
   | 'completed'
   | 'aborted'
@@ -21,10 +21,7 @@ export interface LlmFailure {
   requestId?: string
 }
 
-/**
- * Provider-neutral token accounting. The prompt buckets are disjoint:
- * inputTokens is uncached input; cacheReadTokens/cacheWriteTokens are separate.
- */
+/** Provider-neutral token accounting. Prompt buckets are disjoint. */
 export interface TokenUsage {
   inputTokens: number
   outputTokens: number
@@ -63,16 +60,17 @@ export interface ConversationDescriptor {
   stepCount?: number
 }
 
+/** Cold-history read port. A production adapter may page from DB/network. */
 export interface ConversationBackend {
   readonly sessionId: string
   readonly count: number
   loadRange(start: number, count: number): readonly LogicalMessage[]
 }
-
 export interface ConversationHistoryAdapter extends ConversationBackend {}
 
 export type SubmitDisposition = 'started' | 'queued' | 'blocked'
 
+/** Execution port; the synthetic controller is only the demo implementation. */
 export interface ConversationExecutionController {
   readonly running: boolean
   start(reset?: boolean): void
@@ -83,6 +81,7 @@ export interface ConversationExecutionController {
   setRate(rate: number): void
 }
 
+/** Rebuildable keyed presentation store. */
 export interface ConversationProjectionStore {
   readonly order: readonly string[]
   readonly size: number
@@ -91,14 +90,25 @@ export interface ConversationProjectionStore {
   subscribeNode(id: string, listener: () => void): Unsubscribe
 }
 
-export interface ViewportSnapshot {
+/** Framework-neutral semantic viewport checkpoint. No draft/product state belongs here. */
+export interface SemanticViewportSnapshot {
   logicalPosition: number
   anchorUnitId: string | null
   anchorOffsetPx: number
   followTail: boolean
   atVisualBottom: boolean
+}
+
+/**
+ * Small session-local interaction memory persisted across Recent switching/hot-runtime
+ * eviction. It is not canonical history and may use a different persistence policy.
+ */
+export interface SessionViewMemory extends SemanticViewportSnapshot {
   draftText: string
 }
+
+/** @deprecated compatibility name; use SemanticViewportSnapshot or SessionViewMemory explicitly. */
+export type ViewportSnapshot = SessionViewMemory
 
 export interface StreamDelta {
   sessionId: string
