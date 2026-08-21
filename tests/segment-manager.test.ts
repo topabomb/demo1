@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { SegmentManager } from '../src/core/segment-manager'
+import { SegmentManager } from '../src/engine/core/segment-manager'
 
 describe('SegmentManager semantic restore', () => {
   it('ends an initial/cold-rehydrated window at the last visible logical reader', () => {
