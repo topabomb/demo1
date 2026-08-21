@@ -34,13 +34,19 @@ export function clampLogicalIndex(index: number, logicalCount: number): number {
   return Math.max(0, Math.min(logicalCount - 1, Math.floor(Number(index) || 0)))
 }
 
+/**
+ * Select the committed row whose leading edge is nearest the viewport leading edge.
+ * A giant row may start hundreds of pixels above the viewport while still intersecting it;
+ * preserving that distant edge produces visible jumps during responsive reflow. Measurement
+ * probes are rejected by the semantic-reader filter before geometric ranking.
+ */
 export function selectCommittedAnchor(rows: readonly ViewportRowSample[], viewportTop: number, viewportBottom: number, reader: number): CommittedViewportAnchor | null {
-  const first = rows
+  const candidate = rows
     .filter(row => row.messageIndex <= reader + 1 && row.bottom > viewportTop && row.top < viewportBottom)
-    .sort((a, b) => a.top - b.top)[0]
-  if (!first) return null
-  const top = first.top - viewportTop
-  return { id: first.id, offsetPx: top, viewportTopPx: top }
+    .sort((a, b) => Math.abs(a.top - viewportTop) - Math.abs(b.top - viewportTop))[0]
+  if (!candidate) return null
+  const top = candidate.top - viewportTop
+  return { id: candidate.id, offsetPx: top, viewportTopPx: top }
 }
 
 export function isMessageCommittedVisible(rows: readonly ViewportRowSample[], target: number, viewportTop: number, viewportBottom: number): boolean {
