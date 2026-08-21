@@ -22,6 +22,8 @@ export interface LogicalMessage {
   id: string
   index: number
   turnId: string
+  /** Stable model-request coordinate inside a Turn when the producer has one. */
+  stepId?: string
   role: LogicalRole
   blocks?: readonly ContentBlock[]
   revision?: number
@@ -30,13 +32,14 @@ export interface LogicalMessage {
 
   /** Synthetic/demo compatibility only. Production adapters should emit `blocks`. */
   kind?: string
-  seed: number
-  intensity: number
+  seed?: number
+  intensity?: number
   content?: string
 }
 
 export interface AppendCanonicalMessage {
   turnId: string
+  stepId?: string
   role: LogicalRole
   blocks: readonly ContentBlock[]
   variant?: string
