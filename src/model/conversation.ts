@@ -29,7 +29,7 @@ export interface ContentBlockMap {
   markdown: { markdown: string; flavor?: 'gfm' }
   reasoning: { text: string; tokenCount?: number; durationMs?: number; defaultOpen?: boolean; status?: 'streaming' | 'complete' | 'interrupted' }
   code: { code: string; language?: string; filename?: string; defaultOpen?: boolean }
-  /** Legacy stress-corpus image shape. New user/tool media should normally use `attachments`. */
+  /** Stress/reference image primitive. User/tool media normally uses `attachments`. */
   image: { src?: string; width: number; height: number; alt?: string; seed?: number }
   attachments: { items: readonly AttachmentItem[]; title?: string; provenance?: ArtifactProvenance }
   audio: { title: string; purpose: 'tts' | 'asr-input' | 'recording'; durationMs: number; src?: string; transcript?: string; model?: string; waveform?: readonly number[]; status?: 'processing' | 'ready' | 'error' }
@@ -46,7 +46,7 @@ export type ContentBlock<K extends ContentBlockType = ContentBlockType> = {
 
 export type LogicalRole = 'user' | 'assistant' | 'tool' | 'system'
 
-/** Provider-neutral canonical history record. No Vue/DOM/virtualizer concerns belong here. */
+/** Provider-neutral canonical history record. No demo, Vue, DOM or virtualizer fields belong here. */
 export interface LogicalMessage {
   id: string
   index: number
@@ -54,24 +54,17 @@ export interface LogicalMessage {
   /** Stable model-request coordinate inside a Turn when the producer has one. */
   stepId?: string
   role: LogicalRole
-  blocks?: readonly ContentBlock[]
+  blocks: readonly ContentBlock[]
   revision?: number
   live?: boolean
-  variant?: string
-
-  /** Synthetic/demo compatibility only. Production adapters should emit `blocks`. */
-  kind?: string
-  seed?: number
-  intensity?: number
-  content?: string
 }
 
+/** Append form used by normalized backend/runtime adapters before global message indexes are assigned. */
 export interface AppendCanonicalMessage {
   turnId: string
   stepId?: string
   role: LogicalRole
   blocks: readonly ContentBlock[]
-  variant?: string
   live?: boolean
 }
 
