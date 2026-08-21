@@ -19,7 +19,7 @@ export interface LlmFailure {
   requestId?: string
 }
 
-/** Provider-neutral token accounting. Prompt buckets are disjoint. */
+/** Provider-normalized token accounting. Prompt buckets are disjoint. */
 export interface TokenUsage {
   inputTokens: number
   outputTokens: number
@@ -41,10 +41,10 @@ export interface PendingInteraction {
   toolName?: string
 }
 
+/** Durable/session semantics only. Relative age, badges and other list chrome belong to products. */
 export interface ConversationDescriptor {
   id: string
   title: string
-  age: string
   status: SessionStatus
   logicalCount: number
   unread?: boolean
