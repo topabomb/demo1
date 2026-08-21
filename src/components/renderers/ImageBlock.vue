@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { RenderUnit } from '../../core/types'
+import type { RenderUnit } from '../../presentation/render-unit'
 const props = defineProps<{ unit: RenderUnit }>()
 const width = computed(() => Math.max(1, Number(props.unit.payload.width ?? 800)))
 const height = computed(() => Math.max(1, Number(props.unit.payload.height ?? 450)))
