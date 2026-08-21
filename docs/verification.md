@@ -9,9 +9,9 @@ One workflow owns the release path:
 1. **Pull request / main validation** — frozen install, unit + architecture tests, strict Vue/TypeScript typecheck, production build and full Chromium E2E against the local production server.
 2. **GitHub Pages (`main` only)** — after validation succeeds, build and deploy the same SHA, then run the full Chromium suite against the public deployment URL.
 
-Feature branches never replace the public demo. A successful Pages upload/deploy is not accepted until the deployed-site Chromium gate also passes.
+A successful Pages upload/deploy is not accepted until the deployed-site Chromium gate also passes.
 
-The workflow's concurrency key includes the event type as well as the PR number/ref. This is required because a merged `pull_request: closed` event may expose the base branch as `github.ref`; without event isolation its branch-cleanup run can race with and cancel the `push main` release run (or be cancelled by it).
+The workflow's concurrency key includes the event type as well as the PR number/ref. This prevents merged-PR cleanup from racing with or cancelling the `push main` release run.
 
 ## Unit / architecture matrix
 
@@ -20,10 +20,13 @@ The workflow's concurrency key includes the event type as well as the PR number/
 | Physical ownership | source implementation has exactly `src/engine/**` reusable ownership and `src/demo/**` executable-proof ownership; legacy parallel source roots do not return |
 | Dependency direction | every Engine relative import remains inside Engine; Demo may consume Engine; Engine never consumes Demo |
 | Public API | `src/engine/index.ts` exposes framework-neutral contracts and never imports Vue/Demo implementation |
-| Playback boundary | synthetic rate/pause/resume/ingress/publish telemetry exists only in Demo and does not leak into SessionKernel, execution port or `SessionUiSnapshot` |
+| Provider-policy boundary | SessionKernel stores canonical/lifecycle/accounting facts but never creates assumed reasoning/answer blocks, synthetic completion/abort copy, or token/cache estimates |
+| Playback boundary | synthetic rate/pause/resume/content generation/token estimates/ingress/publish telemetry exist only in Demo and do not leak into Engine ports/state |
+| Product-metadata boundary | display-only relative session age and diagnostics form state remain Demo-owned |
+| Physical-state boundary | mounted DOM row telemetry is emitted by the Vue adapter and never persisted in `ConversationSessionRuntime` / `SessionUiSnapshot` |
 | Session semantics | live execution is separate from last Turn outcome; error history remains resumable |
 | Canonical identity | Message/Turn/Step/Block coordinates are stable; Step may remain absent when the producer does not expose one |
-| Canonical mutation ownership | block clone/append/replace/settle helpers live in the model mutation layer rather than Session lifecycle code |
+| Canonical mutation ownership | block clone/append/replace/settle helpers live in the model mutation layer; they do not estimate provider billing semantics |
 | Renderer identity | RenderUnits expose Message/Turn/Step/Block location directly; renderers need no Session/history scan |
 | Ordered mutation feed | every semantic mutation reaches hot projection in producer order while summary/UI refresh remains independently coalesced |
 | Tool correlation | call/result records share one producer-owned `callId`; artifacts reference the producing call through provenance |
@@ -37,9 +40,10 @@ The workflow's concurrency key includes the event type as well as the PR number/
 | Segment manager | bounded far jump, reader-ending cold restore and 512-message neighbor shifts |
 | Semantic viewport | exact messages-after; measurement probes cannot become semantic truth; jumps commit after stable measurement |
 | Physical navigation controller | one controller owns mounted sampling, user-scroll intent, committed anchor restoration, latest-wins navigation and physical tail pinning |
+| Vue product seam | Engine viewport has only real conversation controls; product context/actions/overlays/tools enter through narrow slots; no fake model/search/attachment affordances |
 | Physical tail | bottom detection/tail pin follows the actual scroll container across reflow |
 | Core primitives | Fenwick/page index/segment management remain deterministic and framework-neutral |
-| CSS ownership | `engine/vue/engine.css` is host-scoped; global page styling remains Demo-owned |
+| CSS ownership | `engine.css` owns shell/viewport/composer; `renderers.css` owns content visuals; both remain host-scoped; Demo alone owns global/product CSS |
 | Release concurrency | `push main` validation/deploy and merged-PR cleanup use distinct concurrency groups and cannot cancel each other |
 
 ## Chromium product / stress matrix
@@ -64,7 +68,7 @@ Local production and deployed Pages must both exercise:
 - failed Turn → resumable new Turn;
 - queue, approval and question blocker persistence;
 - exact Working / Completed / Blocked / Failed / Interrupted Recent indicators;
-- durable input/output/reasoning/cache/context statistics;
+- provider-normalized input/output/reasoning/cache/context statistics;
 - New Session and session search;
 - exact `Latest` / messages-after semantics;
 - variable-height composer with no viewport overlay;
@@ -74,6 +78,8 @@ Local production and deployed Pages must both exercise:
 - virtualizer-owned wrapper with zero vertical margin/padding;
 - runtime changes to sidebar/content widths, row gap and composer height preserving semantic/geometry invariants;
 - architecture page exposing the same ownership boundaries implemented in code;
+- **clean Engine shell**: public Demo supplies its synthetic/debug chrome through Engine slots while fake Search/Attach/model controls remain absent;
+- **responsive product seam**: mobile host-owned menu spacing, header and composer remain usable without horizontal overflow;
 - **host CSS isolation**: later host-global `button/input/textarea/select/img/table` rules cannot break conversation geometry, overflow or row layout.
 
 Streaming/performance diagnostics are **eventually observed outputs**, not a same-render-frame contract. Semantic mutations are applied synchronously in producer order, while Vue/workspace summary publication may be coalesced independently. E2E therefore waits for stream-publish and projection counters to reach their required values separately; it never weakens the quantitative thresholds just to accommodate scheduling jitter.
