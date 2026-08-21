@@ -46,12 +46,23 @@ async function jump(page: Page, index: number): Promise<void> {
   // Virtua may temporarily mount the target as a measurement probe before the
   // asynchronous programmatic scroll has actually committed. Navigation is only
   // complete when the target is physically visible and the semantic reader has
-  // converged around it; DOM presence alone is not a completion signal.
+  // converged exactly on the requested coordinate; DOM presence alone is not a
+  // completion signal.
   await expect(page.locator(`[data-message-index="${index}"]`).first()).toBeVisible({ timeout: 15_000 })
-  await expect.poll(async () => {
-    const reader = numeric(await page.getByTestId('reader-position').textContent())
-    return Math.abs(reader - index)
-  }, { timeout: 15_000 }).toBeLessThan(48)
+  await expect.poll(async () => numeric(await page.getByTestId('reader-position').textContent()), { timeout: 15_000 }).toBe(index)
+  await settleNavigationFrames(page)
+}
+
+async function settleNavigationFrames(page: Page, count = 5): Promise<void> {
+  await page.evaluate((frames) => new Promise<void>(resolve => {
+    let remaining = frames
+    const next = () => {
+      remaining -= 1
+      if (remaining <= 0) resolve()
+      else requestAnimationFrame(next)
+    }
+    requestAnimationFrame(next)
+  }), count)
 }
 
 async function switchSession(page: Page, id: string): Promise<void> {
