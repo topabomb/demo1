@@ -7,11 +7,6 @@ interface PatternEntry {
   variant: string
 }
 
-/**
- * A deterministic Agent-like turn pattern. It deliberately includes consecutive
- * thinking/tool/result sequences, long assistant content, code, diffs, images and
- * raw HTML so the UI is stressed with realistic heterogeneous heights.
- */
 const TURN_PATTERN: readonly PatternEntry[] = [
   { role: 'user', kind: 'markdown', variant: 'user-request' },
   { role: 'assistant', kind: 'thinking', variant: 'analysis' },
@@ -43,11 +38,13 @@ export class SyntheticConversationSource implements ConversationSource {
   readonly count: number
   #scope: string
   #seedOffset: number
+  #liveTail: boolean
 
-  constructor(count: number, scope = '', seedOffset = 0) {
+  constructor(count: number, scope = '', seedOffset = 0, liveTail = false) {
     this.count = count
     this.#scope = scope
     this.#seedOffset = seedOffset
+    this.#liveTail = liveTail
   }
 
   getMessage(index: number): LogicalMessage {
@@ -61,7 +58,7 @@ export class SyntheticConversationSource implements ConversationSource {
       ? `${this.#scope}:turn-${Math.floor(index / TURN_PATTERN.length)}`
       : `turn-${Math.floor(index / TURN_PATTERN.length)}`
 
-    if (index === this.count - 1) {
+    if (this.#liveTail && index === this.count - 1) {
       return {
         id: messageId,
         index,
