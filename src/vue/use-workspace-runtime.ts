@@ -1,10 +1,10 @@
 import { onBeforeUnmount, shallowRef } from 'vue'
-import { ConversationWorkspaceRuntime } from '../conversation/workspace-runtime'
+import { DemoWorkspaceRuntime } from '../demo/workspace-runtime'
 import type { ConversationSessionRuntime, SessionUiSnapshot } from '../conversation/session-runtime'
 
-/** Thin Vue bridge: framework sees atomic snapshots, not the mutable session kernel. */
+/** Demo-only Vue bridge. Reusable engine consumers compose their own workspace/session owner. */
 export function useWorkspaceRuntime() {
-  const workspace = new ConversationWorkspaceRuntime()
+  const workspace = new DemoWorkspaceRuntime()
   const workspaceRevision = shallowRef(0)
   const activeSession = shallowRef<ConversationSessionRuntime>(workspace.activeSession)
   const activeUiState = shallowRef<SessionUiSnapshot>(workspace.activeSession.uiSnapshot)
