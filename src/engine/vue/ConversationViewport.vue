@@ -16,7 +16,8 @@ import { VIEWPORT_POLICY, type CommittedViewportAnchor } from '../viewport/contr
 import ConversationNodeSeat from './ConversationNodeSeat.vue'
 import { ViewportNavigationController } from './viewport-navigation-controller'
 
-const props = defineProps<{ runtime: ConversationSessionRuntime; stream: ConversationExecutionController; uiState: SessionUiSnapshot; diagnostics?: boolean }>()
+const props = defineProps<{ runtime: ConversationSessionRuntime; stream: ConversationExecutionController; uiState: SessionUiSnapshot }>()
+const emit = defineEmits<{ viewportMetrics: [metrics: { mountedRows: number }] }>()
 
 const VIRTUAL_BUFFER_PX = 900
 const VIRTUAL_ITEM_HINT_PX = 180
@@ -27,6 +28,7 @@ const composerInputRef = ref<HTMLTextAreaElement | null>(null)
 const composerShellRef = ref<HTMLElement | null>(null)
 const order = shallowRef<string[]>([...props.runtime.projection.order])
 const composerText = ref(props.runtime.draftText)
+const mountedRows = ref(0)
 const shifting = ref(false)
 const uiState = computed(() => props.uiState)
 let metricsFrame = 0
@@ -92,8 +94,10 @@ function refreshMountedRows(): void {
   if (metricsFrame) return
   metricsFrame = requestAnimationFrame(() => {
     metricsFrame = 0
-    props.runtime.mountedRows = scrollStageRef.value?.querySelectorAll('[data-virtual-item="true"]').length ?? 0
-    props.runtime.markStateDirty()
+    const next = scrollStageRef.value?.querySelectorAll('[data-virtual-item="true"]').length ?? 0
+    if (mountedRows.value === next) return
+    mountedRows.value = next
+    emit('viewportMetrics', { mountedRows: next })
   })
 }
 
@@ -137,7 +141,7 @@ async function applyShift(plan: ShiftPlan): Promise<void> {
 async function shiftBackward(): Promise<void> { if (shifting.value) return; const plan = props.runtime.planShiftBackward(); if (!plan) return; shifting.value = true; navigation.clearUserIntent(); props.runtime.setFollowTail(false); await applyShift(plan); shifting.value = false }
 async function shiftForward(): Promise<void> { if (shifting.value) return; const plan = props.runtime.planShiftForward(); if (!plan) return; shifting.value = true; navigation.clearUserIntent(); await applyShift(plan); shifting.value = false }
 
-async function jumpToMessage(raw = props.runtime.jumpInput): Promise<void> {
+async function jumpToMessage(raw = props.runtime.currentLogicalPosition): Promise<void> {
   if (props.runtime.logicalCount <= 0) return
   const revision = navigation.begin()
   try {
@@ -314,23 +318,21 @@ defineExpose({ captureSnapshot, jumpToMessage, jumpToLatest, shiftBackward, shif
 <template>
   <main class="conversation-shell" :data-session-id="runtime.id">
     <header class="conversation-header">
-      <div class="conversation-title"><strong>{{ runtime.title }}</strong><span>workspace / {{ runtime.id }}</span></div>
-      <div class="header-chips">
-        <button class="model-chip">Synthetic Agent</button><button class="model-chip secondary-model">Reasoning · balanced</button>
+      <div class="conversation-heading">
+        <div class="conversation-title"><strong>{{ runtime.title }}</strong><span>conversation / {{ runtime.id }}</span></div>
+        <div class="conversation-header-context"><slot name="header-context" /></div>
+      </div>
+      <div class="conversation-header-actions">
+        <slot name="header-actions" />
         <span class="run-status" :class="`indicator-${sessionIndicator}`" :title="runtime.kernel.lastFailure?.message"><i /> {{ statusLabel }}</span>
-        <button v-if="uiState.sessionStatus === 'working'" class="header-stop" data-testid="abort-run" title="Stop run" @click="abortRun">■</button>
-        <button class="header-icon" title="Search conversation">⌕</button>
+        <button v-if="uiState.sessionStatus === 'working'" class="header-stop" data-testid="abort-run" type="button" title="Stop run" @click="abortRun">■</button>
       </div>
     </header>
 
     <div ref="scrollStageRef" class="scroll-stage" data-testid="scrollport" @wheel.capture="onUserWheel" @pointerdown.capture="onUserPointerDown">
-      <div v-show="diagnostics" class="conversation-meta-strip">
-        <span>Loaded <strong data-testid="segment-range">{{ uiState.rangeStart.toLocaleString() }} – {{ Math.max(uiState.rangeStart, uiState.rangeEnd - 1).toLocaleString() }}</strong></span>
-        <span>Reader <strong data-testid="reader-position">#{{ uiState.reader.toLocaleString() }}</strong></span>
-        <span data-testid="mounted-label">{{ uiState.mountedRows }} DOM rows</span><span v-if="uiState.streamTarget" data-testid="follow-state">{{ followLabel }}</span>
-      </div>
+      <slot name="viewport-overlay" :mounted-rows="mountedRows" :follow-label="followLabel" :ui-state="uiState" />
 
-      <div v-if="order.length === 0" class="empty-conversation" data-testid="empty-conversation"><div class="empty-agent-mark">✦</div><h2>Start a new agent session</h2><p>Ask a question or give the agent a task. The session can keep running while you switch elsewhere.</p></div>
+      <div v-if="order.length === 0" class="empty-conversation" data-testid="empty-conversation"><div class="empty-agent-mark">✦</div><h2>Start a conversation</h2><p>Send a prompt to begin. Session state is independent from the mounted viewport.</p></div>
 
       <VList v-else :key="`${runtime.id}:${uiState.virtualEpoch}`" ref="listRef" class="conversation-vlist" :data="order" :item-size="VIRTUAL_ITEM_HINT_PX" :buffer-size="VIRTUAL_BUFFER_PX" :shift="runtime.shiftMode" :item-props="itemProps" @scroll="onVirtualScroll" @scroll-end="onVirtualScrollEnd">
         <template #default="{ item }"><ConversationNodeSeat :runtime="runtime" :node-id="item" /></template>
@@ -342,7 +344,7 @@ defineExpose({ captureSnapshot, jumpToMessage, jumpToLatest, shiftBackward, shif
     <footer ref="composerShellRef" class="composer-shell" data-testid="composer-shell">
       <div v-if="uiState.pendingInteraction" class="pending-interaction" data-testid="pending-interaction" :data-kind="uiState.pendingInteraction.kind">
         <div class="pending-icon">!</div><div><strong>{{ uiState.pendingInteraction.title }}</strong><p>{{ uiState.pendingInteraction.detail }}</p></div>
-        <div class="pending-actions"><button class="secondary" data-testid="deny-interaction" @click="resolveInteraction(false)">{{ interactionSecondary }}</button><button data-testid="approve-interaction" @click="resolveInteraction(true)">{{ interactionPrimary }}</button></div>
+        <div class="pending-actions"><button class="secondary" data-testid="deny-interaction" type="button" @click="resolveInteraction(false)">{{ interactionSecondary }}</button><button data-testid="approve-interaction" type="button" @click="resolveInteraction(true)">{{ interactionPrimary }}</button></div>
       </div>
       <div v-else-if="sessionIndicator === 'failed'" class="turn-outcome-banner failure" data-testid="last-turn-failure"><strong>Last turn failed</strong><span>{{ runtime.kernel.lastFailure?.code }} · {{ runtime.kernel.lastFailure?.message }}</span></div>
       <div v-else-if="sessionIndicator === 'max-tokens'" class="turn-outcome-banner warning"><strong>Last turn reached the output-token limit</strong><span>You can continue this session with another prompt.</span></div>
@@ -350,8 +352,8 @@ defineExpose({ captureSnapshot, jumpToMessage, jumpToLatest, shiftBackward, shif
       <div class="composer-box">
         <textarea ref="composerInputRef" v-model="composerText" data-testid="composer-input" rows="1" :placeholder="composerPlaceholder" :disabled="Boolean(uiState.pendingInteraction)" @input="onComposerInput" @keydown.enter.exact.prevent="sendComposer" />
         <div class="composer-actions">
-          <div><button class="composer-icon" title="Attach">＋</button><button class="mode-button">Agent ▾</button><button class="mode-button">Model ▾</button></div>
-          <div><span class="context-meter" data-testid="stats-context">{{ contextPercent ?? 0 }}% context</span><button v-if="uiState.sessionStatus === 'working'" class="stop-button" data-testid="composer-stop" title="Stop run" @click="abortRun">■</button><button class="send-button" :class="{ queued: uiState.sessionStatus === 'working' }" :disabled="!canSend" :title="sendLabel" @click="sendComposer">{{ uiState.sessionStatus === 'working' ? '↗' : '↑' }}</button></div>
+          <div class="composer-extension"><slot name="composer-tools" /></div>
+          <div><span class="context-meter" data-testid="stats-context">{{ contextPercent ?? 0 }}% context</span><button v-if="uiState.sessionStatus === 'working'" class="stop-button" data-testid="composer-stop" type="button" title="Stop run" @click="abortRun">■</button><button class="send-button" :class="{ queued: uiState.sessionStatus === 'working' }" :disabled="!canSend" type="button" :title="sendLabel" @click="sendComposer">{{ uiState.sessionStatus === 'working' ? '↗' : '↑' }}</button></div>
         </div>
       </div>
       <div class="session-stats-line" data-testid="session-stats-line">
@@ -361,7 +363,7 @@ defineExpose({ captureSnapshot, jumpToMessage, jumpToLatest, shiftBackward, shif
         <span data-testid="stats-output-tokens">out {{ formatTokens(tokenUsage.outputTokens) }}</span>
         <span v-if="tokenUsage.reasoningTokens > 0">reasoning {{ formatTokens(tokenUsage.reasoningTokens) }}</span>
       </div>
-      <span class="composer-hint">Enter to send · background runs survive session switches · drafts and blockers are session-scoped</span>
+      <span class="composer-hint">Enter to send</span>
     </footer>
   </main>
 </template>
