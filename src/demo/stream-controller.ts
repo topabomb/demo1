@@ -4,13 +4,17 @@ import type { ConversationSessionKernel } from '../engine/conversation/session-k
 const MAX_RUN_PUBLISHES = 1800
 const REASONING_PUBLISHES = 18
 
-/** Demo-only execution driver. It depends on the session API and never on a viewport. */
+/** Demo-only playback driver. Rate controls and counters are intentionally not engine/session state. */
 export class SyntheticStreamController implements ConversationExecutionController {
   #kernel: ConversationSessionKernel
   #timer: ReturnType<typeof setInterval> | null = null
   #framePending = false
   #pendingDelta = ''
   #runPublishes = 0
+
+  rate = 20
+  ingressTicks = 0
+  publishTicks = 0
 
   constructor(kernel: ConversationSessionKernel) { this.#kernel = kernel }
   get running(): boolean { return this.#timer !== null && this.#kernel.status === 'working' }
@@ -19,10 +23,10 @@ export class SyntheticStreamController implements ConversationExecutionControlle
     if (this.#kernel.status !== 'working' || this.#kernel.currentAssistantIndex === null) return
     this.#stopTimer()
     if (reset) this.#runPublishes = 0
-    this.#timer = setInterval(() => this.#ingest(), Math.max(16, Math.round(1000 / this.#kernel.streamRate)))
+    this.#timer = setInterval(() => this.#ingest(), Math.max(16, Math.round(1000 / this.rate)))
   }
 
-  stop(_clear = false): void { this.#stopTimer() }
+  pause(): void { this.#stopTimer() }
   abort(): void { this.#stopTimer(); this.#kernel.abortCurrent() }
 
   submit(prompt: string): SubmitDisposition {
@@ -30,6 +34,7 @@ export class SyntheticStreamController implements ConversationExecutionControlle
     if (this.#kernel.status === 'working') return this.#kernel.enqueue(prompt) ? 'queued' : 'blocked'
     const index = this.#kernel.beginTurn(prompt)
     if (index === null) return 'blocked'
+    this.resetTelemetry()
     this.start(true)
     return 'started'
   }
@@ -37,9 +42,10 @@ export class SyntheticStreamController implements ConversationExecutionControlle
   resolveInteraction(approved: boolean): void { this.#kernel.resolveInteraction(approved) }
   setRate(rate: number): void {
     const wasRunning = this.running
-    this.#kernel.setStreamRate(rate)
+    this.rate = Math.max(1, Math.floor(rate))
     if (wasRunning) this.start(false)
   }
+  resetTelemetry(): void { this.ingressTicks = 0; this.publishTicks = 0 }
   dispose(): void { this.#stopTimer() }
 
   #stopTimer(): void {
@@ -50,10 +56,10 @@ export class SyntheticStreamController implements ConversationExecutionControlle
   }
 
   #ingest(): void {
-    this.#kernel.incrementIngress()
+    this.ingressTicks += 1
     this.#pendingDelta += this.#runPublishes < REASONING_PUBLISHES
-      ? syntheticReasoningDelta(this.#kernel.streamIngressTicks)
-      : syntheticAnswerDelta(this.#kernel.streamIngressTicks)
+      ? syntheticReasoningDelta(this.ingressTicks)
+      : syntheticAnswerDelta(this.ingressTicks)
     if (this.#framePending) return
     this.#framePending = true
     scheduleFrame(() => { this.#framePending = false; this.#publish() })
@@ -66,6 +72,7 @@ export class SyntheticStreamController implements ConversationExecutionControlle
     if (this.#runPublishes < REASONING_PUBLISHES) this.#kernel.appendCurrentReasoningDelta(delta)
     else this.#kernel.appendAssistantDelta(delta)
     this.#runPublishes += 1
+    this.publishTicks += 1
     if (this.#runPublishes < MAX_RUN_PUBLISHES) return
 
     this.#stopTimer()
@@ -73,6 +80,7 @@ export class SyntheticStreamController implements ConversationExecutionControlle
     const queued = this.#kernel.dequeue()
     if (queued !== null) {
       this.#kernel.beginTurn(queued)
+      this.resetTelemetry()
       this.start(true)
     }
   }
