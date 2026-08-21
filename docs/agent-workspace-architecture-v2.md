@@ -95,6 +95,7 @@ v1 looked too much like a benchmark dashboard. v2 changes the default surface to
 4. **Any mounted row as an anchor.** Rejected after a probe was captured as the composer-resize anchor.
 5. **Virtualizer-owned wrapper decoration.** Rejected after a measured 14.015625px row overlap; wrapper geometry must remain pure and product spacing lives inside the measured child.
 6. **Semantic reader interpreted as window center.** Rejected after repeatable +1023 restoration drift with a 2048 hot window.
+7. **DOM residency as proof that session data persisted.** Rejected by the first public v2 Pages run. A background assistant continued growing while its session was off-screen; on return the earlier user prompt was correctly outside Virtua's mounted buffer even though its canonical message still existed. Persistence must be verified through semantic addressing/navigation, not by requiring an old row to remain mounted.
 
 ## v2 executable acceptance
 
@@ -115,4 +116,8 @@ The implementation is accepted only when the exact final commit passes locally a
 
 ## Current progress
 
-The v2 core has been rewritten around `ConversationSessionKernel -> ConversationSessionRuntime -> keyed projection -> committed semantic viewport`. Core TypeScript has been checked locally. Product UX, unit tests and browser scenarios are now in the branch so CI can validate the actual Vue/Virtua integration. This section must not be changed to ACCEPTED until the final deployed SHA passes the complete public browser suite.
+The v2 core is implemented around `ConversationSessionKernel -> ConversationSessionRuntime -> keyed projection -> committed semantic viewport` and the product-facing workspace now exercises the real multi-session behaviors above.
+
+A full CI checkpoint passed **19/19 unit tests**, strict Vue/TypeScript production build, and **13/13 local Chromium scenarios**. The first deployed v2 Pages checkpoint deployed successfully and passed **12/13** public Chromium scenarios. The sole failure was a semantically incorrect test assumption that a previously sent user message must still be DOM-mounted after its off-screen assistant had continued growing. The test now performs explicit semantic navigation to the canonical message before asserting its preserved content; the hot buffer is intentionally not enlarged to satisfy a DOM-residency assumption.
+
+The proof remains **active**, not ACCEPTED, until this corrected final head passes both the local CI suite and the same 13-test Chromium suite against the deployed Pages URL.
