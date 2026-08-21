@@ -49,7 +49,7 @@ async function visibleAnchor(page: Page): Promise<{ id: string; top: number } | 
 async function anchorDrift(page: Page, anchor: { id: string; top: number }): Promise<number> {
   return page.locator(`[data-render-unit="${anchor.id}"]`).evaluate((element, expectedTop) => {
     const viewport = element.closest<HTMLElement>('[data-testid="scrollport"]')
-    if (!viewport) return Number.POSITIVE_INFINITY)
+    if (!viewport) return Number.POSITIVE_INFINITY
     return Math.abs((element.getBoundingClientRect().top - viewport.getBoundingClientRect().top) - Number(expectedTop))
   }, anchor.top).catch(() => Number.POSITIVE_INFINITY)
 }
