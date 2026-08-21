@@ -181,6 +181,10 @@ async function injectMarkdownGallery(): Promise<void> {
         <div><span>hot messages</span><strong>{{ (activeUiState.rangeEnd - activeUiState.rangeStart).toLocaleString() }}</strong></div>
         <div><span>render units</span><strong data-testid="active-units">{{ activeUiState.projectionSize.toLocaleString() }}</strong></div>
         <div><span>DOM rows</span><strong data-testid="mounted-rows">{{ activeUiState.mountedRows }}</strong></div>
+        <div><span>projection cache</span><strong data-testid="projection-cache">{{ activeUiState.projectionCacheSize }}</strong></div>
+        <div><span>projection hits</span><strong data-testid="projection-cache-hits">{{ activeUiState.projectionCacheHits }}</strong></div>
+        <div><span>full projects</span><strong data-testid="projection-full-projects">{{ activeUiState.projectionFullProjects }}</strong></div>
+        <div><span>incremental patches</span><strong data-testid="projection-incremental">{{ activeUiState.projectionIncrementalPatches }}</strong></div>
         <div><span>messages after</span><strong data-testid="messages-after-metric">{{ activeUiState.messagesAfter.toLocaleString() }}</strong></div>
         <div><span>queue</span><strong data-testid="queued-prompts">{{ activeUiState.queuedPrompts }}</strong></div>
         <div><span>input tokens</span><strong data-testid="diagnostic-input-tokens">{{ formatTokens(billedInputTokens(activeUsage)) }}</strong></div>
@@ -194,7 +198,7 @@ async function injectMarkdownGallery(): Promise<void> {
         <div><span>fold state</span><strong>{{ foldStateCount }}</strong></div><div><span>highlight LRU</span><strong>{{ highlightEntries }}</strong></div><div><span>markdown LRU</span><strong>{{ markdownEntries }}</strong></div><div><span>renderer registry</span><strong>{{ registeredRendererIds().length }}</strong></div><div><span>virtual epoch</span><strong>{{ activeUiState.virtualEpoch }}</strong></div>
       </div>
 
-      <div class="architecture-note"><strong>Durable kernel / disposable viewport</strong><span>Canonical messages contain extensible ContentBlock[]; semantic projectors create bounded RenderUnits, then the frontend renderer registry resolves components.</span><span>Hot runtime LRU: <b data-testid="hot-session-ids">{{ hotSessionIds }}</b></span><span>Viewport algorithms consume semantic keys/geometry through an adapter contract; CSS is not a state source.</span><span>Global page index: {{ activeSession.pageHeights.pageCount.toLocaleString() }} Fenwick leaves.</span></div>
+      <div class="architecture-note"><strong>Durable domain / rebuildable presentation</strong><span>Canonical ContentBlock[] lives in the session model. ProjectionEngine keeps only bounded hot memoization and patches the mutable Markdown tail during streaming.</span><span>Hot runtime LRU: <b data-testid="hot-session-ids">{{ hotSessionIds }}</b></span><span>Viewport policy consumes semantic keys/geometry; Virtua and product CSS remain replaceable physical adapters.</span><span>Global page index: {{ activeSession.pageHeights.pageCount.toLocaleString() }} Fenwick leaves.</span></div>
     </aside>
 
     <button v-if="!diagnosticsOpen" class="diagnostics-reopen" data-testid="diagnostics-open" title="Architecture diagnostics" @click="diagnosticsOpen = true">◫</button>
