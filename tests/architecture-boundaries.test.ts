@@ -80,43 +80,61 @@ describe('engine architecture boundaries', () => {
     expect(source).not.toMatch(/(?:demo|\.\/vue\/)/)
   })
 
-  it('keeps synthetic playback controls and counters out of engine contracts/state', () => {
+  it('keeps synthetic playback and provider policy out of engine session truth', () => {
     const contracts = readFileSync(join(engineRoot, 'conversation/contracts.ts'), 'utf8')
     const kernel = readFileSync(join(engineRoot, 'conversation/session-kernel.ts'), 'utf8')
+    const mutations = readFileSync(join(engineRoot, 'model/message-mutations.ts'), 'utf8')
     const runtime = readFileSync(join(engineRoot, 'runtime/session-runtime.ts'), 'utf8')
-    const engineSource = `${contracts}\n${kernel}\n${runtime}`
+    const engineSource = `${contracts}\n${kernel}\n${mutations}\n${runtime}`
+
     expect(engineSource).not.toMatch(/\b(?:streamRate|streamIngressTicks|streamRenderTicks|setStreamRate|incrementIngress)\b/)
-    expect(contracts).not.toMatch(/\b(?:start|stop|setRate|pause)\s*\(/)
+    expect(kernel).not.toMatch(/\b(?:beginTurn|appendCurrentReasoningDelta|appendAssistantDelta|completeCurrent|abortCurrent|failCurrent|estimateTokens)\b/)
+    expect(kernel).not.toContain('Completed.')
+    expect(kernel).not.toContain('Stopped by user')
+    expect(mutations).not.toContain('estimateTokens')
+    expect(contracts).not.toMatch(/\bage:\s*string/)
+    expect(runtime).not.toMatch(/\b(?:mountedRows|jumpInput)\b/)
 
     const demoStream = readFileSync(join(demoRoot, 'stream-controller.ts'), 'utf8')
     expect(demoStream).toMatch(/\brate\s*=\s*20/)
     expect(demoStream).toMatch(/\bingressTicks\s*=\s*0/)
     expect(demoStream).toMatch(/\bpublishTicks\s*=\s*0/)
+    expect(demoStream).toContain('estimateTokens')
   })
 
-  it('keeps diagnostics and physical navigation out of their former oversized shells', () => {
+  it('keeps product chrome and physical telemetry outside the reusable viewport', () => {
     const workspace = readFileSync(join(demoRoot, 'components/AgentWorkspace.vue'), 'utf8')
+    const viewport = readFileSync(join(engineRoot, 'vue/ConversationViewport.vue'), 'utf8')
+
     expect(workspace).toContain("./DemoDiagnosticsPanel.vue")
     expect(workspace).not.toContain('data-testid="metrics"')
-
-    const viewport = readFileSync(join(engineRoot, 'vue/ConversationViewport.vue'), 'utf8')
+    expect(workspace).toContain('#header-context')
+    expect(workspace).toContain('#header-actions')
     expect(viewport).toContain("./viewport-navigation-controller")
     expect(viewport).not.toContain('function restoreListAnchor')
     expect(viewport).not.toContain('function pinMeasuredEnd')
+    expect(viewport).toContain("emit('viewportMetrics'")
+    expect(viewport).not.toMatch(/Synthetic Agent|Reasoning · balanced|Search conversation|title="Attach"|>Agent ▾<|>Model ▾</)
   })
 
   it('loads demo and engine styles from their owning trees only', () => {
     const main = readFileSync(join(demoRoot, 'main.ts'), 'utf8')
+    const shellCss = readFileSync(join(engineRoot, 'vue/engine.css'), 'utf8')
     expect(main).toContain("./styles/demo.css")
     expect(main).toContain("../engine/vue/engine.css")
     expect(main).toContain("./styles/architecture.css")
+    expect(shellCss).toContain("@import './renderers.css'")
   })
 
-  it('keeps engine CSS host-scoped', () => {
-    const css = readFileSync(join(engineRoot, 'vue/engine.css'), 'utf8')
-    expect(css).toContain('[data-conversation-engine].conversation-shell')
-    expect(css).not.toMatch(/(^|\n)\s*:root\s*\{/)
-    expect(css).not.toMatch(/(^|\n)\s*(?:html|body|#app)(?:\s|,|\{)/)
+  it('keeps both engine css responsibilities host-scoped', () => {
+    for (const name of ['engine.css', 'renderers.css']) {
+      const css = readFileSync(join(engineRoot, `vue/${name}`), 'utf8')
+      expect(css).toContain('[data-conversation-engine].conversation-shell')
+      expect(css).not.toMatch(/(^|\n)\s*:root\s*\{/)
+      expect(css).not.toMatch(/(^|\n)\s*(?:html|body|#app)(?:\s|,|\{)/)
+    }
+    const shellCss = readFileSync(join(engineRoot, 'vue/engine.css'), 'utf8')
+    expect(shellCss).not.toMatch(/\.model-chip|\.mode-button|\.conversation-meta-strip/)
   })
 
   it('isolates main release concurrency from merged-PR cleanup', () => {
