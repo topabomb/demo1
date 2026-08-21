@@ -54,15 +54,19 @@ async function anchorDrift(page: Page, anchor: { id: string; top: number }): Pro
   }, anchor)
 }
 
-test('architecture proof exposes portable contracts, not a framework-specific message list', async ({ page }) => {
+test('architecture proof exposes state lifetimes and portable contracts', async ({ page }) => {
   await openLab(page)
   await page.getByTestId('architecture-link').click()
   await expect(page.getByTestId('architecture-page')).toBeVisible()
-  await expect(page.getByRole('heading', { name: /seven ownership boundaries/i })).toBeVisible()
-  for (const name of ['Backend Adapter', 'Session Kernel', 'Content Projector Registry', 'Hot Projection Runtime', 'Semantic Viewport Policy', 'Physical List Adapter', 'Renderer Registry + Product UI']) {
+  await expect(page.getByRole('heading', { name: /four state lifetimes/i })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /seven contracts/i })).toBeVisible()
+  for (const name of ['Backend / Runtime Ports', 'Canonical Conversation Model', 'Session + Workspace Kernel', 'Projection Runtime', 'Semantic Viewport Policy', 'Physical List Adapter', 'Renderer + Product Adapter']) {
     await expect(page.getByText(name, { exact: true })).toBeVisible()
   }
-  await expect(page.getByText(/ContentBlock\[\]/).first()).toBeVisible()
+  for (const name of ['Durable domain state', 'Session interaction memory', 'Rebuildable presentation state', 'Ephemeral physical state']) {
+    await expect(page.getByText(name, { exact: true })).toBeVisible()
+  }
+  await expect(page.getByText(/O\(delta \+ mutable Markdown tail\)/)).toBeVisible()
   await page.getByTestId('launch-lab').click()
   await expect(page.getByTestId('active-session-id')).toBeVisible()
 })
