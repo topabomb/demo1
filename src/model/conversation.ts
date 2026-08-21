@@ -1,4 +1,6 @@
-export type ToolCategory = 'generic' | 'search' | 'filesystem' | 'shell' | 'image-generation' | 'tts' | 'asr'
+export type BuiltinToolCategory = 'generic' | 'search' | 'filesystem' | 'shell' | 'image-generation' | 'tts' | 'asr'
+/** Tool categories are routing/presentation hints, not a closed list of capabilities. */
+export type ToolCategory = BuiltinToolCategory | (string & {})
 export type AttachmentKind = 'image' | 'audio' | 'video' | 'file'
 
 export interface AttachmentItem {
@@ -27,6 +29,7 @@ export interface ContentBlockMap {
   markdown: { markdown: string; flavor?: 'gfm' }
   reasoning: { text: string; tokenCount?: number; durationMs?: number; defaultOpen?: boolean; status?: 'streaming' | 'complete' | 'interrupted' }
   code: { code: string; language?: string; filename?: string; defaultOpen?: boolean }
+  /** Legacy stress-corpus image shape. New user/tool media should normally use `attachments`. */
   image: { src?: string; width: number; height: number; alt?: string; seed?: number }
   attachments: { items: readonly AttachmentItem[]; title?: string; provenance?: ArtifactProvenance }
   audio: { title: string; purpose: 'tts' | 'asr-input' | 'recording'; durationMs: number; src?: string; transcript?: string; model?: string; waveform?: readonly number[]; status?: 'processing' | 'ready' | 'error' }
