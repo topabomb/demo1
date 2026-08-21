@@ -18,13 +18,17 @@ Feature branches cannot replace the public demo. A Pages deployment is not consi
 | Area | Required proof |
 |---|---|
 | Session semantics | live execution is separate from last Turn outcome; error history is resumable |
+| Canonical identity | Turn is required; Step is a stable optional producer coordinate; demo-only seed/intensity are not required domain fields |
+| Renderer identity | RenderUnits expose message/Turn/Step/Block location directly; renderers need no Session/history scan |
+| Tool correlation | call and result records share one stable producer-owned `callId` |
 | Token/cache accounting | disjoint uncached input/cache-read/cache-write buckets and cache-hit formula |
 | Workspace store | ≥4 working SessionKernels while hot `ConversationSessionRuntime` count stays ≤3 |
 | Runtime eviction | a working viewport can be evicted without destroying execution |
 | Keyed projection | node patch does not invalidate order/sibling node subscribers |
 | Projection cache | bounded cache, stable cache-hit RenderUnit containers and append-only Markdown tail projection |
 | Segment manager | bounded far jump, reader-ending cold restore, 512-message neighboring shifts |
-| Semantic viewport | measurement probes rejected as anchors; exact messages-after calculation |
+| Semantic viewport | measurement probes rejected as anchors; exact messages-after calculation; explicit jumps commit only after stable measurement |
+| Physical tail | bottom detection/tail pinning follows the actual scroll container across composer/product reflow |
 | Fenwick/page index | aggregate prefix/update/navigation behavior remains deterministic |
 | Synthetic source | deterministic heterogeneous renderers and bounded large-content projection |
 
@@ -48,7 +52,7 @@ The browser suite must exercise all of these on local production and the public 
 - New Session and session search;
 - exact `Latest` / messages-after semantics;
 - variable-height composer with no viewport overlay;
-- composer resize preserving history anchor and tail pinning;
+- composer resize preserving history anchor and physical tail pinning;
 - thinking/tool/code/diff/image/HTML dynamic renderer behavior;
 - adjacent mounted rows never geometrically overlap;
 - virtualizer-owned wrapper has zero vertical margin/padding;
