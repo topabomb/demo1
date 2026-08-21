@@ -25,23 +25,14 @@ jobs:
           version: 10.15.1
           run_install: false
           cache: true
-          cache_dependency_path: package.json
+          cache_dependency_path: pnpm-lock.yaml
 
       - uses: actions/setup-node@v6
         with:
           node-version: 22
 
       - name: Install dependencies
-        run: pnpm install --no-frozen-lockfile --prefer-offline
-
-      # Temporary bootstrap artifact: this repository pre-dates a committed lockfile.
-      # The next commit consumes this artifact and switches all installs to frozen mode.
-      - name: Upload generated lockfile
-        uses: actions/upload-artifact@v4
-        with:
-          name: generated-pnpm-lock
-          path: pnpm-lock.yaml
-          retention-days: 1
+        run: pnpm install --frozen-lockfile --prefer-offline
 
       - name: Unit tests
         run: pnpm test
@@ -81,14 +72,14 @@ jobs:
           version: 10.15.1
           run_install: false
           cache: true
-          cache_dependency_path: package.json
+          cache_dependency_path: pnpm-lock.yaml
 
       - uses: actions/setup-node@v6
         with:
           node-version: 22
 
       - name: Install dependencies
-        run: pnpm install --no-frozen-lockfile --prefer-offline
+        run: pnpm install --frozen-lockfile --prefer-offline
 
       - name: Build Pages artifact
         run: pnpm exec vite build
