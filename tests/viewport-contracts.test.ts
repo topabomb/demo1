@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { messagesAfter, remainingToBottom, selectCommittedAnchor } from '../src/viewport/contracts'
+import { messagesAfter, remainingToBottom, selectCommittedAnchor } from '../src/engine/viewport/contracts'
 
 describe('semantic viewport contract', () => {
   it('does not treat a mounted measurement probe as the semantic anchor', () => {
