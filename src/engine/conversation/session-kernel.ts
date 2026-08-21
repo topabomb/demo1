@@ -1,14 +1,6 @@
 import { BatchedNotifier, type Unsubscribe } from '../core/notifier'
-import { block, type AppendCanonicalMessage, type LogicalMessage } from '../model/conversation'
-import {
-  appendMarkdownContent,
-  appendReasoningContent,
-  cloneBlocks,
-  estimateTokens,
-  markdownText,
-  replaceMarkdownContent,
-  settleReasoning,
-} from '../model/message-mutations'
+import type { AppendCanonicalMessage, LogicalMessage } from '../model/conversation'
+import { cloneBlocks } from '../model/message-mutations'
 import type {
   ConversationDescriptor,
   ConversationHistoryAdapter,
@@ -31,11 +23,16 @@ export interface SessionKernelEvent {
   contentPatch?: SessionKernelContentPatch
 }
 
-/** Canonical session truth. Provider playback/debug telemetry belongs outside this kernel. */
+/**
+ * Canonical session truth.
+ *
+ * This kernel stores normalized messages and lifecycle/accounting facts but never
+ * invents provider output, default assistant blocks, token estimates or product copy.
+ * Execution adapters own those decisions and publish them through these semantic APIs.
+ */
 export class ConversationSessionKernel {
   readonly id: string
   readonly title: string
-  readonly age: string
   readonly backend: ConversationHistoryAdapter
 
   #appended: LogicalMessage[] = []
@@ -63,7 +60,6 @@ export class ConversationSessionKernel {
   constructor(descriptor: ConversationDescriptor, backend: ConversationHistoryAdapter) {
     this.id = descriptor.id
     this.title = descriptor.title
-    this.age = descriptor.age
     this.backend = backend
     this.#status = descriptor.status
     this.#pendingInteraction = descriptor.pendingInteraction ?? null
@@ -72,9 +68,9 @@ export class ConversationSessionKernel {
     this.#usage = normalizeTokenUsage(descriptor.usage)
     this.#context = descriptor.context
       ? { ...descriptor.context }
-      : { projectedTokens: Math.min(96_000, Math.max(0, Math.round(backend.count / 20))), contextWindow: 128_000 }
-    this.#turnCount = Math.max(0, Math.floor(descriptor.turnCount ?? Math.max(1, Math.round(backend.count / 12))))
-    this.#stepCount = Math.max(this.#turnCount, Math.floor(descriptor.stepCount ?? this.#turnCount * 2))
+      : { projectedTokens: 0, contextWindow: 128_000 }
+    this.#turnCount = Math.max(0, Math.floor(descriptor.turnCount ?? 0))
+    this.#stepCount = Math.max(this.#turnCount, Math.floor(descriptor.stepCount ?? this.#turnCount))
 
     if (descriptor.status === 'working' && backend.count > 0) {
       this.#currentAssistantIndex = backend.count - 1
@@ -88,6 +84,7 @@ export class ConversationSessionKernel {
     this.#eventListeners.add(listener)
     return () => this.#eventListeners.delete(listener)
   }
+
   get lastEvent(): SessionKernelEvent { return this.#lastEvent }
   get status(): SessionStatus { return this.#status }
   get pendingInteraction(): PendingInteraction | null { return this.#pendingInteraction }
@@ -109,7 +106,6 @@ export class ConversationSessionKernel {
     return {
       id: this.id,
       title: this.title,
-      age: this.age,
       status: this.#status,
       logicalCount: this.count,
       unread: this.#unread,
@@ -180,38 +176,57 @@ export class ConversationSessionKernel {
     return indexes
   }
 
-  beginTurn(prompt: string): number | null {
-    const text = prompt.trim()
-    if (!text || this.#pendingInteraction) return null
-    const userIndex = this.count
-    const turnId = `${this.id}:runtime-turn-${userIndex}`
-    const stepId = `${turnId}:step-0`
-    this.#appended.push({ id: `${this.id}:m-${userIndex}`, index: userIndex, turnId, stepId, role: 'user', blocks: [block('prompt', 'markdown', { markdown: text })], revision: 0 })
-    const assistantIndex = this.count
-    this.#appended.push({
-      id: `${this.id}:m-${assistantIndex}`,
-      index: assistantIndex,
-      turnId,
-      stepId,
-      role: 'assistant',
-      blocks: [
-        block('reasoning', 'reasoning', { text: '', tokenCount: 0, durationMs: 0, defaultOpen: false, status: 'streaming' }),
-        block('answer', 'markdown', { markdown: '' }),
-      ],
-      revision: 0,
-      live: true,
-    })
-    this.#currentAssistantIndex = assistantIndex
+  /** Replace normalized content while preserving producer-owned message identity. */
+  replaceCanonicalMessage(index: number, message: LogicalMessage, contentPatch?: SessionKernelContentPatch): void {
+    const current = this.getMessage(index)
+    if (
+      message.index !== index ||
+      message.id !== current.id ||
+      message.turnId !== current.turnId ||
+      message.stepId !== current.stepId ||
+      message.role !== current.role
+    ) throw new Error(`canonical identity changed for message ${index}`)
+
+    this.#writeMessage(index, { ...message, blocks: cloneBlocks(message.blocks) })
+    if (contentPatch) this.#recordFirstOutput()
+    this.#emit({ kind: 'content', messageIndex: index, contentPatch })
+  }
+
+  /** Begin provider/runtime execution after the adapter has appended any new canonical records. */
+  startExecution(currentAssistantIndex: number | null = null): boolean {
+    if (this.#pendingInteraction) return false
+    if (currentAssistantIndex !== null) this.getMessage(currentAssistantIndex)
+    this.#currentAssistantIndex = currentAssistantIndex
     this.#status = 'working'
     this.#lastTurnReason = null
     this.#lastFailure = null
-    this.#turnCount += 1
-    this.#stepCount += 1
-    this.#accountPrompt(text)
     this.#runStartedAt = now()
     this.#firstOutputAt = 0
-    this.#emit({ kind: 'append', messageIndex: assistantIndex })
-    return assistantIndex
+    this.#emit({ kind: 'status', messageIndex: currentAssistantIndex ?? undefined })
+    return true
+  }
+
+  /** Finish execution without inventing any content. */
+  finishExecution(reason: TurnEndReasonKind, failure: LlmFailure | null = null): void {
+    const index = this.#currentAssistantIndex
+    this.#status = reason === 'blocked' ? 'waiting' : reason === 'aborted' || reason === 'interrupted' ? 'interrupted' : 'idle'
+    this.#lastTurnReason = reason
+    this.#lastFailure = failure ? { ...failure } : null
+    this.#currentAssistantIndex = null
+    if (this.#runStartedAt > 0) this.#lastTurnDurationMs = Math.max(0, now() - this.#runStartedAt)
+    this.#runStartedAt = 0
+    this.#firstOutputAt = 0
+    this.#emit({ kind: 'status', messageIndex: index ?? undefined })
+  }
+
+  /** Store provider-normalized accounting; the Engine never estimates billing/cache semantics. */
+  setAccounting(usage: Partial<TokenUsage>, context: SessionContextStats = this.#context): void {
+    this.#usage = normalizeTokenUsage(usage)
+    this.#context = {
+      projectedTokens: Math.max(0, Math.floor(context.projectedTokens)),
+      contextWindow: Math.max(1, Math.floor(context.contextWindow)),
+    }
+    this.#emit({ kind: 'usage' })
   }
 
   enqueue(prompt: string): boolean {
@@ -228,64 +243,10 @@ export class ConversationSessionKernel {
     return next
   }
 
-  appendCurrentReasoningDelta(delta: string): void {
-    const index = this.#currentAssistantIndex
-    if (index === null || !delta) return
-    const patched = appendReasoningContent(this.getMessage(index), delta, Math.max(0, now() - this.#runStartedAt))
-    if (!patched) return
-    this.#writeMessage(index, patched.message)
-    const reasoning = estimateTokens(delta)
-    this.#usage.reasoningTokens += reasoning
-    this.#context.projectedTokens = Math.min(this.#context.contextWindow, this.#context.projectedTokens + reasoning)
-    this.#recordFirstOutput()
-    this.#emit({ kind: 'content', messageIndex: index, contentPatch: { kind: 'append-reasoning', blockId: patched.blockId, delta } })
-  }
-
-  appendAssistantDelta(delta: string): void {
-    const index = this.#currentAssistantIndex
-    if (index === null || !delta) return
-    const patched = appendMarkdownContent(this.getMessage(index), delta)
-    this.#writeMessage(index, patched.message)
-    const output = estimateTokens(delta)
-    this.#usage.outputTokens += output
-    this.#context.projectedTokens = Math.min(this.#context.contextWindow, this.#context.projectedTokens + output)
-    this.#recordFirstOutput()
-    this.#emit({ kind: 'content', messageIndex: index, contentPatch: { kind: 'append-markdown', blockId: patched.blockId, delta } })
-  }
-
-  completeCurrent(): void {
-    const index = this.#currentAssistantIndex
-    if (index !== null) {
-      const current = settleReasoning(this.getMessage(index), 'complete')
-      const text = markdownText(current).trim()
-      const next = text ? { ...current, revision: (current.revision ?? 0) + 1, live: false } : replaceMarkdownContent(current, 'Completed.', false)
-      this.#writeMessage(index, next)
-    }
-    this.#finishRun('completed', null)
-    this.#emit({ kind: 'status', messageIndex: index ?? undefined })
-  }
-
-  abortCurrent(): void {
-    const index = this.#currentAssistantIndex
-    if (index !== null) {
-      const current = settleReasoning(this.getMessage(index), 'interrupted')
-      const patched = appendMarkdownContent(current, '\n\n_Stopped by user._')
-      this.#writeMessage(index, { ...patched.message, live: false })
-    }
-    this.#status = 'interrupted'
+  clearQueue(): void {
+    if (this.#queuedPrompts.length === 0) return
     this.#queuedPrompts = []
-    this.#finishRun('aborted', null, false)
-    this.#emit({ kind: 'status', messageIndex: index ?? undefined })
-  }
-
-  failCurrent(failure: LlmFailure): void {
-    const index = this.#currentAssistantIndex
-    if (index !== null) {
-      const current = settleReasoning(this.getMessage(index), 'interrupted')
-      this.#writeMessage(index, { ...current, revision: (current.revision ?? 0) + 1, live: false })
-    }
-    this.#finishRun('error', failure)
-    this.#emit({ kind: 'status', messageIndex: index ?? undefined })
+    this.#emit({ kind: 'queue' })
   }
 
   resolveInteraction(approved: boolean): void {
@@ -303,30 +264,9 @@ export class ConversationSessionKernel {
   }
 
   #recordFirstOutput(): void {
-    if (this.#firstOutputAt !== 0) return
+    if (this.#firstOutputAt !== 0 || this.#runStartedAt === 0) return
     this.#firstOutputAt = now()
     this.#lastTtftMs = Math.max(0, this.#firstOutputAt - this.#runStartedAt)
-  }
-
-  #accountPrompt(text: string): void {
-    const promptTokens = Math.max(1, estimateTokens(text))
-    const reusable = Math.min(this.#context.projectedTokens, Math.round(this.#context.projectedTokens * 0.82))
-    const uncached = Math.max(promptTokens + 64, Math.round(this.#context.projectedTokens * 0.03))
-    const cacheWrite = Math.max(0, Math.round(uncached * 0.12))
-    this.#usage.inputTokens += uncached
-    this.#usage.cacheReadTokens += reusable
-    this.#usage.cacheWriteTokens += cacheWrite
-    this.#context.projectedTokens = Math.min(this.#context.contextWindow, this.#context.projectedTokens + promptTokens + 32)
-  }
-
-  #finishRun(reason: TurnEndReasonKind, failure: LlmFailure | null, setIdle = true): void {
-    if (setIdle) this.#status = 'idle'
-    this.#lastTurnReason = reason
-    this.#lastFailure = failure ? { ...failure } : null
-    this.#currentAssistantIndex = null
-    if (this.#runStartedAt > 0) this.#lastTurnDurationMs = Math.max(0, now() - this.#runStartedAt)
-    this.#runStartedAt = 0
-    this.#firstOutputAt = 0
   }
 
   #touchUnread(): void { if (!this.#foreground) this.#unread = true }
