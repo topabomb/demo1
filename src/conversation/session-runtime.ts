@@ -6,7 +6,7 @@ import type { RenderUnit } from '../presentation/render-unit'
 import type { PendingInteraction, SessionStatus, ViewportSnapshot } from './contracts'
 import { KeyedConversationProjection } from './keyed-node-store'
 import { BatchedNotifier, type Unsubscribe } from './notifier'
-import type { ConversationSessionKernel } from './session-kernel'
+import type { ConversationSessionKernel, SessionKernelEvent } from './session-kernel'
 
 export const WINDOW_MESSAGES = 2048
 export const SHIFT_MESSAGES = 512
@@ -85,7 +85,9 @@ export class ConversationSessionRuntime {
     this.#activeUnits = this.#materialize(this.segment.range)
     this.#refreshPageEstimates()
     this.projection.replace(this.#activeUnits)
-    this.#kernelUnsubscribe = kernel.subscribe(() => this.#syncKernel())
+    // Incremental presentation must receive every semantic kernel mutation in
+    // producer order. Workspace/UI summaries remain independently coalesced.
+    this.#kernelUnsubscribe = kernel.subscribeEvents(event => this.#syncKernel(event))
   }
 
   dispose(): void { this.#kernelUnsubscribe(); this.projectionEngine.clear() }
@@ -223,8 +225,7 @@ export class ConversationSessionRuntime {
     this.#stateNotifier.markDirty()
   }
 
-  #syncKernel(): void {
-    const event = this.kernel.lastEvent
+  #syncKernel(event: SessionKernelEvent): void {
     const oldCount = this.#knownLogicalCount
     const newCount = this.logicalCount
 
@@ -255,8 +256,8 @@ export class ConversationSessionRuntime {
         this.#activeUnits = this.#activeUnits.map(unit => byId.get(unit.id) ?? unit)
         for (const unit of units) this.projection.patch(unit)
       } else {
-        const before = this.#activeUnits.filter(unit => unit.messageIndex < event.messageIndex!)
-        const after = this.#activeUnits.filter(unit => unit.messageIndex > event.messageIndex!)
+        const before = this.#activeUnits.filter(unit => unit.messageIndex < event.messageIndex)
+        const after = this.#activeUnits.filter(unit => unit.messageIndex > event.messageIndex)
         this.#activeUnits = [...before, ...units, ...after]
         this.projection.replace(this.#activeUnits)
       }
