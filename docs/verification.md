@@ -11,6 +11,8 @@ One workflow owns the release path:
 
 Feature branches never replace the public demo. A successful Pages upload/deploy is not accepted until the deployed-site Chromium gate also passes.
 
+The workflow's concurrency key includes the event type as well as the PR number/ref. This is required because a merged `pull_request: closed` event may expose the base branch as `github.ref`; without event isolation its branch-cleanup run can race with and cancel the `push main` release run (or be cancelled by it).
+
 ## Unit / architecture matrix
 
 | Area | Required proof |
@@ -38,6 +40,7 @@ Feature branches never replace the public demo. A successful Pages upload/deploy
 | Physical tail | bottom detection/tail pin follows the actual scroll container across reflow |
 | Core primitives | Fenwick/page index/segment management remain deterministic and framework-neutral |
 | CSS ownership | `engine/vue/engine.css` is host-scoped; global page styling remains Demo-owned |
+| Release concurrency | `push main` validation/deploy and merged-PR cleanup use distinct concurrency groups and cannot cancel each other |
 
 ## Chromium product / stress matrix
 
@@ -100,6 +103,7 @@ Performance counters such as FPS, long tasks and heap remain diagnostics because
 - Node and pnpm major/minor versions are explicit in the workflow.
 - Pages base-path construction is repository-derived so forks/templates can publish without source edits.
 - only one workflow defines validation + release ordering.
+- release/deploy concurrency is event-isolated from merged-branch cleanup, while repeated runs of the same event/ref still cancel stale work.
 
 ## Release evidence
 
