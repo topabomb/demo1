@@ -24,7 +24,7 @@ import ConversationNodeSeat from './ConversationNodeSeat.vue'
 
 const props = defineProps<{ runtime: ConversationSessionRuntime; stream: SyntheticStreamController; diagnostics?: boolean }>()
 
-// Virtua adapter tuning: these are physical-renderer hints, not semantic state.
+// Virtua adapter tuning: physical renderer hints, never semantic state.
 const VIRTUAL_BUFFER_PX = 900
 const VIRTUAL_ITEM_HINT_PX = 180
 
@@ -48,7 +48,11 @@ let unsubscribeState: (() => void) | null = null
 
 let pendingComposerAnchor: CommittedViewportAnchor | null = null
 let pendingComposerPinned = false
-/** Last stable semantic coordinate, retained independently from physical list measurements. */
+/**
+ * Last user/programmatic navigation coordinate that was semantically committed.
+ * Layout-induced Virtua scroll events must never overwrite it before resize
+ * reconciliation, otherwise the adapter preserves the already-drifted position.
+ */
 let lastCommittedAnchor: CommittedViewportAnchor | null = null
 
 const messagesAfter = computed(() => uiState.value.messagesAfter)
@@ -108,7 +112,7 @@ function sampleRows(): ViewportRowSample[] {
   })
 }
 
-/** DOM measurement is an adapter input; committed-anchor selection is pure policy. */
+/** DOM measurement is adapter input; anchor selection itself stays pure policy. */
 function captureCommittedAnchor(): CommittedViewportAnchor | null {
   const stage = scrollStageRef.value
   if (!stage) return null
@@ -146,10 +150,7 @@ function updateReader(offset = listRef.value?.scrollOffset ?? 0): void {
   const bottomProbe = Math.max(0, Math.min(list.scrollSize - 1, offset + Math.max(1, list.viewportSize - 2)))
   const index = Math.max(0, Math.min(order.value.length - 1, list.findItemIndex(bottomProbe)))
   const node = nodeFor(order.value[index]!)
-  if (node) {
-    props.runtime.setReaderPosition(node.messageIndex, false)
-    rememberCommittedAnchor()
-  }
+  if (node) props.runtime.setReaderPosition(node.messageIndex, false)
 }
 
 async function restoreListAnchor(anchor: CommittedViewportAnchor): Promise<void> {
@@ -170,7 +171,9 @@ async function restoreListAnchor(anchor: CommittedViewportAnchor): Promise<void>
     currentList.scrollBy(delta)
   }
   await settleFrames(1)
-  lastCommittedAnchor = captureCommittedAnchor() ?? anchor
+  // Preserve the semantic coordinate we intentionally restored. Re-selecting an
+  // anchor here can choose a different row after a large reflow and introduce drift.
+  lastCommittedAnchor = anchor
 }
 
 async function pinMeasuredEnd(maxFrames = VIEWPORT_POLICY.restoreAttempts): Promise<void> {
@@ -213,14 +216,17 @@ function onVirtualScroll(offset: number): void {
 }
 function onVirtualScrollEnd(): void {
   refreshMountedRows()
-  rememberCommittedAnchor()
-  if (shifting.value || performance.now() >= userScrollIntentUntil) return
+  const hasUserIntent = performance.now() < userScrollIntentUntil
+  // Programmatic/layout-induced scroll-end is physical noise. Only explicit user
+  // navigation is allowed to replace the stable semantic anchor here.
+  if (hasUserIntent) rememberCommittedAnchor()
+  if (shifting.value || !hasUserIntent) return
   if (userScrollDirection < 0 && (listRef.value?.scrollOffset ?? Infinity) < VIEWPORT_POLICY.edgeThresholdPx) void shiftBackward()
   else if (userScrollDirection > 0 && remainingToBottom() < VIEWPORT_POLICY.edgeThresholdPx) void shiftForward()
 }
 
 async function applyShift(plan: ShiftPlan): Promise<void> {
-  const anchor = captureCommittedAnchor()
+  const anchor = lastCommittedAnchor ?? captureCommittedAnchor()
   if (plan.direction === 'backward') { props.runtime.applyIntermediate(plan.intermediate, true); await settleFrames(3); props.runtime.commitShift(plan, false); await settleFrames(2) }
   else { props.runtime.applyIntermediate(plan.intermediate, false); await settleFrames(2); props.runtime.commitShift(plan, true); await settleFrames(3) }
   props.runtime.finishShift()
@@ -306,8 +312,8 @@ function resizeComposer(): void {
 function onComposerInput(): void {
   props.runtime.setDraftText(composerText.value)
   pendingComposerPinned = props.runtime.atVisualBottom && props.runtime.range.end === props.runtime.logicalCount
-  pendingComposerAnchor = pendingComposerPinned ? null : captureCommittedAnchor()
-  if (pendingComposerAnchor) lastCommittedAnchor = pendingComposerAnchor
+  pendingComposerAnchor = pendingComposerPinned ? null : (lastCommittedAnchor ?? captureCommittedAnchor())
+  if (!lastCommittedAnchor && pendingComposerAnchor) lastCommittedAnchor = pendingComposerAnchor
   void nextTick().then(resizeComposer)
 }
 async function sendComposer(): Promise<void> {
@@ -317,8 +323,8 @@ async function sendComposer(): Promise<void> {
   if (disposition === 'blocked') return
   composerText.value = ''; props.runtime.setDraftText('')
   pendingComposerPinned = props.runtime.atVisualBottom && props.runtime.range.end === props.runtime.logicalCount
-  pendingComposerAnchor = pendingComposerPinned ? null : captureCommittedAnchor()
-  if (pendingComposerAnchor) lastCommittedAnchor = pendingComposerAnchor
+  pendingComposerAnchor = pendingComposerPinned ? null : (lastCommittedAnchor ?? captureCommittedAnchor())
+  if (!lastCommittedAnchor && pendingComposerAnchor) lastCommittedAnchor = pendingComposerAnchor
   await nextTick(); resizeComposer()
   if (disposition === 'started') { await settleFrames(2); await jumpToLatest() }
 }
@@ -330,13 +336,13 @@ function scheduleViewportResizeReconcile(): void {
     const anchor = pendingComposerAnchor ?? lastCommittedAnchor
     pendingComposerPinned = false; pendingComposerAnchor = null
     if (pin && props.runtime.range.end === props.runtime.logicalCount) await pinMeasuredEnd()
-    else if (anchor) { await restoreListAnchor(anchor); updateReader(); rememberCommittedAnchor() }
+    else if (anchor) { await restoreListAnchor(anchor); updateReader() }
     else { updateReader(); rememberCommittedAnchor() }
     refreshMountedRows()
   })
 }
 function captureSnapshot(): ViewportSnapshot {
-  const anchor = captureCommittedAnchor()
+  const anchor = lastCommittedAnchor ?? captureCommittedAnchor()
   if (anchor) lastCommittedAnchor = anchor
   const snapshot = anchor ? props.runtime.snapshot(anchor.id, anchor.offsetPx) : props.runtime.snapshot()
   props.runtime.rememberSnapshot(snapshot)
@@ -352,7 +358,9 @@ async function restoreSnapshot(): Promise<void> {
   } else if (snapshot.anchorUnitId && order.value.includes(snapshot.anchorUnitId)) {
     await restoreListAnchor({ id: snapshot.anchorUnitId, offsetPx: snapshot.anchorOffsetPx, viewportTopPx: snapshot.anchorOffsetPx })
   } else await scrollToLogical(snapshot.logicalPosition)
-  await settleFrames(2); lastScrollOffset = listRef.value?.scrollOffset ?? 0; updateReader(lastScrollOffset); rememberCommittedAnchor(); refreshMountedRows()
+  await settleFrames(2); lastScrollOffset = listRef.value?.scrollOffset ?? 0; updateReader(lastScrollOffset)
+  if (!snapshot.atVisualBottom && !lastCommittedAnchor) rememberCommittedAnchor()
+  refreshMountedRows()
 }
 function formatAfter(count: number): string { return count.toLocaleString('en-US') }
 function attachViewportObserver(): void {
