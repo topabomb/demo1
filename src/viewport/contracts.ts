@@ -16,7 +16,8 @@ export const VIEWPORT_POLICY = Object.freeze({
   edgeThresholdPx: 900,
   anchorTolerancePx: 0.75,
   userIntentMs: 650,
-  restoreAttempts: 8,
+  restoreAttempts: 12,
+  stableLayoutFrames: 3,
   jumpAttempts: 10,
 })
 

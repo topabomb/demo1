@@ -160,16 +160,26 @@ async function restoreListAnchor(anchor: CommittedViewportAnchor): Promise<void>
   if (!list) return
   const index = order.value.indexOf(anchor.id)
   if (index < 0) return
+  let stableFrames = 0
   list.scrollToIndex(index, { align: 'start', offset: -anchor.offsetPx })
   for (let attempt = 0; attempt < VIEWPORT_POLICY.restoreAttempts; attempt += 1) {
     await settleFrames(1)
     const currentList = listRef.value
     const stage = scrollStageRef.value
     const row = renderedRow(anchor.id)
-    if (!currentList || !stage || !row) { currentList?.scrollToIndex(index, { align: 'start', offset: -anchor.offsetPx }); continue }
+    if (!currentList || !stage || !row) {
+      stableFrames = 0
+      currentList?.scrollToIndex(index, { align: 'start', offset: -anchor.offsetPx })
+      continue
+    }
     const currentTop = row.getBoundingClientRect().top - stage.getBoundingClientRect().top
     const delta = currentTop - anchor.viewportTopPx
-    if (Math.abs(delta) < VIEWPORT_POLICY.anchorTolerancePx) break
+    if (Math.abs(delta) < VIEWPORT_POLICY.anchorTolerancePx) {
+      stableFrames += 1
+      if (stableFrames >= VIEWPORT_POLICY.stableLayoutFrames) break
+      continue
+    }
+    stableFrames = 0
     currentList.scrollBy(delta)
   }
   await settleFrames(1)
@@ -180,13 +190,24 @@ async function restoreListAnchor(anchor: CommittedViewportAnchor): Promise<void>
 
 async function pinMeasuredEnd(maxFrames = VIEWPORT_POLICY.restoreAttempts): Promise<void> {
   if (props.runtime.logicalCount <= 0) return
+  let stableFrames = 0
+  let previousScrollSize = -1
+  let previousViewportSize = -1
   for (let attempt = 0; attempt < maxFrames; attempt += 1) {
-    await nextTick(); await frame()
+    await settleFrames(1)
     const list = listRef.value
     if (!list) return
     list.scrollTo(Math.max(0, list.scrollSize - list.viewportSize))
-    await frame()
-    if (remainingToBottom() < 1) break
+    await settleFrames(1)
+    const current = listRef.value
+    if (!current) return
+    const geometryStable = Math.abs(current.scrollSize - previousScrollSize) < 0.5
+      && Math.abs(current.viewportSize - previousViewportSize) < 0.5
+    const pinned = remainingToBottom() < 1
+    stableFrames = pinned && geometryStable ? stableFrames + 1 : 0
+    previousScrollSize = current.scrollSize
+    previousViewportSize = current.viewportSize
+    if (stableFrames >= VIEWPORT_POLICY.stableLayoutFrames) break
   }
   lastScrollOffset = listRef.value?.scrollOffset ?? 0
   updateReader(lastScrollOffset)
@@ -255,6 +276,7 @@ function targetIsCommittedVisible(target: number): boolean {
 }
 async function scrollToLogical(target: number, align: 'start' | 'center' | 'end' = 'center'): Promise<void> {
   if (props.runtime.logicalCount <= 0) return
+  const semanticTailNavigation = align === 'end' && target === props.runtime.logicalCount - 1
   for (let attempt = 0; attempt < VIEWPORT_POLICY.jumpAttempts; attempt += 1) {
     await settleFrames(1)
     const list = listRef.value
@@ -263,10 +285,22 @@ async function scrollToLogical(target: number, align: 'start' | 'center' | 'end'
     if (index < 0) continue
     list.scrollToIndex(index, { align }); await settleFrames(2)
     if (!targetIsCommittedVisible(target)) continue
-    lastScrollOffset = list.scrollOffset; updateReader(lastScrollOffset); await settleFrames(1)
-    if (targetIsCommittedVisible(target) && Math.abs(props.runtime.currentLogicalPosition - target) < 64) { rememberCommittedAnchor(); return }
+    lastScrollOffset = list.scrollOffset
+    if (semanticTailNavigation) updateReader(lastScrollOffset)
+    else props.runtime.setReaderPosition(target, false)
+    await settleFrames(1)
+    if (!targetIsCommittedVisible(target)) continue
+    if (semanticTailNavigation) rememberCommittedAnchor()
+    else {
+      const anchor = captureCommittedAnchor()
+      if (anchor) lastCommittedAnchor = anchor
+    }
+    return
   }
-  lastScrollOffset = listRef.value?.scrollOffset ?? 0; updateReader(lastScrollOffset); rememberCommittedAnchor()
+  lastScrollOffset = listRef.value?.scrollOffset ?? 0
+  if (semanticTailNavigation) updateReader(lastScrollOffset)
+  else props.runtime.setReaderPosition(target, false)
+  rememberCommittedAnchor()
 }
 async function waitForJumpEpoch(previousEpoch: number, previousHandle: VListHandle | null, target: number): Promise<void> {
   for (let attempt = 0; attempt < VIEWPORT_POLICY.jumpAttempts + 2; attempt += 1) {
@@ -311,11 +345,20 @@ function resizeComposer(): void {
   input.style.height = `${Math.max(1, input.scrollHeight)}px`
   input.style.overflowY = input.scrollHeight > input.clientHeight ? 'auto' : 'hidden'
 }
+function capturePendingLayoutIntent(): void {
+  const shouldPin = pendingComposerPinned
+    || (props.runtime.atVisualBottom && props.runtime.range.end === props.runtime.logicalCount)
+  if (shouldPin) {
+    pendingComposerPinned = true
+    pendingComposerAnchor = null
+    return
+  }
+  if (!pendingComposerAnchor) pendingComposerAnchor = lastCommittedAnchor ?? captureCommittedAnchor()
+  if (!lastCommittedAnchor && pendingComposerAnchor) lastCommittedAnchor = pendingComposerAnchor
+}
 function onComposerInput(): void {
   props.runtime.setDraftText(composerText.value)
-  pendingComposerPinned = props.runtime.atVisualBottom && props.runtime.range.end === props.runtime.logicalCount
-  pendingComposerAnchor = pendingComposerPinned ? null : (lastCommittedAnchor ?? captureCommittedAnchor())
-  if (!lastCommittedAnchor && pendingComposerAnchor) lastCommittedAnchor = pendingComposerAnchor
+  capturePendingLayoutIntent()
   void nextTick().then(resizeComposer)
 }
 async function sendComposer(): Promise<void> {
@@ -324,9 +367,7 @@ async function sendComposer(): Promise<void> {
   const disposition = props.stream.submit(prompt)
   if (disposition === 'blocked') return
   composerText.value = ''; props.runtime.setDraftText('')
-  pendingComposerPinned = props.runtime.atVisualBottom && props.runtime.range.end === props.runtime.logicalCount
-  pendingComposerAnchor = pendingComposerPinned ? null : (lastCommittedAnchor ?? captureCommittedAnchor())
-  if (!lastCommittedAnchor && pendingComposerAnchor) lastCommittedAnchor = pendingComposerAnchor
+  capturePendingLayoutIntent()
   await nextTick(); resizeComposer()
   if (disposition === 'started') { await settleFrames(2); await jumpToLatest() }
 }
