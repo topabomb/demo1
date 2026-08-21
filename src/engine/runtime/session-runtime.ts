@@ -25,7 +25,6 @@ export interface SessionUiSnapshot {
   reader: number
   followTail: boolean
   atVisualBottom: boolean
-  mountedRows: number
   eventRevision: number
   streamTarget: string | null
   messagesAfter: number
@@ -42,7 +41,7 @@ export interface SessionUiSnapshot {
   pendingInteraction: PendingInteraction | null
 }
 
-/** Disposable composition runtime for one hot conversation view. */
+/** Disposable composition runtime for one hot conversation view. DOM telemetry stays in the physical adapter. */
 export class ConversationSessionRuntime {
   readonly projection = new KeyedConversationProjection()
   readonly projectionEngine = new ProjectionEngine()
@@ -59,8 +58,6 @@ export class ConversationSessionRuntime {
 
   virtualEpoch = 0
   shiftMode = false
-  mountedRows = 0
-  jumpInput: number
   currentLogicalPosition: number
   followTail: boolean
   atVisualBottom: boolean
@@ -73,7 +70,6 @@ export class ConversationSessionRuntime {
     const position = clampIndex(snapshot.logicalPosition, kernel.count)
     this.segment = new SegmentManager(kernel.count, WINDOW_MESSAGES, SHIFT_MESSAGES, position)
     this.#snapshot = { ...snapshot, logicalPosition: position }
-    this.jumpInput = position
     this.currentLogicalPosition = position
     this.followTail = snapshot.followTail
     this.atVisualBottom = snapshot.atVisualBottom && this.segment.range.end === kernel.count
@@ -104,7 +100,6 @@ export class ConversationSessionRuntime {
       reader: this.currentLogicalPosition,
       followTail: this.followTail,
       atVisualBottom: this.atVisualBottom,
-      mountedRows: this.mountedRows,
       eventRevision: this.#eventRevision,
       streamTarget: target === null ? null : `${this.id}:m-${target}`,
       messagesAfter: this.messagesAfterCurrent,
@@ -168,7 +163,6 @@ export class ConversationSessionRuntime {
     this.segment.setTotalMessages(this.logicalCount)
     this.segment.jump(target)
     this.#activeUnits = this.#materialize(this.range)
-    this.jumpInput = target
     if (target !== this.logicalCount - 1) this.setFollowTail(false)
     this.atVisualBottom = false
     this.virtualEpoch += 1
