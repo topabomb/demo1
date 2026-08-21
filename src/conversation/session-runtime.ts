@@ -249,7 +249,9 @@ export class ConversationSessionRuntime {
       const message = this.kernel.getMessage(messageIndex)
       const units = event.contentPatch?.kind === 'append-markdown'
         ? this.projectionEngine.appendMarkdownDelta(message, event.contentPatch.blockId, event.contentPatch.delta)
-        : this.projectionEngine.projectMessage(message)
+        : event.contentPatch?.kind === 'append-reasoning'
+          ? this.projectionEngine.appendReasoningDelta(message, event.contentPatch.blockId, event.contentPatch.delta)
+          : this.projectionEngine.projectMessage(message)
       const existing = this.#activeUnits.filter(unit => unit.messageIndex === messageIndex)
       const sameIds = existing.length === units.length && existing.every((unit, index) => unit.id === units[index]?.id)
       if (sameIds) {
