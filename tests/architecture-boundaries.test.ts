@@ -118,4 +118,11 @@ describe('engine architecture boundaries', () => {
     expect(css).not.toMatch(/(^|\n)\s*:root\s*\{/)
     expect(css).not.toMatch(/(^|\n)\s*(?:html|body|#app)(?:\s|,|\{)/)
   })
+
+  it('isolates main release concurrency from merged-PR cleanup', () => {
+    const workflow = readFileSync(resolve(process.cwd(), '.github/workflows/ci.yml'), 'utf8')
+    expect(workflow).toContain('group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}')
+    expect(workflow).toContain("github.event_name == 'push' && github.ref == 'refs/heads/main'")
+    expect(workflow).toContain("github.event.action == 'closed'")
+  })
 })
