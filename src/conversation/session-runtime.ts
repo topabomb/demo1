@@ -1,10 +1,11 @@
 import { PageHeightIndex, DEFAULT_PAGE_SIZE } from '../core/page-index'
-import { projectMessages } from '../core/projector'
+import { projectMessage, projectMessages } from '../core/projector'
 import { SegmentManager } from '../core/segment-manager'
 import type { RenderUnit, SegmentRange } from '../core/types'
-import type { ConversationDescriptor, ConversationHistoryAdapter, ViewportSnapshot } from './contracts'
+import type { PendingInteraction, SessionStatus, ViewportSnapshot } from './contracts'
 import { KeyedConversationProjection } from './keyed-node-store'
 import { BatchedNotifier, type Unsubscribe } from './notifier'
+import type { ConversationSessionKernel } from './session-kernel'
 
 export const WINDOW_MESSAGES = 2048
 export const SHIFT_MESSAGES = 512
@@ -33,25 +34,23 @@ export interface SessionUiSnapshot {
   projectionSize: number
   virtualEpoch: number
   estimatedTotalHeight: number
+  sessionStatus: SessionStatus
+  queuedPrompts: number
+  pendingInteraction: PendingInteraction | null
 }
 
-/**
- * Framework-free per-session conversation scope. Viewport navigation and Agent
- * execution are deliberately separate lifecycles: a running stream can continue
- * while this session is off-screen or while the reader browses old history.
- */
+/** Heavyweight hot semantic runtime. It is explicitly disposable and never owns execution. */
 export class ConversationSessionRuntime {
   readonly projection = new KeyedConversationProjection()
-  readonly pageHeights: PageHeightIndex
-  readonly descriptor: ConversationDescriptor
-  readonly adapter: ConversationHistoryAdapter
-  readonly segment: SegmentManager
+  readonly kernel: ConversationSessionKernel
+  pageHeights: PageHeightIndex
+  segment: SegmentManager
 
   #stateNotifier = new BatchedNotifier()
   #activeUnits: RenderUnit[] = []
-  #liveTailUnits: RenderUnit[] = []
-  #liveOverrides = new Map<string, RenderUnit>()
   #snapshot: ViewportSnapshot
+  #kernelUnsubscribe: Unsubscribe
+  #knownLogicalCount: number
 
   virtualEpoch = 0
   shiftMode = false
@@ -61,52 +60,38 @@ export class ConversationSessionRuntime {
   followTail: boolean
   atVisualBottom: boolean
   draftText: string
-  streamRate = 20
-  streamIngressTicks = 0
-  streamRenderTicks = 0
-  streamTarget: string | null = null
-  streamChunkText = ''
-  streamBaseUnit: RenderUnit | null = null
-  pendingDelta = ''
-  tailIntentGeneration = 0
 
-  constructor(
-    descriptor: ConversationDescriptor,
-    adapter: ConversationHistoryAdapter,
-    snapshot: ViewportSnapshot,
-  ) {
-    this.descriptor = descriptor
-    this.adapter = adapter
-    this.pageHeights = new PageHeightIndex(adapter.count)
-    const position = clampIndex(snapshot.logicalPosition, adapter.count)
-    this.segment = new SegmentManager(adapter.count, WINDOW_MESSAGES, SHIFT_MESSAGES, position)
+  constructor(kernel: ConversationSessionKernel, snapshot: ViewportSnapshot) {
+    this.kernel = kernel
+    this.#knownLogicalCount = kernel.count
+    this.pageHeights = new PageHeightIndex(kernel.count)
+    const position = clampIndex(snapshot.logicalPosition, kernel.count)
+    this.segment = new SegmentManager(kernel.count, WINDOW_MESSAGES, SHIFT_MESSAGES, position)
     this.#snapshot = { ...snapshot, logicalPosition: position }
     this.jumpInput = position
     this.currentLogicalPosition = position
     this.followTail = snapshot.followTail
-    this.atVisualBottom = snapshot.atVisualBottom && this.segment.range.end === adapter.count
+    this.atVisualBottom = snapshot.atVisualBottom && this.segment.range.end === kernel.count
     this.draftText = snapshot.draftText
     this.#activeUnits = this.#materialize(this.segment.range)
     this.#refreshPageEstimates()
-    this.projection.replace(this.displayUnits)
+    this.projection.replace(this.#activeUnits)
+    this.#kernelUnsubscribe = kernel.subscribe(() => this.#syncKernel())
   }
 
-  get id(): string { return this.descriptor.id }
-  get title(): string { return this.descriptor.title }
-  get status(): ConversationDescriptor['status'] { return this.descriptor.status }
-  get logicalCount(): number { return this.adapter.count }
+  dispose(): void { this.#kernelUnsubscribe() }
+  get id(): string { return this.kernel.id }
+  get title(): string { return this.kernel.title }
+  get status(): SessionStatus { return this.kernel.status }
+  get logicalCount(): number { return this.kernel.count }
   get range(): SegmentRange { return this.segment.range }
   get activeUnits(): readonly RenderUnit[] { return this.#activeUnits }
-  get liveTailUnits(): readonly RenderUnit[] { return this.#liveTailUnits }
-  get displayUnits(): readonly RenderUnit[] {
-    if (this.range.end !== this.logicalCount) return this.#activeUnits
-    const base = this.#activeUnits.map(unit => this.#liveOverrides.get(unit.id) ?? unit)
-    const extra = this.#liveTailUnits.map(unit => this.#liveOverrides.get(unit.id) ?? unit)
-    return [...base, ...extra]
-  }
+  get displayUnits(): readonly RenderUnit[] { return this.#activeUnits }
   get messagesAfterCurrent(): number { return Math.max(0, this.logicalCount - 1 - this.currentLogicalPosition) }
   get estimatedTotalHeight(): number { return this.pageHeights.estimatedTotalHeight() }
+
   get uiSnapshot(): SessionUiSnapshot {
+    const target = this.kernel.currentAssistantIndex
     return {
       rangeStart: this.range.start,
       rangeEnd: this.range.end,
@@ -114,25 +99,23 @@ export class ConversationSessionRuntime {
       followTail: this.followTail,
       atVisualBottom: this.atVisualBottom,
       mountedRows: this.mountedRows,
-      streamRate: this.streamRate,
-      streamIngressTicks: this.streamIngressTicks,
-      streamRenderTicks: this.streamRenderTicks,
-      streamTarget: this.streamTarget,
+      streamRate: this.kernel.streamRate,
+      streamIngressTicks: this.kernel.streamIngressTicks,
+      streamRenderTicks: this.kernel.streamRenderTicks,
+      streamTarget: target === null ? null : `${this.id}:m-${target}`,
       messagesAfter: this.messagesAfterCurrent,
-      liveChunkCount: this.#liveTailUnits.length + 1,
+      liveChunkCount: target === null ? 0 : this.#activeUnits.filter(unit => unit.messageIndex === target).length,
       projectionSize: this.projection.size,
       virtualEpoch: this.virtualEpoch,
       estimatedTotalHeight: this.estimatedTotalHeight,
+      sessionStatus: this.kernel.status,
+      queuedPrompts: this.kernel.queuedPrompts,
+      pendingInteraction: this.kernel.pendingInteraction,
     }
   }
 
-  subscribeState(listener: () => void): Unsubscribe {
-    return this.#stateNotifier.subscribe(listener)
-  }
-
-  markStateDirty(): void {
-    this.#stateNotifier.markDirty()
-  }
+  subscribeState(listener: () => void): Unsubscribe { return this.#stateNotifier.subscribe(listener) }
+  markStateDirty(): void { this.#stateNotifier.markDirty() }
 
   setDraftText(value: string): void {
     if (this.draftText === value) return
@@ -156,9 +139,7 @@ export class ConversationSessionRuntime {
     this.draftText = snapshot.draftText
   }
 
-  get rememberedSnapshot(): ViewportSnapshot {
-    return { ...this.#snapshot, draftText: this.draftText }
-  }
+  get rememberedSnapshot(): ViewportSnapshot { return { ...this.#snapshot, draftText: this.draftText } }
 
   setReaderPosition(index: number, atVisualBottom: boolean): void {
     this.currentLogicalPosition = clampIndex(index, this.logicalCount)
@@ -169,13 +150,13 @@ export class ConversationSessionRuntime {
   setFollowTail(value: boolean): void {
     if (this.followTail === value) return
     this.followTail = value
-    this.tailIntentGeneration += 1
     this.#stateNotifier.markDirty()
   }
 
-  /** Change the semantic hot viewport only; never cancel/reset an async Agent run. */
   jump(index: number): void {
+    if (this.logicalCount <= 0) return
     const target = clampIndex(index, this.logicalCount)
+    this.segment.setTotalMessages(this.logicalCount)
     this.segment.jump(target)
     this.#activeUnits = this.#materialize(this.range)
     this.currentLogicalPosition = target
@@ -184,7 +165,7 @@ export class ConversationSessionRuntime {
     this.atVisualBottom = false
     this.virtualEpoch += 1
     this.#refreshPageEstimates()
-    this.projection.replace(this.displayUnits)
+    this.projection.replace(this.#activeUnits)
     this.#stateNotifier.markDirty()
   }
 
@@ -192,28 +173,18 @@ export class ConversationSessionRuntime {
     const previous = { ...this.range }
     const next = this.segment.shiftBackward()
     if (next.start === previous.start) return null
-
     const incoming = this.#materializeRange(next.start, previous.start)
     const retained = this.#activeUnits.filter(unit => unit.messageIndex < next.end)
-    const final = [...incoming, ...retained]
-    return {
-      direction: 'backward', previous, next: { ...next },
-      intermediate: [...incoming, ...this.#activeUnits], final,
-    }
+    return { direction: 'backward', previous, next: { ...next }, intermediate: [...incoming, ...this.#activeUnits], final: [...incoming, ...retained] }
   }
 
   planShiftForward(): ShiftPlan | null {
     const previous = { ...this.range }
     const next = this.segment.shiftForward()
     if (next.start === previous.start) return null
-
     const incoming = this.#materializeRange(previous.end, next.end)
     const retained = this.#activeUnits.filter(unit => unit.messageIndex >= next.start)
-    const final = [...retained, ...incoming]
-    return {
-      direction: 'forward', previous, next: { ...next },
-      intermediate: [...this.#activeUnits, ...incoming], final,
-    }
+    return { direction: 'forward', previous, next: { ...next }, intermediate: [...this.#activeUnits, ...incoming], final: [...retained, ...incoming] }
   }
 
   applyIntermediate(units: readonly RenderUnit[], shiftMode: boolean): void {
@@ -226,50 +197,62 @@ export class ConversationSessionRuntime {
     this.shiftMode = shiftMode
     this.#activeUnits = [...plan.final]
     this.#refreshPageEstimates()
-    this.projection.replace(this.displayUnits)
+    this.projection.replace(this.#activeUnits)
     this.#stateNotifier.markDirty()
   }
 
-  finishShift(): void {
-    this.shiftMode = false
-    this.#stateNotifier.markDirty()
-  }
+  finishShift(): void { this.shiftMode = false; this.#stateNotifier.markDirty() }
 
-  appendLiveChunk(unit: RenderUnit): void {
-    this.#liveTailUnits = [...this.#liveTailUnits, unit]
-    if (this.range.end === this.logicalCount) this.projection.replace(this.displayUnits)
-    this.#stateNotifier.markDirty()
-  }
-
-  /** Store live node state even when its row is outside the current projection. */
-  patchNode(unit: RenderUnit): void {
-    if (unit.messageIndex === this.logicalCount - 1) this.#liveOverrides.set(unit.id, unit)
-    this.projection.patch(unit)
-    this.streamRenderTicks += 1
-    this.#stateNotifier.markDirty()
-  }
-
-  /** Re-apply off-screen stream state after navigating back to the logical tail. */
   refreshProjection(): void {
-    this.projection.replace(this.displayUnits)
+    this.#activeUnits = this.#materialize(this.range)
+    this.projection.replace(this.#activeUnits)
     this.#stateNotifier.markDirty()
   }
 
-  clearLiveTail(): void {
-    this.#liveTailUnits = []
-    this.#liveOverrides.clear()
-    this.streamChunkText = ''
-    if (this.range.end === this.logicalCount) this.projection.replace(this.#activeUnits)
+  #syncKernel(): void {
+    const event = this.kernel.lastEvent
+    const oldCount = this.#knownLogicalCount
+    const newCount = this.logicalCount
+
+    if (newCount !== oldCount) {
+      const wasPinned = this.followTail || this.atVisualBottom
+      this.#knownLogicalCount = newCount
+      this.segment.setTotalMessages(newCount)
+      if (Math.ceil(Math.max(1, newCount) / DEFAULT_PAGE_SIZE) !== this.pageHeights.pageCount) {
+        this.pageHeights = new PageHeightIndex(newCount)
+      }
+      if (wasPinned && newCount > 0) {
+        this.segment.setEndingAt(newCount - 1)
+        this.currentLogicalPosition = newCount - 1
+        this.atVisualBottom = true
+        this.#activeUnits = this.#materialize(this.range)
+        this.#refreshPageEstimates()
+        this.projection.replace(this.#activeUnits)
+      }
+    }
+
+    if (event.messageIndex !== undefined && event.messageIndex >= this.range.start && event.messageIndex < this.range.end) {
+      const units = projectMessage(this.kernel.getMessage(event.messageIndex))
+      const existing = this.#activeUnits.filter(unit => unit.messageIndex === event.messageIndex)
+      const sameIds = existing.length === units.length && existing.every((unit, index) => unit.id === units[index]?.id)
+      if (sameIds) {
+        const byId = new Map(units.map(unit => [unit.id, unit]))
+        this.#activeUnits = this.#activeUnits.map(unit => byId.get(unit.id) ?? unit)
+        for (const unit of units) this.projection.patch(unit)
+      } else {
+        this.#activeUnits = this.#materialize(this.range)
+        this.projection.replace(this.#activeUnits)
+      }
+    }
+
     this.#stateNotifier.markDirty()
   }
 
-  #materialize(range: SegmentRange): RenderUnit[] {
-    return this.#materializeRange(range.start, range.end)
-  }
+  #materialize(range: SegmentRange): RenderUnit[] { return this.#materializeRange(range.start, range.end) }
 
   #materializeRange(start: number, end: number): RenderUnit[] {
     if (end <= start) return []
-    return projectMessages([...this.adapter.loadRange(start, end - start)])
+    return projectMessages(this.kernel.loadRange(start, end - start))
   }
 
   #refreshPageEstimates(): void {
@@ -292,5 +275,6 @@ export class ConversationSessionRuntime {
 }
 
 function clampIndex(index: number, count: number): number {
-  return Math.max(0, Math.min(Math.max(0, count - 1), Math.floor(Number(index) || 0)))
+  if (count <= 0) return 0
+  return Math.max(0, Math.min(count - 1, Math.floor(Number(index) || 0)))
 }
