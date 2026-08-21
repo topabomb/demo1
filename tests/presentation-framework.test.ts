@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import type { LogicalMessage } from '../src/model/conversation'
-import { block } from '../src/model/conversation'
-import { ContentProjectorRegistry, defaultContentProjectors, projectMessage } from '../src/presentation/projector-registry'
-import { splitMarkdown } from '../src/presentation/markdown-chunks'
+import type { LogicalMessage } from '../src/engine/model/conversation'
+import { block } from '../src/engine/model/conversation'
+import { ContentProjectorRegistry, defaultContentProjectors, projectMessage } from '../src/engine/presentation/projector-registry'
+import { splitMarkdown } from '../src/engine/presentation/markdown-chunks'
 import { AGENT_SCENARIO_MESSAGE_COUNT, createAgentScenarioPack, createMixedDemoTurn, MARKDOWN_COMPATIBILITY_FIXTURES } from '../src/demo/scenarios'
 
 function message(blocks: LogicalMessage['blocks'], revision = 0): LogicalMessage {
