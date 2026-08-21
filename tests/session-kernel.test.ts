@@ -1,79 +1,73 @@
 import { describe, expect, it } from 'vitest'
 import { ConversationSessionKernel } from '../src/engine/conversation/session-kernel'
+import { block } from '../src/engine/model/conversation'
+import { appendMarkdownContent, appendReasoningContent, settleReasoning } from '../src/engine/model/message-mutations'
 import { SyntheticHistoryAdapter } from '../src/demo/history-adapter'
 import { SyntheticStreamController } from '../src/demo/stream-controller'
 
+function appendTurn(kernel: ConversationSessionKernel, prompt: string): number {
+  const userIndex = kernel.count
+  const turnId = `${kernel.id}:test-turn-${userIndex}`
+  const stepId = `${turnId}:step-0`
+  const indexes = kernel.appendCanonicalMessages([
+    { turnId, stepId, role: 'user', blocks: [block('prompt', 'markdown', { markdown: prompt })] },
+    { turnId, stepId, role: 'assistant', blocks: [block('reasoning', 'reasoning', { text: '', tokenCount: 0, durationMs: 0, status: 'streaming' }), block('answer', 'markdown', { markdown: '' })], live: true },
+  ])
+  return indexes[1]!
+}
+
 describe('ConversationSessionKernel', () => {
-  it('turns an idle historical conversation into a canonical resumable Turn/Step with durable accounting', () => {
+  it('stores canonical content/lifecycle/accounting without inventing provider behavior', () => {
     const descriptor = {
-      id: 'resume', title: 'Resume', age: 'now', status: 'idle' as const, logicalCount: 100,
+      id: 'resume', title: 'Resume', status: 'idle' as const, logicalCount: 100,
       usage: { inputTokens: 20, outputTokens: 10, cacheReadTokens: 40, cacheWriteTokens: 5, reasoningTokens: 2 },
       context: { projectedTokens: 2_000, contextWindow: 128_000 },
       lastTurnReason: 'completed' as const,
     }
     const kernel = new ConversationSessionKernel(descriptor, new SyntheticHistoryAdapter('resume', 100, 9))
-    const execution = new SyntheticStreamController(kernel)
-    const inputBefore = kernel.usage.inputTokens
-    const reasoningBefore = kernel.usage.reasoningTokens
-    expect(execution.submit('continue this task')).toBe('started')
+    const assistantIndex = appendTurn(kernel, 'continue this task')
+    expect(kernel.startExecution(assistantIndex)).toBe(true)
     expect(kernel.count).toBe(102)
-    expect(kernel.getMessage(100)).toMatchObject({
-      role: 'user', turnId: 'resume:runtime-turn-100', stepId: 'resume:runtime-turn-100:step-0',
-      blocks: [{ id: 'prompt', type: 'markdown', data: { markdown: 'continue this task' } }],
-    })
-    expect(kernel.getMessage(101)).toMatchObject({
-      role: 'assistant', live: true, turnId: 'resume:runtime-turn-100', stepId: 'resume:runtime-turn-100:step-0',
-      blocks: [
-        { id: 'reasoning', type: 'reasoning', data: { text: '', status: 'streaming' } },
-        { id: 'answer', type: 'markdown', data: { markdown: '' } },
-      ],
-    })
-    expect(kernel.status).toBe('working')
-    expect(kernel.lastTurnReason).toBeNull()
-    expect(kernel.usage.inputTokens).toBeGreaterThan(inputBefore)
+    expect(kernel.getMessage(100)).toMatchObject({ role: 'user', blocks: [{ id: 'prompt', type: 'markdown' }] })
+    expect(kernel.getMessage(101)).toMatchObject({ role: 'assistant', live: true, blocks: [{ id: 'reasoning' }, { id: 'answer' }] })
 
-    kernel.appendCurrentReasoningDelta('Inspect stable identities before rendering. ')
-    expect(kernel.getMessage(101)).toMatchObject({
-      blocks: [
-        { id: 'reasoning', type: 'reasoning', data: { text: 'Inspect stable identities before rendering. ', status: 'streaming' } },
-        { id: 'answer', type: 'markdown', data: { markdown: '' } },
-      ],
-    })
+    const reasoning = appendReasoningContent(kernel.getMessage(assistantIndex), 'Inspect stable identities before rendering. ', 20, 11)!
+    kernel.replaceCanonicalMessage(assistantIndex, reasoning.message, { kind: 'append-reasoning', blockId: reasoning.blockId, delta: 'Inspect stable identities before rendering. ' })
     expect(kernel.lastEvent.contentPatch).toMatchObject({ kind: 'append-reasoning', blockId: 'reasoning' })
-    expect(kernel.usage.reasoningTokens).toBeGreaterThan(reasoningBefore)
 
-    kernel.appendAssistantDelta('A streamed answer adds output-token accounting. ')
-    expect(kernel.getMessage(101)).toMatchObject({
-      blocks: [
-        { id: 'reasoning', type: 'reasoning' },
-        { id: 'answer', type: 'markdown', data: { markdown: 'A streamed answer adds output-token accounting. ' } },
-      ],
-    })
+    const answer = appendMarkdownContent(kernel.getMessage(assistantIndex), 'A provider-normalized streamed answer. ')
+    kernel.replaceCanonicalMessage(assistantIndex, answer.message, { kind: 'append-markdown', blockId: answer.blockId, delta: 'A provider-normalized streamed answer. ' })
     expect(kernel.lastEvent.contentPatch).toMatchObject({ kind: 'append-markdown', blockId: 'answer' })
-    expect(kernel.usage.outputTokens).toBeGreaterThan(10)
-    kernel.completeCurrent()
-    const completed = kernel.getMessage(101)
-    expect(completed.live).toBe(false)
-    expect(completed.blocks[0]).toMatchObject({ id: 'reasoning', type: 'reasoning', data: { status: 'complete' } })
-    expect(completed.blocks[1]).toMatchObject({ id: 'answer', type: 'markdown', data: { markdown: 'A streamed answer adds output-token accounting. ' } })
+
+    kernel.setAccounting({ inputTokens: 25, outputTokens: 19, cacheReadTokens: 44, cacheWriteTokens: 6, reasoningTokens: 13 }, { projectedTokens: 2_100, contextWindow: 128_000 })
+    expect(kernel.usage).toEqual({ inputTokens: 25, outputTokens: 19, cacheReadTokens: 44, cacheWriteTokens: 6, reasoningTokens: 13 })
+
+    const settled = settleReasoning(kernel.getMessage(assistantIndex), 'complete')
+    kernel.replaceCanonicalMessage(assistantIndex, { ...settled, live: false })
+    kernel.finishExecution('completed')
+    expect(kernel.status).toBe('idle')
     expect(kernel.lastTurnReason).toBe('completed')
-    execution.dispose()
+    expect(kernel.getMessage(assistantIndex)).toMatchObject({ live: false, blocks: [{ type: 'reasoning', data: { status: 'complete' } }, { type: 'markdown' }] })
   })
 
   it('delivers every semantic mutation in producer order while summary notification stays coalesced', async () => {
-    const descriptor = { id: 'events', title: 'Events', age: 'now', status: 'idle' as const, logicalCount: 0 }
+    const descriptor = { id: 'events', title: 'Events', status: 'idle' as const, logicalCount: 0 }
     const kernel = new ConversationSessionKernel(descriptor, new SyntheticHistoryAdapter('events', 0, 4))
     const events: string[] = []
     let summaries = 0
     const unsubscribeEvents = kernel.subscribeEvents(event => events.push(event.contentPatch?.kind ?? event.kind))
     const unsubscribeSummary = kernel.subscribe(() => { summaries += 1 })
 
-    kernel.beginTurn('first')
-    kernel.appendCurrentReasoningDelta('r')
-    kernel.appendAssistantDelta('a')
-    kernel.appendAssistantDelta('b')
+    const index = appendTurn(kernel, 'first')
+    kernel.startExecution(index)
+    const reasoning = appendReasoningContent(kernel.getMessage(index), 'r', 1, 1)!
+    kernel.replaceCanonicalMessage(index, reasoning.message, { kind: 'append-reasoning', blockId: reasoning.blockId, delta: 'r' })
+    let answer = appendMarkdownContent(kernel.getMessage(index), 'a')
+    kernel.replaceCanonicalMessage(index, answer.message, { kind: 'append-markdown', blockId: answer.blockId, delta: 'a' })
+    answer = appendMarkdownContent(kernel.getMessage(index), 'b')
+    kernel.replaceCanonicalMessage(index, answer.message, { kind: 'append-markdown', blockId: answer.blockId, delta: 'b' })
 
-    expect(events).toEqual(['append', 'append-reasoning', 'append-markdown', 'append-markdown'])
+    expect(events).toEqual(['append', 'status', 'append-reasoning', 'append-markdown', 'append-markdown'])
     expect(summaries).toBe(0)
     await Promise.resolve()
     expect(summaries).toBe(1)
@@ -82,7 +76,7 @@ describe('ConversationSessionKernel', () => {
   })
 
   it('queues follow-ups while working instead of coupling them to the viewport', () => {
-    const descriptor = { id: 'queue', title: 'Queue', age: 'now', status: 'idle' as const, logicalCount: 0 }
+    const descriptor = { id: 'queue', title: 'Queue', status: 'idle' as const, logicalCount: 0 }
     const kernel = new ConversationSessionKernel(descriptor, new SyntheticHistoryAdapter('queue', 0, 4))
     const execution = new SyntheticStreamController(kernel)
     expect(execution.submit('first')).toBe('started')
@@ -92,11 +86,11 @@ describe('ConversationSessionKernel', () => {
   })
 
   it('records last-turn failure without making the historical session non-resumable', () => {
-    const descriptor = { id: 'failed', title: 'Failed', age: 'now', status: 'idle' as const, logicalCount: 20, lastTurnReason: 'error' as const }
+    const descriptor = { id: 'failed', title: 'Failed', status: 'idle' as const, logicalCount: 20, lastTurnReason: 'error' as const }
     const kernel = new ConversationSessionKernel(descriptor, new SyntheticHistoryAdapter('failed', 20, 4))
     const execution = new SyntheticStreamController(kernel)
     expect(execution.submit('retry with a new turn')).toBe('started')
-    kernel.failCurrent({ code: 'PROVIDER_TIMEOUT', message: 'timeout', status: 504 })
+    execution.fail({ code: 'PROVIDER_TIMEOUT', message: 'timeout', status: 504 })
     expect(kernel.status).toBe('idle')
     expect(kernel.lastTurnReason).toBe('error')
     expect(kernel.lastFailure?.code).toBe('PROVIDER_TIMEOUT')
