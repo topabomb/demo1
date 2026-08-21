@@ -1,4 +1,7 @@
-import type { SegmentRange } from './types'
+export interface SegmentRange {
+  start: number
+  end: number
+}
 
 export class SegmentManager {
   private _range: SegmentRange
