@@ -2,156 +2,280 @@
 
 Status: **candidate reference architecture under executable verification**.
 
-This document is the single design source of truth for the lab. The goal is not a Vue/Virtua trick and not a CodeNomad clone. It is a portable architecture for Agent workspaces that must support very long heterogeneous conversations, multiple independent asynchronous sessions, resumable history, human blockers, durable usage statistics, and stable dynamic-height UX.
+This is the single design source of truth for `demo1`. The goal is not a Vue/Virtua trick and not a CodeNomad/DSH clone. The target is a reusable **Agent Conversation Presentation Framework** for workspaces that need:
 
-## 1. Target and non-goals
+- very long heterogeneous histories (1,000,000+ logical messages/events);
+- many independent asynchronous/resumable sessions;
+- reasoning, tools, Markdown, code, diff, images, HTML/artifacts and future render types;
+- streaming output and dynamic-height content;
+- stable reader/Latest/anchor semantics;
+- replaceable framework, virtualizer, layout and product styling;
+- durable execution/usage/blocker state that does not depend on a mounted viewport.
 
-The architecture must keep two scaling dimensions independent:
+The core principle is:
 
-1. **history scale** — a session may contain 1,000,000+ logical messages/events;
-2. **workspace concurrency** — many sessions may be working, blocked, failed, idle or unread at the same time.
+> **Provider protocol, durable session state, semantic content, presentation projection, semantic viewport, physical virtualization and product rendering are different ownership boundaries.**
 
-Normal rendering/update cost must depend on changed/hot/visible data, not total history.
+Normal hot-path work should scale with **changed + hot + visible** content, not total historical size.
 
-This reference does **not** require Vue, Virtua, DSH, OpenCode, a particular provider, a specific sidebar, a fixed content width, or the dark theme in the demo. Those are replaceable adapters or product choices.
+---
 
-## 2. Portable ownership boundaries
+## 1. Four lifecycles, seven contracts
 
 ```text
 Provider / DSH / OpenCode / remote runtime
                  │
                  ▼
 ┌──────────────────────────────────────────────┐
-│ 1. Backend Adapter                          │
-│ paging · protocol translation · capabilities│
+│ 1. Backend Adapter                          │ protocol lifetime
+│ paging · cursors · event normalization       │
 └───────────────────┬──────────────────────────┘
                     │ canonical messages/events
                     ▼
 ┌──────────────────────────────────────────────┐
-│ 2. SessionKernel / Execution Registry        │
-│ durable session semantics                    │
-│ turns · run · queue · blockers · usage       │
+│ 2. SessionKernel / Execution Registry        │ session lifetime
+│ run · queue · blockers · turns · usage       │
 └───────────────────┬──────────────────────────┘
-                    │ hot/visible session only
+                    │ LogicalMessage + ContentBlock[]
                     ▼
 ┌──────────────────────────────────────────────┐
-│ 3. Hot ConversationRuntime                   │
-│ bounded segment · keyed projection · indexes │
+│ 3. Content Projector Registry                │ presentation semantics
+│ ContentBlock → bounded stable RenderUnit[]   │
 └───────────────────┬──────────────────────────┘
                     ▼
 ┌──────────────────────────────────────────────┐
-│ 4. Semantic Viewport Policy                  │
+│ 4. Hot Projection Runtime                    │ hot semantic lifetime
+│ bounded segment · order + keyed nodes        │
+└───────────────────┬──────────────────────────┘
+                    ▼
+┌──────────────────────────────────────────────┐
+│ 5. Semantic Viewport Policy                  │ interaction lifetime
 │ reader · Latest · anchor · follow · restore  │
 └───────────────────┬──────────────────────────┘
                     ▼
 ┌──────────────────────────────────────────────┐
-│ 5. Framework / Virtualizer Adapter           │
-│ physical list · resize observer · DOM sample │
+│ 6. Physical List / Framework Adapter         │ mounted lifetime
+│ measurement · ResizeObserver · DOM samples   │
 └───────────────────┬──────────────────────────┘
                     ▼
 ┌──────────────────────────────────────────────┐
-│ 6. Product UI / CSS                          │
-│ layout · theme · icons · composer limits     │
+│ 7. Renderer Registry + Product UI / CSS      │ replaceable presentation
+│ Vue/React/Solid components · layout · theme  │
 └──────────────────────────────────────────────┘
 ```
 
-The first four are reusable architecture. Layer 5 adapts it to a frontend/runtime. Layer 6 is product presentation.
+The reusable architecture is 1–5 plus the small contracts between 5–7. Vue, Virtua and the dark reference UI are implementations, not architectural requirements.
 
 ### Ownership matrix
 
-| Concern | Owner | Durable across viewport eviction? | Framework reactive? |
+| Concern | Owner | Survives viewport eviction? | Framework reactive? |
 |---|---|---:|---:|
 | Provider protocol/cursors | Backend Adapter | yes | no |
-| Canonical appended turns | SessionKernel | yes | no |
+| Canonical turns/messages | SessionKernel / backend history | yes | no |
 | Current execution | SessionKernel + ExecutionController | yes | no |
-| Queue | SessionKernel | yes | no |
-| Approval/question blocker | SessionKernel | yes | no |
+| Queue / approval / question | SessionKernel | yes | no |
 | Last Turn result/failure | SessionKernel | yes | no |
 | Token/cache/context projection | SessionKernel | yes | no |
-| Unread/attention | SessionKernel / Workspace | yes | thin snapshot only |
-| ~2K projected history | Hot ConversationRuntime | no; rebuildable | no deep reactivity |
-| RenderUnit order/nodes | Keyed ProjectionStore | no; rebuildable | key-level bridge only |
-| Reader/anchor/draft snapshot | semantic snapshot | yes | atomic snapshot only |
-| Virtualizer measurement cache | frontend adapter | no | implementation detail |
-| Mounted DOM | frontend adapter | no | visible only |
-| Sidebar width/colors/row gap | product CSS | n/a | no semantic effect |
+| `ContentBlock[]` semantics | canonical message model | yes | no |
+| ~2K projected history | Hot Runtime | rebuildable | no deep reactivity |
+| `order + keyed RenderUnit nodes` | Projection Store | rebuildable | key-level bridge only |
+| reader/anchor/follow/draft | semantic snapshot | yes | atomic snapshot only |
+| height/measurement cache | physical adapter | no | implementation detail |
+| mounted DOM | physical adapter | no | visible only |
+| component registry | frontend renderer layer | n/a | small registry |
+| colors/sidebar width/breakpoints | product CSS | n/a | no semantic effect |
 
-The key invariant is:
+**Invariant:** N running Agent sessions do not imply N heavyweight runtimes or N mounted viewports.
 
-> **N running Agent sessions do not imply N heavyweight conversation runtimes or N mounted viewports.**
+---
 
-The demo keeps at least four working kernels alive while limiting heavyweight runtimes to three.
+## 2. Canonical content is heterogeneous and extensible
 
-## 3. Session semantics
+A real assistant message is not `message.kind = markdown`. One Turn may contain reasoning, text, several tool calls/results, Markdown, code, a diff and an image. Therefore the portable model is:
 
-A resumable Agent session cannot be represented by one overloaded `status` string. Four dimensions are independent.
+```ts
+interface LogicalMessage {
+  id: string
+  index: number
+  turnId: string
+  role: 'user' | 'assistant' | 'tool' | 'system'
+  blocks?: readonly ContentBlock[]
+  revision?: number
+  live?: boolean
+}
 
-### 3.1 Live execution state
-
-Portable live state used by this lab:
-
-```text
-idle
-working
-waiting
-interrupted
+interface ContentBlockMap {
+  text: ...
+  markdown: ...
+  reasoning: ...
+  code: ...
+  image: ...
+  html: ...
+  'tool-call': ...
+  'tool-result': ...
+  diff: ...
+}
 ```
 
-`waiting` means execution is currently blocked on a human interaction. `interrupted` represents an interrupted live lifecycle; the session history is still resumable.
+`ContentBlockMap` is intentionally declaration-mergeable. A product may add `citation`, `terminal-session`, `file-tree`, `chart`, `artifact`, `subagent`, etc. without changing SessionKernel, paging, viewport policy or virtualizer code.
 
-### 3.2 Last settled Turn result
+Legacy backends that expose one `kind` per message are normalized into blocks at the adapter/presentation boundary; new adapters should emit canonical blocks directly.
 
-The vocabulary aligns with DSH's portable Turn-end reasons:
+### Stable block identity
 
-```text
-completed
-aborted
-blocked
-error
-max-tokens
-interrupted
-```
-
-This is **historical outcome**, not permanent session lifecycle. For example:
+Every block needs a stable ID within its message. The projector derives RenderUnit IDs from:
 
 ```text
-lastTurn = error(PROVIDER_TIMEOUT)
-current execution = idle
-composer = enabled
+Session + Message + ContentBlock + bounded chunk index
 ```
 
-The user may submit another prompt, which starts a new `working` Turn and clears the active failure surface.
+Identity must represent semantics, not current DOM position.
 
-### 3.3 Blockers
+---
 
-The demo models the two common human blockers:
+## 3. Two registries, not one component switch
+
+“Extensible renderer” means two independent extension surfaces.
+
+### 3.1 Content Projector Registry
 
 ```text
-approval
-a question
+ContentBlock.type
+      ↓
+ContentProjectorRegistry
+      ↓
+bounded RenderUnit[]
 ```
 
-A blocker belongs to the SessionKernel, not the mounted conversation component. It therefore survives Recent switching and hot-runtime eviction.
+The projector owns:
 
-### 3.4 Attention
+- semantic block → physical presentation decomposition;
+- stable IDs/revisions;
+- size estimates;
+- bounded chunking for huge Markdown/code/diff;
+- renderer ID selection;
+- fallback for unknown semantic blocks.
 
-`unread` and queued follow-ups are workspace routing state. They may change while the session is off-screen.
+It is framework-free.
 
-### 3.5 Why this matches DSH well
+### 3.2 Frontend Renderer Registry
 
-DSH's canonical Session event model separates `turn/start`, `turn/end`, `step/start`, `step/end`, user/assistant/tool surface events and the Turn-end reason. The reference architecture adopts the same separation principle without depending on DSH packages or event wire shapes.
+```text
+RenderUnit.kind
+      ↓
+RendererRegistry
+      ↓
+Vue / React / Solid component
+```
 
-A backend adapter can map DSH/OpenCode/provider-specific events into these portable semantics.
+The renderer owns actual DOM/visual output and local disclosure state. Replacing a Markdown component or adding a `citation` component must not modify the conversation store or scroll policy.
 
-## 4. Durable usage, cache and context projections
+### Extension checklist
 
-Usage is session/turn data, not viewport data. Never compute total input/output/cache statistics by folding only the currently projected 2K-message window.
+To add a new semantic output such as `citation`:
 
-The portable accounting uses disjoint prompt buckets, matching DSH semantics:
+1. extend `ContentBlockMap`;
+2. register a semantic projector producing bounded stable RenderUnits;
+3. register a frontend renderer for its renderer ID;
+4. define its containment/responsive contract;
+5. add canonical fixture + unit + browser tests.
+
+No SessionKernel/SegmentManager/Virtua changes should be necessary.
+
+---
+
+## 4. Renderer contracts and bounded presentation
+
+A virtualizer cannot solve an individual 100K-pixel message. Presentation projection must bound physical units first.
+
+| Semantic block | Projection rule | Renderer rule | Narrow-screen behavior |
+|---|---|---|---|
+| text | one bounded unit | plain semantic text | wrap |
+| Markdown | fence-safe ~6K chunks | GFM + sanitization + LRU | prose reflow; table/pre scroll internally |
+| reasoning | disclosure unit | collapsed by default | remeasure on toggle |
+| code | ~80-line chunks | Shiki worker + bounded cache | horizontal internal scroll |
+| diff | ~72-line chunks | collapsible diff | horizontal internal scroll |
+| image | intrinsic dimensions | reserve aspect ratio before load | `max-width:100%` |
+| HTML/artifact | bounded semantic unit | DOMPurify | contained/internal overflow |
+| tool call/result | structured disclosure | input/output independent from list | contained JSON/pre |
+| unknown | safe fallback | diagnostic representation | wrap/contain |
+
+### Renderer geometry invariant
+
+A renderer may change height asynchronously, but must remain contained in the available inline size and report its final height through normal layout/ResizeObserver. It must not mutate semantic reader state directly.
+
+---
+
+## 5. Markdown is a first-class streaming problem
+
+Parsing an ever-growing assistant response from byte 0 on every token/frame creates cost proportional to the total current answer. The reference path instead uses:
+
+```text
+live Markdown source
+      ↓
+fence-safe block chunker (~6K target)
+      ↓
+settled prefix chunks + mutable tail
+      ↓
+content-derived chunk revision
+      ↓
+bounded Markdown HTML LRU
+```
+
+Important properties:
+
+- a fenced code block is never cut between opener and closer;
+- appending to the tail does not change IDs/revisions of already settled prefix chunks;
+- keyed projection therefore only publishes changed tail nodes;
+- DOMPurify runs before mounting HTML generated from Markdown;
+- raw `<script>` does not survive;
+- GFM table/task-list/fence/blockquote/long-document cases are executable fixtures.
+
+For production workloads with very expensive Markdown parsing, the same contract can move parsing to a worker without changing SessionKernel or viewport semantics.
+
+---
+
+## 6. DSH-aligned session semantics
+
+A resumable Agent session cannot be represented by one overloaded `status` string.
+
+### Live execution
+
+```text
+idle | working | waiting | interrupted
+```
+
+### Last settled Turn result
+
+```text
+completed | aborted | blocked | error | max-tokens | interrupted
+```
+
+This is historical outcome, not permanent session state. `lastTurn=error(PROVIDER_TIMEOUT)` with `execution=idle` remains resumable.
+
+### Human blockers
+
+```text
+approval | question
+```
+
+Blockers belong to SessionKernel and survive Recent switching and hot-runtime eviction.
+
+### Attention
+
+Unread and queued follow-ups belong to workspace/session routing, not the mounted conversation.
+
+This matches the useful DSH separation principle: Turn lifecycle, step lifecycle, content/tool events and Turn-end reason are distinct concepts even when the actual wire protocol differs.
+
+---
+
+## 7. Durable usage/cache/context projections
+
+Usage is session/Turn data, never a fold over the current 2K hot window.
 
 ```ts
 interface TokenUsage {
-  inputTokens: number        // uncached input only
+  inputTokens: number        // uncached prompt input
   cacheReadTokens: number
   cacheWriteTokens: number
   outputTokens: number
@@ -159,263 +283,221 @@ interface TokenUsage {
 }
 ```
 
-Therefore:
-
 ```text
 billed input = input + cacheRead + cacheWrite
 cache hit %  = cacheRead / billed input
 ```
 
-The SessionKernel also owns a context projection:
+SessionKernel also owns context occupancy, turns/steps, TTFT/run duration when available, last failure code and last Turn reason. A real adapter should prefer provider-reported usage; the lab estimates values only to prove ownership and update paths.
 
-```ts
-interface SessionContextStats {
-  projectedTokens: number
-  contextWindow: number
-}
-```
+---
 
-This is intentionally a whole-session/request projection. It can survive paging, compaction, viewport eviction and frontend remount.
+## 8. Long-history and keyed hot projection
 
-The demo updates these counters while synthetic streaming runs so the UI proves the ownership model. A real backend should consume provider-reported usage whenever available rather than estimate it client-side.
+Do not materialize one million messages in framework state.
 
-Useful product projections include:
+The reference keeps roughly 2,048 logical messages hot and shifts neighboring history in slices of 512. Only incoming messages are projected; retained RenderUnit object identities are reused.
 
-- turns / steps;
-- input / output / reasoning tokens;
-- cache read/write and cache-hit percentage;
-- context occupancy;
-- TTFT / run duration / tokens per second when backend timing is available;
-- last Turn reason and structured failure code.
-
-## 5. Long-history store and projection
-
-### 5.1 Do not materialize the whole history into framework state
-
-The demo can address 1,000,000 logical messages but only projects a bounded window (about 2,048 messages). Cold bodies belong to backend/persistence.
-
-### 5.2 Stable keyed projection
-
-The DSH-inspired projection shape is:
+The DSH-inspired presentation store is:
 
 ```text
 order: NodeId[]
 nodes: Map<NodeId, RenderUnit>
 ```
 
-A streaming update patches one keyed node. It should not rebuild/filter the entire hot list when order membership has not changed.
+A stream delta patches one keyed node. It does not invalidate sibling seats or publish list order when membership/order is unchanged.
 
-A logical assistant message can project to multiple bounded RenderUnits. This prevents one enormous Markdown/code/diff message from becoming a single 100K-pixel virtual item.
+Global navigation uses page/segment metadata and a page-level Fenwick height index. The frontend intentionally does not maintain a million-entry height tree.
 
-### 5.3 Incremental neighboring shifts
+---
 
-The reference window shifts by 512 messages. Only the incoming slice is projected; retained RenderUnit objects preserve identity.
-
-### 5.4 Global height/index data
-
-The demo uses page-level aggregate heights and a Fenwick index. It intentionally does **not** maintain a million-item frontend height tree. Global navigation works at page/segment level; physical measurements remain local to the virtualizer.
-
-## 6. Semantic viewport policy
-
-Physical scroll state is not application truth.
+## 9. Semantic viewport is application truth
 
 ```text
 mounted DOM != visible DOM != committed semantic viewport
 ```
 
-Virtualizers may mount measurement probes or temporary rows. The application owns:
+Virtualizers may mount measurement probes and temporary rows. The application owns:
 
-- semantic reader: last visible logical message;
-- exact messages-after count;
+- `reader`: last committed visible logical message;
+- exact `messagesAfter = logicalCount - 1 - reader`;
 - Latest visibility;
-- stable semantic anchor `{RenderUnitId, offsetPx}`;
+- semantic anchor `{ RenderUnitId, offsetPx }`;
 - follow-tail intent;
 - restoration policy.
 
-The pure policy in `src/viewport/contracts.ts` consumes abstract physical measurements. It does not import Vue, Virtua or CSS.
+Physical scroll coordinates are adapter inputs, not persisted application semantics.
 
-### 6.1 Latest
+### Follow-tail
 
-```text
-messagesAfter = logicalCount - 1 - reader
-```
+Model output and user scroll are independent inputs. An upward user intent must immediately own the viewport; programmatic tail-follow cannot steal it back. Latest may re-enable follow only after the true logical/physical end commits.
 
-It is not derived from scrollbar remainder. At the true logical tail, `Latest` disappears even if the browser/virtualizer retains a tiny physical remainder.
+### Composer resize
 
-### 6.2 Anchor
+The composer is a separate layout row, not an overlay. Height changes resize the physical viewport. If pinned, re-pin the measured end. If reading history, restore the same semantic anchor.
 
-Only rows that:
+---
 
-1. intersect the physical viewport;
-2. belong to the current projection;
-3. are consistent with the committed semantic reader
+## 10. Responsive layout is remeasurement, not a state transition
 
-may become an anchor. This rejects virtualizer measurement probes.
-
-### 6.3 Follow-tail
-
-Model streaming and user scroll intent are separate inputs. A reader scrolling upward must immediately own the viewport; programmatic tail follow cannot steal it back. Returning to Latest may re-enable follow when physically committed at the end.
-
-### 6.4 Composer/layout resize
-
-Composer height is **not an algorithm constant**. Product CSS chooses its min/max height. A ResizeObserver reports the resulting viewport change; semantic policy then either:
-
-- re-pins a reader already committed to the tail, or
-- restores the semantic anchor for a reader in history.
-
-That means another product may use a 40–300px composer without changing session or viewport algorithms.
-
-## 7. Framework / virtualizer adapter
-
-The current adapter is Vue 3 + Virtua. It is not architectural.
-
-The minimum abstract physical list port is approximately:
-
-```ts
-interface PhysicalListPort {
-  scrollOffset: number
-  scrollSize: number
-  viewportSize: number
-  findItemIndex(offset: number): number
-  scrollTo(offset: number): void
-  scrollBy(offset: number): void
-  scrollToIndex(index: number, options?: ...): void
-}
-```
-
-A React/Solid/another-virtualizer implementation only needs to supply equivalent physical operations and row geometry samples.
-
-Vue itself receives shallow/atomic snapshots. The million-message canonical store is not a deep reactive object graph.
-
-## 8. CSS integration contract versus product styling
-
-Almost all CSS is replaceable. Only a tiny geometry contract is coupled to dynamic virtualization.
-
-### Required geometry contract
-
-1. The scroll stage must participate correctly in layout and be shrinkable (`min-height: 0` in a grid/flex implementation).
-2. The physical virtual list must fill the stage.
-3. **The virtualizer-owned measured item wrapper must not carry vertical margin/padding that the virtualizer does not include in its measurement.**
-4. Product row spacing must live inside the measured content box.
-5. Composer/pending-interaction UI must own layout space rather than overlaying the scroll viewport, unless an alternative adapter explicitly compensates for the overlay.
-
-The reference file `src/virtua-layout.css` contains only these physical constraints.
-
-### Replaceable product values
-
-These are explicitly presentation, not algorithm:
+Changing desktop → tablet → phone can reflow every visible Markdown/tool row. It must not change session state or logical reader semantics.
 
 ```text
-session sidebar width
-conversation content width
-row gap
-composer min/max height
-colors / font / border / shadow
-user bubble shape
-thinking/tool card style
-Latest button placement/style
-diagnostics placement
+saved committed semantic anchor
+       ↓
+product width/breakpoint changes
+       ↓
+renderer reflow + physical remeasurement
+       ↓
+restore same semantic anchor
 ```
 
-The demo exposes these as CSS custom properties and E2E changes them at runtime while checking semantic anchors and row geometry.
-
-## 9. Real multi-session lifecycle
-
-A historical session is not a frozen transcript.
+Reference product layouts:
 
 ```text
-historical idle/failed/completed session
-       │ submit
-       ▼
-append User message
-append live Assistant message
-status = working
-       │
-       ├── switch to another Recent session
-       ├── hot runtime may be evicted
-       └── SessionKernel continues receiving deltas
-       │
-       ▼
-return / semantic rehydrate
-       │
-       ├── inspect history
-       ├── Latest
-       ├── stop
-       └── submit another Turn
+Desktop: sidebar | conversation | optional diagnostics
+Tablet:  sidebar | conversation; diagnostics overlay
+Phone:   conversation + session drawer + diagnostics overlay
 ```
 
-Submitting while already working creates a generic queued follow-up in the reference semantics. A concrete backend adapter may map that to queue, steer or another provider capability.
+The phone layout never removes access to Recent sessions; it moves the sidebar into a drawer.
 
-## 10. Renderer boundary
+### Responsive acceptance
 
-Renderer type is presentation metadata, not backend protocol:
+- no page-level horizontal overflow;
+- Markdown table/code scroll inside their renderer;
+- code/diff/tool/HTML remain contained;
+- images keep intrinsic aspect ratio and never exceed the row width;
+- row non-overlap remains true after reflow;
+- semantic navigation/Latest/session switching remains valid.
+
+---
+
+## 11. CSS is not the algorithm
+
+The reference implementation has three presentation CSS layers.
+
+### `virtua-layout.css` — non-negotiable physical integration
+
+Only geometry requirements:
+
+- conversation shell/scroll stage can shrink (`min-width/min-height:0`);
+- physical list fills the viewport;
+- virtualizer-owned measured wrapper has **zero vertical margin/padding**.
+
+The lab previously measured **14.015625px row overlap** from `7px + 7px` padding on that wrapper. Product spacing therefore belongs inside the measured child (`NodeSeat`).
+
+### `renderer-content.css` — renderer containment
+
+Markdown tables/pre, code, diff, tool JSON, image and HTML containment. This file can be restyled but the containment contract must remain.
+
+### `product-ux.css` + `responsive-ux.css` — replaceable product design
+
+Sidebar width, content width, row gap, composer limits, colors, icons, desktop/tablet/mobile layout and drawer behavior. Semantic algorithms do not read these values.
+
+---
+
+## 12. Runtime fixture injection is part of the proof
+
+Static generated history is insufficient proof. The lab can append at runtime:
+
+- `+1 mixed turn`;
+- `+5 mixed turns`;
+- `Markdown compatibility gallery`.
+
+These controls do **not** inject DOM cards. They append canonical messages through SessionKernel, then traverse the exact production path:
 
 ```text
-Markdown
-thinking/reasoning
-Tool call/result
-code
-diff
-image
-HTML/artifact
-status/error
+SessionKernel
+→ LogicalMessage + ContentBlock[]
+→ Content Projector Registry
+→ keyed hot projection
+→ semantic viewport / Virtua
+→ Renderer Registry
 ```
 
-The virtualizer sees stable keys and sizes, not semantic renderer internals. Async image/highlighting/disclosure resize must feed the same measurement path.
+The deterministic five-Turn fixture covers reasoning, Markdown, tool call/result, code, diff, image and sanitized HTML.
 
-Markdown/HTML is sanitized in the demo. Syntax highlighting runs in a Worker with bounded cache.
+---
 
-## 11. Practice-derived invariants
+## 13. Failure-derived invariants
 
-These failures are the most valuable output of the experiment.
+The lab keeps failures as design evidence:
 
-| Observed failure | Root cause | Reusable invariant |
+| Failure | Root cause | Permanent invariant |
 |---|---|---|
-| `14.015625px` adjacent-row overlap | `7px + 7px` vertical decoration on Virtua-owned wrapper was outside its measurement model | virtualizer-owned wrapper is geometry-pure; spacing goes inside measured child |
-| repeatable `+1023` reader restore drift | last-visible reader was interpreted as center of a 2048-message hot window | semantic reader meaning must be explicit and independent from segment construction |
-| false composer anchor | a mounted Virtua measurement probe was treated as viewport truth | anchor only from committed semantic viewport |
-| Jump window correct but viewport wrong | imperative scroll targeted an old virtualizer epoch | far navigation is a two-phase semantic-window then physical-commit transaction |
-| upward wheel swallowed by streaming | user intent and programmatic follow were not arbitrated separately | explicit reader intent wins and cancels stale follow writes |
-| `Latest 1` at apparent bottom | physical remainder was used as logical truth | Latest/count comes from logical reader |
-| older user turn missing from DOM after public switch | slower environment let the live assistant push old row outside mounted buffer | DOM residency is not persistence; verify canonical history through semantic navigation |
-| running sessions prevented LRU eviction | execution controller held heavyweight runtime | SessionKernel lifetime is independent from hot runtime lifetime |
-| failed/completed history treated as terminal | one status mixed turn outcome with resumability | current execution and last Turn result are separate dimensions |
-| usage tied to visible messages | viewport paging changes what is loaded | token/cache/context are durable session projections |
+| running sessions broke hot-runtime limit | execution owned heavyweight runtime | SessionKernel/execution outlives disposable viewport runtime |
+| completed history could not continue | history and execution were conflated | every historical session remains resumable |
+| failed session looked permanently dead | one status represented several dimensions | live execution and last Turn outcome are separate |
+| token totals changed with viewport | stats derived from hot rows | usage/cache/context are durable projections |
+| 14.015625px card overlap | vertical padding on measured Virtua wrapper | virtualizer-owned wrapper is geometry-pure |
+| repeatable +1023 restore drift | reader treated as center of 2048 window | semantic reader is authoritative; cold restore window ends around reader |
+| false composer anchor | Virtua measurement probe treated as visible row | anchors come only from committed semantic viewport |
+| old row missing after slow Pages switch | DOM residency used as persistence proof | canonical addressability, not DOM presence, proves persistence |
+| fenced Markdown split incorrectly | closing fence evaluated before chunk flush | Markdown chunker evaluates boundary using pre-line fence state |
+| whole long Markdown reparsed during stream | one mutable giant Markdown unit | settled chunks keep stable revisions; only tail changes |
+| phone sidebar disappeared | responsive CSS removed a product capability | narrow layout moves Recent to a drawer, not out of the product |
 
-## 12. Template implementation checklist
+---
 
-A product adopting this architecture should be able to answer yes to all of these:
-
-- Backend-specific types end at an adapter boundary.
-- Session execution can continue with no mounted viewport.
-- A running session can lose its hot projection/runtime.
-- Historical sessions remain resumable after completion, interruption or failure.
-- Blockers and queues are session-owned.
-- Usage/cache/context statistics do not depend on the visible window.
-- Framework reactive state is bounded by hot/visible work.
-- RenderUnits have stable session-scoped keys.
-- Large individual content is chunked or internally virtualized.
-- Latest uses logical coordinates.
-- Semantic anchors reject measurement probes.
-- Composer/layout resizing preserves history anchor and tail pinning.
-- Virtualizer wrapper geometry is controlled and tested.
-- A theme/layout change does not change semantic algorithms.
-- The same browser scenarios pass against the deployed production build.
-
-## 13. Reference implementation mapping
+## 14. Reference implementation map
 
 ```text
-src/conversation/contracts.ts          portable session/backend contracts
-src/conversation/session-kernel.ts     durable session/execution state
-src/conversation/session-semantics.ts  derived status + usage semantics
-src/conversation/workspace-runtime.ts  workspace registry + hot LRU
-src/conversation/session-runtime.ts    bounded hot projection runtime
-src/conversation/keyed-node-store.ts   stable order + keyed nodes
-src/core/segment-manager.ts            bounded logical segment
-src/viewport/contracts.ts              framework-neutral viewport policy
-src/components/ConversationViewport.vue Vue/Virtua physical adapter + product composition
-src/virtua-layout.css                  minimal geometry contract
-src/product-ux.css                     replaceable reference product theme
+src/conversation/
+  session-kernel.ts            durable session/execution semantics
+  session-runtime.ts           disposable hot projection runtime
+  keyed-node-store.ts          stable order + keyed node subscriptions
+
+src/presentation/
+  content-model.ts             extensible ContentBlockMap
+  projector-registry.ts        semantic block → RenderUnit registry
+  markdown-chunks.ts           streaming-safe Markdown segmentation
+  demo-fixtures.ts             canonical runtime proof fixtures
+
+src/viewport/
+  contracts.ts                 framework-neutral viewport policy
+
+src/components/
+  ConversationViewport.vue     Virtua/Vue physical adapter
+  ConversationNodeSeat.vue     key-level Vue subscription bridge
+  renderers/registry.ts        frontend renderer registry
+  renderers/*                  reference renderers
+
+src/virtua-layout.css          tiny physical geometry contract
+src/renderer-content.css       renderer containment contract
+src/product-ux.css             replaceable desktop product theme
+src/responsive-ux.css          replaceable responsive product adapter
 ```
 
-See `verification.md` for the exact automated acceptance matrix and final build evidence.
+A production extraction can split these into packages such as:
+
+```text
+agent-conversation-core
+agent-conversation-presentation
+agent-conversation-viewport
+agent-conversation-vue
+agent-conversation-renderers
+```
+
+---
+
+## 15. Template adoption checklist
+
+A new Agent UI adopting this architecture should be able to answer **yes** to all of the following:
+
+1. Can backend/provider shapes be replaced without touching UI renderers?
+2. Can a session keep running with zero mounted viewports?
+3. Can running sessions exceed the number of hot conversation runtimes?
+4. Can a historical failed/completed session start a new Turn?
+5. Can one message contain multiple heterogeneous semantic blocks?
+6. Can a new semantic block/renderer be registered without editing SessionKernel or scroll code?
+7. Can a 100K-character answer be projected into bounded stable units?
+8. Does streaming update only changed keyed nodes?
+9. Are usage/cache/context totals independent of the hot window?
+10. Is semantic reader/Latest independent of scrollbar approximations?
+11. Can composer and responsive layout changes preserve semantic position?
+12. Can desktop/tablet/phone layouts change without page-level overflow or row overlap?
+13. Can runtime-injected mixed turns traverse the same canonical path as real messages?
+14. Are local production and deployed Pages tested with the same browser suite?
+
+If any answer is no, the implementation is still an application-specific demo rather than the intended reusable framework.
