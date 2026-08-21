@@ -12,6 +12,16 @@ describe('semantic viewport contract', () => {
     expect(anchor?.offsetPx).toBe(20)
   })
 
+  it('anchors to the committed row edge nearest viewport top instead of a giant partially visible row', () => {
+    const anchor = selectCommittedAnchor([
+      { id: 'giant-above', messageIndex: 100, top: -575, bottom: 140 },
+      { id: 'nearest', messageIndex: 101, top: 18, bottom: 118 },
+      { id: 'later', messageIndex: 102, top: 118, bottom: 220 },
+    ], 0, 800, 102)
+    expect(anchor?.id).toBe('nearest')
+    expect(anchor?.offsetPx).toBe(18)
+  })
+
   it('computes logical messages-after independently of physical scroll size', () => {
     expect(messagesAfter(500_000, 1_000_000)).toBe(499_999)
     expect(messagesAfter(999_999, 1_000_000)).toBe(0)
