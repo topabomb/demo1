@@ -4,8 +4,8 @@ import {
   cacheHitPercent,
   deriveSessionIndicator,
   contextOccupancyPercent,
-} from '../src/conversation/session-semantics'
-import type { ConversationDescriptor, TokenUsage } from '../src/conversation/contracts'
+} from '../src/engine/conversation/session-semantics'
+import type { ConversationDescriptor, TokenUsage } from '../src/engine/conversation/contracts'
 
 function descriptor(overrides: Partial<ConversationDescriptor>): ConversationDescriptor {
   return { id: 's', title: 'Session', age: 'now', status: 'idle', logicalCount: 10, ...overrides }
