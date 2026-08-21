@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import type { LogicalMessage } from '../src/core/types'
-import { block } from '../src/presentation/content-model'
+import type { LogicalMessage } from '../src/model/conversation'
+import { block } from '../src/model/conversation'
 import { ContentProjectorRegistry, defaultContentProjectors, projectMessage } from '../src/presentation/projector-registry'
 import { splitMarkdown } from '../src/presentation/markdown-chunks'
-import { createMixedDemoTurn, MARKDOWN_COMPATIBILITY_FIXTURES } from '../src/presentation/demo-fixtures'
+import { AGENT_SCENARIO_MESSAGE_COUNT, createAgentScenarioPack, createMixedDemoTurn, MARKDOWN_COMPATIBILITY_FIXTURES } from '../src/presentation/demo-fixtures'
 
 function message(blocks: LogicalMessage['blocks'], revision = 0): LogicalMessage {
-  return { id: 's:m-1', index: 1, turnId: 's:t-1', stepId: 's:t-1:step-0', role: 'assistant', blocks, seed: 7, intensity: 5, revision }
+  return { id: 's:m-1', index: 1, turnId: 's:t-1', stepId: 's:t-1:step-0', role: 'assistant', blocks, revision }
 }
 
 describe('Agent presentation framework', () => {
@@ -50,6 +50,36 @@ describe('Agent presentation framework', () => {
     const customBlock = { id: 'cite-1', type: 'citation', data: { href: 'https://example.com' } } as never
     expect(registry.project(message([]), customBlock, 0)[0]?.kind).toBe('citation')
     expect(defaultContentProjectors.has('citation')).toBe(false)
+  })
+
+  it('projects common Agent media workflows without tool-specific renderer coupling', () => {
+    const pack = createAgentScenarioPack('scenario', 2)
+    expect(pack).toHaveLength(AGENT_SCENARIO_MESSAGE_COUNT)
+    const projected = pack.flatMap((entry, index) => projectMessage({
+      id: `scenario:m-${index}`,
+      index,
+      turnId: entry.turnId,
+      stepId: entry.stepId,
+      role: entry.role,
+      blocks: entry.blocks,
+      variant: entry.variant,
+      revision: 0,
+    }))
+    expect(new Set(projected.map(unit => unit.kind))).toEqual(new Set(['attachments', 'thinking', 'markdown', 'tool', 'audio']))
+    expect(projected.filter(unit => unit.kind === 'attachments')).toHaveLength(3)
+    expect(projected.filter(unit => unit.kind === 'audio')).toHaveLength(2)
+
+    const imageCall = pack.find(entry => entry.variant === 'scenario-image-gen-call')?.blocks[0]
+    const imageResult = pack.find(entry => entry.variant === 'scenario-image-gen-result')?.blocks[0]
+    const generated = pack.find(entry => entry.variant === 'scenario-image-gen-artifacts')?.blocks[0]
+    expect(imageCall?.type).toBe('tool-call')
+    expect(imageResult?.type).toBe('tool-result')
+    expect(generated?.type).toBe('attachments')
+    if (imageCall?.type === 'tool-call' && imageResult?.type === 'tool-result' && generated?.type === 'attachments') {
+      expect(imageResult.data.callId).toBe(imageCall.data.callId)
+      expect(generated.data.provenance?.toolCallId).toBe(imageCall.data.callId)
+      expect(generated.data.items).toHaveLength(4)
+    }
   })
 
   it('maintains a deterministic Markdown compatibility gallery', () => {
