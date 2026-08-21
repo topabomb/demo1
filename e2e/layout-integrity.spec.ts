@@ -41,7 +41,7 @@ async function committedAnchor(page: Page): Promise<{ id: string; top: number } 
     const row = [...stage.querySelectorAll<HTMLElement>('[data-virtual-item="true"]')]
       .map(element => ({ element, index: Number(element.dataset.messageIndex), rect: element.getBoundingClientRect() }))
       .filter(entry => entry.index <= reader + 1 && entry.rect.bottom > viewport.top && entry.rect.top < viewport.bottom)
-      .sort((a, b) => a.rect.top - b.rect.top)[0]
+      .sort((a, b) => Math.abs(a.rect.top - viewport.top) - Math.abs(b.rect.top - viewport.top))[0]
     return row ? { id: row.element.dataset.renderUnit ?? '', top: row.rect.top - viewport.top } : null
   })
 }
@@ -54,15 +54,15 @@ async function anchorDrift(page: Page, anchor: { id: string; top: number }): Pro
   }, anchor)
 }
 
-test('architecture proof exposes portable boundaries, not a framework-specific message list', async ({ page }) => {
+test('architecture proof exposes portable contracts, not a framework-specific message list', async ({ page }) => {
   await openLab(page)
   await page.getByTestId('architecture-link').click()
   await expect(page.getByTestId('architecture-page')).toBeVisible()
-  await expect(page.getByRole('heading', { name: /six boundaries/i })).toBeVisible()
-  for (const name of ['Backend Adapter', 'Session Kernel', 'Hot Projection Runtime', 'Semantic Viewport Policy', 'Virtualizer / Framework Adapter', 'Product UI / CSS']) {
+  await expect(page.getByRole('heading', { name: /seven ownership boundaries/i })).toBeVisible()
+  for (const name of ['Backend Adapter', 'Session Kernel', 'Content Projector Registry', 'Hot Projection Runtime', 'Semantic Viewport Policy', 'Physical List Adapter', 'Renderer Registry + Product UI']) {
     await expect(page.getByText(name, { exact: true })).toBeVisible()
   }
-  await expect(page.getByText(/input · output · cache read\/write/i)).toBeVisible()
+  await expect(page.getByText(/ContentBlock\[\]/).first()).toBeVisible()
   await page.getByTestId('launch-lab').click()
   await expect(page.getByTestId('active-session-id')).toBeVisible()
 })
