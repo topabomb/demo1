@@ -2,6 +2,7 @@ import type { ConversationExecutionController, SubmitDisposition } from './contr
 import type { ConversationSessionKernel } from './session-kernel'
 
 const MAX_RUN_PUBLISHES = 1800
+const REASONING_PUBLISHES = 18
 
 /** Session-scoped execution. It never owns or depends on a viewport runtime. */
 export class SyntheticStreamController implements ConversationExecutionController {
@@ -19,10 +20,10 @@ export class SyntheticStreamController implements ConversationExecutionControlle
     return this.#timer !== null && this.#kernel.status === 'working'
   }
 
-  start(_reset = true): void {
+  start(reset = true): void {
     if (this.#kernel.status !== 'working' || this.#kernel.currentAssistantIndex === null) return
     this.#stopTimer()
-    this.#runPublishes = 0
+    if (reset) this.#runPublishes = 0
     this.#timer = setInterval(() => this.#ingest(), Math.max(16, Math.round(1000 / this.#kernel.streamRate)))
   }
 
@@ -40,7 +41,7 @@ export class SyntheticStreamController implements ConversationExecutionControlle
     if (this.#kernel.status === 'working') return this.#kernel.enqueue(prompt) ? 'queued' : 'blocked'
     const index = this.#kernel.beginTurn(prompt)
     if (index === null) return 'blocked'
-    this.start(false)
+    this.start(true)
     return 'started'
   }
 
@@ -67,7 +68,9 @@ export class SyntheticStreamController implements ConversationExecutionControlle
 
   #ingest(): void {
     this.#kernel.incrementIngress()
-    this.#pendingDelta += syntheticDelta(this.#kernel.streamIngressTicks)
+    this.#pendingDelta += this.#runPublishes < REASONING_PUBLISHES
+      ? syntheticReasoningDelta(this.#kernel.streamIngressTicks)
+      : syntheticAnswerDelta(this.#kernel.streamIngressTicks)
     if (this.#framePending) return
     this.#framePending = true
     scheduleFrame(() => {
@@ -80,7 +83,8 @@ export class SyntheticStreamController implements ConversationExecutionControlle
     if (!this.#pendingDelta || this.#kernel.currentAssistantIndex === null) return
     const delta = this.#pendingDelta
     this.#pendingDelta = ''
-    this.#kernel.appendAssistantDelta(delta)
+    if (this.#runPublishes < REASONING_PUBLISHES) this.#kernel.appendCurrentReasoningDelta(delta)
+    else this.#kernel.appendAssistantDelta(delta)
     this.#runPublishes += 1
     if (this.#runPublishes < MAX_RUN_PUBLISHES) return
 
@@ -89,12 +93,23 @@ export class SyntheticStreamController implements ConversationExecutionControlle
     const queued = this.#kernel.dequeue()
     if (queued !== null) {
       this.#kernel.beginTurn(queued)
-      this.start(false)
+      this.start(true)
     }
   }
 }
 
-function syntheticDelta(tick: number): string {
+function syntheticReasoningDelta(tick: number): string {
+  const phrases = [
+    'Inspect the session facts before choosing a presentation action. ',
+    'Preserve Turn, Step and Block identity while the reasoning text grows. ',
+    'Keep this stream independent from the physical viewport and current fold state. ',
+    'Apply every semantic delta but coalesce framework publication where possible. ',
+  ]
+  const phrase = phrases[tick % phrases.length]!
+  return tick % 5 === 0 ? `\n\n${phrase}` : phrase
+}
+
+function syntheticAnswerDelta(tick: number): string {
   const phrases = [
     'I inspected the active workspace state and preserved stable semantic identity.',
     'The agent can keep running even when its viewport has been evicted from the hot LRU.',
