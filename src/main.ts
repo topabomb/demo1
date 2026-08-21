@@ -6,5 +6,6 @@ import './virtua-layout.css'
 import './renderer-content.css'
 import './architecture.css'
 import './product-ux.css'
+import './responsive-ux.css'
 
 createApp(App).mount('#app')
