@@ -13,11 +13,11 @@ Executable reference template for production-style Agent workspaces with **very 
 The claim is not “Vue can render one million messages”. The framework separates facts, bounded presentation and physical layout so normal work remains **`O(changed + hot + visible)`**, independent of total history.
 
 ```text
-Backend / Runtime Ports
+Backend / Execution Ports
         ↓
 Canonical Conversation Model
         ↓
-Session Kernel ──────→ Workspace / execution summaries
+Session Kernel ──────→ session facts / summaries
         ↓ ordered semantic events
 Projection Runtime
         ↓
@@ -30,13 +30,13 @@ Renderer / Product Adapter
 
 ## Physical ownership
 
-The repository has two source ownership trees. This is an enforced architecture boundary, not a naming convention:
+The repository has two enforced source ownership trees:
 
 ```text
 src/
 ├── engine/                    reusable implementation
 │   ├── core/                  small algorithm primitives
-│   ├── model/                 canonical messages/blocks + mutations
+│   ├── model/                 canonical messages/blocks + pure mutations
 │   ├── conversation/          session contracts/kernel/semantics
 │   ├── presentation/          projection + keyed RenderUnits
 │   ├── viewport/              framework-neutral viewport policy
@@ -44,21 +44,22 @@ src/
 │   ├── vue/                   Vue/Virtua adapter + renderer registry
 │   │   ├── renderers/
 │   │   ├── viewport-navigation-controller.ts
-│   │   └── engine.css
+│   │   ├── engine.css         shell / viewport / composer
+│   │   └── renderers.css      content renderer visuals
 │   └── workers/
 │
 └── demo/                      executable proof only
     ├── components/            workspace shell, diagnostics, architecture page
-    ├── styles/
+    ├── styles/                product/demo CSS
     ├── vue/
     ├── synthetic.ts           lazy million-message source
-    ├── stream-controller.ts   demo playback/rate/telemetry
+    ├── stream-controller.ts   synthetic provider/playback policy
     ├── scenarios.ts           heterogeneous fixtures
-    ├── workspace-fixtures.ts  seeded sessions
+    ├── workspace-fixtures.ts  seeded sessions + display metadata
     └── workspace-runtime.ts   demo composition + hot-runtime LRU
 ```
 
-`engine/**` may never import `demo/**`. Demo code may consume Engine APIs. `tests/architecture-boundaries.test.ts` verifies both the physical split and internal dependency direction.
+`engine/**` may never import `demo/**`. `tests/architecture-boundaries.test.ts` verifies the physical split, internal dependency direction, provider-policy boundary, Vue product seam and CSS ownership.
 
 ## Stable Engine surface
 
@@ -70,29 +71,29 @@ Framework-neutral consumers import from `src/engine/index.ts`. It exposes:
 - semantic viewport contracts;
 - `ConversationSessionRuntime` and bounded hot-window behavior.
 
-Synthetic playback is deliberately outside that surface. Rate, pause/resume controls and ingress/publish counters belong to `demo/stream-controller.ts`, not the SessionKernel, execution port or UI snapshot. The generic Engine only sees semantic execution (`submit`, `abort`, interaction resolution) and an ordered event revision.
+The Engine stores provider-normalized facts; it does **not** invent provider behavior. It never assumes a reasoning block, creates synthetic answers, estimates billing/cache usage, or injects demo completion/abort copy. The executable synthetic adapter owns those policies and maps them into the same canonical/session APIs a real provider adapter would use.
 
 ## State lifetimes
 
 | State | Examples | Rule |
 |---|---|---|
-| durable domain | history, execution, blockers, outcomes, usage/context | correct with no viewport |
+| durable domain | history, execution, blockers, outcomes, normalized usage/context | correct with no viewport |
 | session interaction memory | reader/anchor/follow checkpoint, draft, disclosure preferences | small and session-scoped |
 | rebuildable presentation | ~2K hot window, projection LRU, keyed RenderUnits | disposable and bounded |
-| ephemeral physical | DOM, measured heights, renderer caches | mounted/render lifetime only |
+| ephemeral physical | DOM row count, measured heights, renderer caches | mounted/render lifetime only |
 
-A running SessionKernel is not the same thing as a hot presentation runtime or a mounted viewport.
+A running SessionKernel is not the same thing as a hot presentation runtime or a mounted viewport. DOM telemetry and diagnostics inputs never write back into Engine session/runtime truth.
 
-## Cohesion, not file-count minimization
+## Vue / product seam
 
-The template intentionally keeps Fenwick indexing, page-height indexing, segment management, notifier primitives and renderer-per-kind modules small. Those are stable algorithm/extension seams; merging them would create mixed responsibilities.
+`ConversationViewport.vue` owns only real conversation behavior: status/stop, blockers, composer/send, Latest, semantic rendering and the physical virtualized viewport. Product-specific UI is injected through four narrow slots:
 
-The review split only files with proven mixed ownership:
+- `header-context`
+- `header-actions`
+- `viewport-overlay`
+- `composer-tools`
 
-- workspace fixture data was removed from `DemoWorkspaceRuntime`;
-- canonical message mutation helpers were removed from `ConversationSessionKernel`;
-- demo diagnostics were removed from the workspace shell;
-- mounted geometry, scroll intent, anchor restoration, tail pinning and latest-wins navigation were consolidated into one `ViewportNavigationController` instead of many tiny composables.
+The public Demo uses those seams for “Synthetic playback” context and architecture diagnostics. The Engine intentionally contains no fake model selector, fake search action or fake attachment button.
 
 ## Content and extension contract
 
@@ -106,27 +107,22 @@ A normal new content type should require only:
 
 It should not require edits to SessionKernel, history segmentation or semantic viewport policy.
 
-If one visual/business row truly spans multiple durable records, introduce a stable-business-ID assembler for that feature and require deterministic replay/prepend/append behavior. Do not force ordinary single-message blocks through a generic cross-event node engine.
-
 Tool execution and displayable artifacts remain separate semantics. Calls/results correlate through producer-owned stable IDs such as `callId`; image/audio/file artifacts keep provenance rather than relying on DOM adjacency.
-
-## DeepSeek Harness influence
-
-The template adopts the scene-relevant parts of [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness): durable/model facts upstream of UI, distinct Turn/Step coordinates, producer-owned stable business identity, ordered semantic mutation separate from UI publication cadence, and renderer-ready keyed data. It deliberately does not copy Cordis or a general plugin/service runtime. See the dedicated design-lessons document for the mapping.
 
 ## CSS / host boundary
 
-There are three owned style surfaces:
+Engine styles are intentionally split by responsibility, not by component count:
 
-- `src/engine/vue/engine.css` — conversation Engine + renderer + virtualizer/composer rules, host-scoped from `[data-conversation-engine].conversation-shell`;
-- `src/demo/styles/demo.css` — demo shell/diagnostics and the only stylesheet allowed to style `html`, `body` or `#app`;
-- `src/demo/styles/architecture.css` — standalone architecture page.
+- `src/engine/vue/engine.css` — design tokens plus shell/viewport/composer geometry;
+- `src/engine/vue/renderers.css` — renderer/content visuals and containment;
+- `src/demo/styles/demo.css` — workspace navigation, Demo slots, diagnostics and the only global page reset;
+- `src/demo/styles/architecture.css` — architecture page.
 
-CI includes a hostile-host CSS browser test where later global element rules attempt to override buttons, inputs, images and tables; Engine geometry must remain correct.
+Both Engine stylesheets are rooted at `[data-conversation-engine].conversation-shell`. Products can override documented custom properties without the Engine knowing whether a sidebar or diagnostics panel exists. CI includes a hostile-host CSS browser test where later global element rules attempt to override buttons, inputs, images and tables; Engine geometry must remain correct.
 
 ## What CI proves
 
-The executable suite covers 1,000,000+ addressable messages, bounded hot runtimes and DOM, streaming reasoning/Markdown, tool/artifact correlation, uploads/media, responsive/composer reflow, exact Latest semantics, far jumps/prepend, session eviction/resume, blockers/failures/queue state, CSS isolation and architecture dependency direction.
+The executable suite covers 1,000,000+ addressable messages, bounded hot runtimes and DOM, streaming reasoning/Markdown, tool/artifact correlation, uploads/media, responsive/composer reflow, exact Latest semantics, far jumps/prepend, session eviction/resume, blockers/failures/queue state, CSS isolation, clean product slots and architecture dependency direction.
 
 ```bash
 pnpm install --frozen-lockfile
@@ -135,4 +131,4 @@ pnpm build
 pnpm test:e2e
 ```
 
-Pull requests run the complete local gate. `main` deploys Pages only after validation succeeds, then the same Chromium suite runs against the deployed public URL. Release acceptance belongs to the exact `main` SHA that passes both stages.
+`main` deploys Pages only after validation succeeds, then the same full Chromium suite runs against the deployed public URL. Release acceptance belongs to the exact `main` SHA that passes both stages.
