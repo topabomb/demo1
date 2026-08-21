@@ -96,7 +96,7 @@ function indicatorDetail(descriptor: ConversationDescriptor): string {
 <template>
   <section class="agent-app" :class="{ 'diagnostics-closed': !diagnosticsOpen }">
     <aside class="session-sidebar">
-      <div class="sidebar-head"><div class="product-name">Agent Workspace Lab</div><a class="architecture-link" href="#architecture" title="Architecture reference">⌘</a></div>
+      <div class="sidebar-head"><div class="product-name">Agent Workspace Lab</div><a class="architecture-link" href="#architecture" data-testid="architecture-link" title="Architecture reference">⌘</a></div>
       <div class="workspace-context"><span class="workspace-dot" /><span>reference-workspace</span><small>backend-neutral</small></div>
       <button class="new-session" data-testid="new-session" @click="newSession">＋ New session</button>
       <label class="session-search" for="session-filter">⌕
