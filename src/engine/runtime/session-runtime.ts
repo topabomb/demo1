@@ -26,9 +26,7 @@ export interface SessionUiSnapshot {
   followTail: boolean
   atVisualBottom: boolean
   mountedRows: number
-  streamRate: number
-  streamIngressTicks: number
-  streamRenderTicks: number
+  eventRevision: number
   streamTarget: string | null
   messagesAfter: number
   liveChunkCount: number
@@ -44,13 +42,7 @@ export interface SessionUiSnapshot {
   pendingInteraction: PendingInteraction | null
 }
 
-/**
- * Disposable composition runtime for one hot conversation view.
- *
- * Domain/execution truth remains in SessionKernel. This layer composes a bounded
- * history segment, Presentation projection/cache and semantic reader memory. It
- * intentionally knows those lower layers; none of them know this runtime back.
- */
+/** Disposable composition runtime for one hot conversation view. */
 export class ConversationSessionRuntime {
   readonly projection = new KeyedConversationProjection()
   readonly projectionEngine = new ProjectionEngine()
@@ -63,6 +55,7 @@ export class ConversationSessionRuntime {
   #snapshot: SessionViewMemory
   #kernelUnsubscribe: Unsubscribe
   #knownLogicalCount: number
+  #eventRevision = 0
 
   virtualEpoch = 0
   shiftMode = false
@@ -112,9 +105,7 @@ export class ConversationSessionRuntime {
       followTail: this.followTail,
       atVisualBottom: this.atVisualBottom,
       mountedRows: this.mountedRows,
-      streamRate: this.kernel.streamRate,
-      streamIngressTicks: this.kernel.streamIngressTicks,
-      streamRenderTicks: this.kernel.streamRenderTicks,
+      eventRevision: this.#eventRevision,
       streamTarget: target === null ? null : `${this.id}:m-${target}`,
       messagesAfter: this.messagesAfterCurrent,
       liveChunkCount: target === null ? 0 : this.#activeUnits.filter(unit => unit.messageIndex === target).length,
@@ -158,7 +149,6 @@ export class ConversationSessionRuntime {
 
   get rememberedSnapshot(): SessionViewMemory { return { ...this.#snapshot, draftText: this.draftText } }
 
-  /** Commit reader only after the physical list has established the target. */
   setReaderPosition(index: number, atVisualBottom: boolean): void {
     this.currentLogicalPosition = clampIndex(index, this.logicalCount)
     this.atVisualBottom = atVisualBottom && this.range.end === this.logicalCount
@@ -228,6 +218,7 @@ export class ConversationSessionRuntime {
   }
 
   #syncKernel(event: SessionKernelEvent): void {
+    this.#eventRevision += 1
     const oldCount = this.#knownLogicalCount
     const newCount = this.logicalCount
 
