@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { VList, type VListHandle } from 'virtua/vue'
 import type { ViewportSnapshot } from '../conversation/contracts'
 import {
@@ -22,7 +22,7 @@ import {
 } from '../viewport/contracts'
 import ConversationNodeSeat from './ConversationNodeSeat.vue'
 
-const props = defineProps<{ runtime: ConversationSessionRuntime; stream: SyntheticStreamController; diagnostics?: boolean }>()
+const props = defineProps<{ runtime: ConversationSessionRuntime; stream: SyntheticStreamController; uiState: SessionUiSnapshot; diagnostics?: boolean }>()
 
 // Virtua adapter tuning: physical renderer hints, never semantic state.
 const VIRTUAL_BUFFER_PX = 900
@@ -35,8 +35,7 @@ const composerShellRef = ref<HTMLElement | null>(null)
 const order = shallowRef<string[]>([...props.runtime.projection.order])
 const composerText = ref(props.runtime.draftText)
 const shifting = ref(false)
-const uiState = shallowRef<SessionUiSnapshot>(props.runtime.uiSnapshot)
-let lastStreamTick = uiState.value.streamRenderTicks
+const uiState = computed(() => props.uiState)
 let userScrollIntentUntil = 0
 let userScrollDirection: -1 | 0 | 1 = 0
 let lastScrollOffset = 0
@@ -46,7 +45,6 @@ let viewportResizeRunning = false
 let viewportResizeQueued = false
 let viewportObserver: ResizeObserver | null = null
 let unsubscribeOrder: (() => void) | null = null
-let unsubscribeState: (() => void) | null = null
 
 let pendingComposerAnchor: CommittedViewportAnchor | null = null
 let pendingComposerPinned = false
@@ -144,7 +142,7 @@ function remainingToBottom(): number {
   if (!list) return Number.POSITIVE_INFINITY
   return remainingToBottomForPort(list)
 }
-function updateReader(offset = listRef.value?.scrollOffset ?? 0): void {
+function updateReaderFromUserScroll(offset = listRef.value?.scrollOffset ?? 0): void {
   const list = listRef.value
   if (!list || order.value.length === 0 || props.runtime.logicalCount <= 0) return
   const atBottom = remainingToBottom() < VIEWPORT_POLICY.bottomTolerancePx && props.runtime.range.end === props.runtime.logicalCount
@@ -218,7 +216,8 @@ async function pinMeasuredEnd(maxFrames = VIEWPORT_POLICY.restoreAttempts): Prom
     if (stableFrames >= VIEWPORT_POLICY.stableLayoutFrames) break
   }
   lastScrollOffset = listRef.value?.scrollOffset ?? 0
-  updateReader(lastScrollOffset)
+  const physicallyAtBottom = remainingToBottom() < VIEWPORT_POLICY.bottomTolerancePx
+  props.runtime.setReaderPosition(props.runtime.logicalCount - 1, physicallyAtBottom)
   lastCommittedAnchor = null
 }
 function markUserIntent(direction: -1 | 0 | 1): void {
@@ -240,7 +239,11 @@ function onVirtualScroll(offset: number): void {
   lastScrollOffset = offset
   const hasIntent = performance.now() < userScrollIntentUntil
   if (hasIntent && userScrollDirection === 0 && inferred !== 0) userScrollDirection = inferred
-  updateReader(offset); refreshMountedRows()
+  // Only an explicit user navigation may derive semantic reader state from a
+  // physical scroll offset. Programmatic jump/restore/reflow has its own semantic
+  // coordinate and physical callbacks are observations, not write authority.
+  if (hasIntent) updateReaderFromUserScroll(offset)
+  refreshMountedRows()
   if (!hasIntent || !uiState.value.streamTarget) return
   if (userScrollDirection < 0) props.runtime.setFollowTail(false)
   else if (userScrollDirection > 0 && remainingToBottom() < VIEWPORT_POLICY.bottomTolerancePx) props.runtime.setFollowTail(true)
@@ -257,12 +260,14 @@ function onVirtualScrollEnd(): void {
 }
 
 async function applyShift(plan: ShiftPlan): Promise<void> {
+  const readerBefore = props.runtime.currentLogicalPosition
   const anchor = lastCommittedAnchor ?? captureCommittedAnchor()
   if (plan.direction === 'backward') { props.runtime.applyIntermediate(plan.intermediate, true); await settleFrames(3); props.runtime.commitShift(plan, false); await settleFrames(2) }
   else { props.runtime.applyIntermediate(plan.intermediate, false); await settleFrames(2); props.runtime.commitShift(plan, true); await settleFrames(3) }
   props.runtime.finishShift()
   if (anchor) await restoreListAnchor(anchor)
-  await nextTick(); updateReader(); refreshMountedRows()
+  props.runtime.setReaderPosition(readerBefore, false)
+  await nextTick(); refreshMountedRows()
 }
 async function shiftBackward(): Promise<void> { if (shifting.value) return; const plan = props.runtime.planShiftBackward(); if (!plan) return; shifting.value = true; clearUserIntent(); props.runtime.setFollowTail(false); await applyShift(plan); shifting.value = false }
 async function shiftForward(): Promise<void> { if (shifting.value) return; const plan = props.runtime.planShiftForward(); if (!plan) return; shifting.value = true; clearUserIntent(); await applyShift(plan); shifting.value = false }
@@ -294,13 +299,12 @@ async function scrollToLogical(target: number, align: 'start' | 'center' | 'end'
     list.scrollToIndex(index, { align }); await settleFrames(2)
     if (!targetIsCommittedVisible(target)) continue
     lastScrollOffset = list.scrollOffset
-    if (semanticTailNavigation) updateReader(lastScrollOffset)
-    else props.runtime.setReaderPosition(target, false)
+    props.runtime.setReaderPosition(target, semanticTailNavigation && remainingToBottom() < VIEWPORT_POLICY.bottomTolerancePx)
     // Programmatic navigation is not committed while the virtualizer is still
     // converging. The responsive transaction must inherit a stable anchor.
     await settleFrames(VIEWPORT_POLICY.stableLayoutFrames)
     if (!targetIsCommittedVisible(target)) continue
-    if (semanticTailNavigation) rememberCommittedAnchor()
+    if (semanticTailNavigation) lastCommittedAnchor = null
     else {
       const anchor = captureCommittedAnchor()
       if (anchor) lastCommittedAnchor = anchor
@@ -308,9 +312,9 @@ async function scrollToLogical(target: number, align: 'start' | 'center' | 'end'
     return
   }
   lastScrollOffset = listRef.value?.scrollOffset ?? 0
-  if (semanticTailNavigation) updateReader(lastScrollOffset)
-  else props.runtime.setReaderPosition(target, false)
-  rememberCommittedAnchor()
+  props.runtime.setReaderPosition(target, semanticTailNavigation && remainingToBottom() < VIEWPORT_POLICY.bottomTolerancePx)
+  if (semanticTailNavigation) lastCommittedAnchor = null
+  else rememberCommittedAnchor()
 }
 async function waitForJumpEpoch(previousEpoch: number, previousHandle: VListHandle | null, target: number): Promise<void> {
   for (let attempt = 0; attempt < VIEWPORT_POLICY.jumpAttempts + 2; attempt += 1) {
@@ -395,13 +399,14 @@ async function reconcileViewportResize(): Promise<void> {
   try {
     while (viewportResizeQueued) {
       viewportResizeQueued = false
+      const readerBefore = props.runtime.currentLogicalPosition
       await settleFrames(2)
       const pin = pendingComposerPinned || (pendingComposerAnchor === null && (props.runtime.atVisualBottom || props.runtime.followTail))
       const anchor = pendingComposerAnchor ?? lastCommittedAnchor
       pendingComposerPinned = false; pendingComposerAnchor = null
       if (pin && props.runtime.range.end === props.runtime.logicalCount) await pinMeasuredEnd()
-      else if (anchor) { await restoreListAnchor(anchor); updateReader() }
-      else { updateReader(); rememberCommittedAnchor() }
+      else if (anchor) { await restoreListAnchor(anchor); props.runtime.setReaderPosition(readerBefore, false) }
+      else props.runtime.setReaderPosition(readerBefore, false)
       refreshMountedRows()
     }
   } finally {
@@ -423,10 +428,15 @@ async function restoreSnapshot(): Promise<void> {
   if (!list || order.value.length === 0) { refreshMountedRows(); return }
   if (snapshot.atVisualBottom && props.runtime.range.end === props.runtime.logicalCount) {
     props.runtime.refreshProjection(); await settleFrames(1); await scrollToLogical(props.runtime.logicalCount - 1, 'end'); await pinMeasuredEnd()
+    props.runtime.setReaderPosition(props.runtime.logicalCount - 1, true)
   } else if (snapshot.anchorUnitId && order.value.includes(snapshot.anchorUnitId)) {
     await restoreListAnchor({ id: snapshot.anchorUnitId, offsetPx: snapshot.anchorOffsetPx, viewportTopPx: snapshot.anchorOffsetPx })
-  } else await scrollToLogical(snapshot.logicalPosition)
-  await settleFrames(2); lastScrollOffset = listRef.value?.scrollOffset ?? 0; updateReader(lastScrollOffset)
+    props.runtime.setReaderPosition(snapshot.logicalPosition, false)
+  } else {
+    await scrollToLogical(snapshot.logicalPosition)
+    props.runtime.setReaderPosition(snapshot.logicalPosition, false)
+  }
+  await settleFrames(2); lastScrollOffset = listRef.value?.scrollOffset ?? 0
   if (!snapshot.atVisualBottom && !lastCommittedAnchor) rememberCommittedAnchor()
   refreshMountedRows()
 }
@@ -438,21 +448,19 @@ function attachViewportObserver(): void {
   rememberCommittedAnchor()
 }
 
+watch(() => props.uiState.streamRenderTicks, (next, previous) => {
+  if (next === previous || !props.uiState.followTail) return
+  void nextTick().then(() => listRef.value?.scrollToIndex(Math.max(0, order.value.length - 1), { align: 'end' }))
+})
+
 onMounted(() => {
   unsubscribeOrder = props.runtime.projection.subscribeOrder(() => { order.value = [...props.runtime.projection.order] })
-  unsubscribeState = props.runtime.subscribeState(() => {
-    const next = props.runtime.uiSnapshot; uiState.value = next
-    if (next.streamRenderTicks !== lastStreamTick) {
-      lastStreamTick = next.streamRenderTicks
-      if (next.followTail) void nextTick().then(() => listRef.value?.scrollToIndex(Math.max(0, order.value.length - 1), { align: 'end' }))
-    }
-  })
   resizeComposer(); void restoreSnapshot().then(attachViewportObserver)
 })
 
 onBeforeUnmount(() => {
   props.runtime.setDraftText(composerText.value); props.runtime.rememberSnapshot(captureSnapshot())
-  unsubscribeOrder?.(); unsubscribeState?.(); viewportObserver?.disconnect()
+  unsubscribeOrder?.(); viewportObserver?.disconnect()
   if (metricsFrame) cancelAnimationFrame(metricsFrame)
   if (viewportResizeFrame) cancelAnimationFrame(viewportResizeFrame)
 })
