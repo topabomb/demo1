@@ -1,4 +1,4 @@
-export type RenderKind =
+export type BuiltinRenderKind =
   | 'text'
   | 'markdown'
   | 'thinking'
@@ -7,6 +7,10 @@ export type RenderKind =
   | 'html'
   | 'tool'
   | 'diff'
+  | 'unknown'
+
+/** Renderer IDs are intentionally open; product packages may register more. */
+export type RenderKind = BuiltinRenderKind | (string & {})
 
 export type LogicalRole = 'user' | 'assistant' | 'tool' | 'system'
 
@@ -15,7 +19,9 @@ export interface LogicalMessage {
   index: number
   turnId: string
   role: LogicalRole
-  kind: RenderKind
+  /** Legacy synthetic hint. New adapters should prefer `blocks`. */
+  kind?: RenderKind
+  blocks?: readonly import('../presentation/content-model').ContentBlock[]
   seed: number
   intensity: number
   revision?: number
