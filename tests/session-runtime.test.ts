@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { ConversationSessionRuntime, SHIFT_MESSAGES, WINDOW_MESSAGES } from '../src/conversation/session-runtime'
+import { ConversationSessionRuntime, SHIFT_MESSAGES, WINDOW_MESSAGES } from '../src/runtime/session-runtime'
 import { ConversationSessionKernel } from '../src/conversation/session-kernel'
-import { SyntheticHistoryAdapter } from '../src/conversation/synthetic-adapter'
+import { SyntheticHistoryAdapter } from '../src/demo/history-adapter'
 
 function runtimeAt(position: number, status: 'idle' | 'working' = 'idle') {
   const descriptor = { id: 'identity-test', title: 'identity test', age: 'now', status, logicalCount: 1_000_000 } as const
-  const kernel = new ConversationSessionKernel(descriptor, new SyntheticHistoryAdapter(descriptor.id, descriptor.logicalCount, 73, status === 'working'), 73)
+  const kernel = new ConversationSessionKernel(descriptor, new SyntheticHistoryAdapter(descriptor.id, descriptor.logicalCount, 73, status === 'working'))
   const runtime = new ConversationSessionRuntime(kernel, {
     logicalPosition: position,
     anchorUnitId: null,
