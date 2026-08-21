@@ -8,12 +8,19 @@ const stateClasses = [
 
 const contracts = [
   ['01', 'Backend / Runtime Ports', 'protocol boundary', 'Paging, cursors, history reads and execution/event normalization.', 'Provider-native shapes stop here.'],
-  ['02', 'Canonical Conversation Model', 'domain vocabulary', 'LogicalMessage + extensible ContentBlock[] + stable semantic IDs.', 'No Vue, DOM, renderer or virtualizer type may leak inward.'],
+  ['02', 'Canonical Conversation Model', 'domain vocabulary', 'LogicalMessage + extensible ContentBlock[] + stable Turn / Step / Block identity.', 'No Vue, DOM, renderer or virtualizer type may leak inward.'],
   ['03', 'Session + Workspace Kernel', 'session lifetime', 'Runs, resumable Turns, queue, blockers, unread, outcomes, usage and session routing.', 'Execution survives hot-runtime and viewport eviction.'],
   ['04', 'Projection Runtime', 'rebuildable hot lifetime', 'Projector Registry + bounded ProjectionEngine cache + keyed hot RenderUnit store.', 'Projection cost scales with incoming/changed hot content, never total history.'],
   ['05', 'Semantic Viewport Policy', 'interaction lifetime', 'Reader, exact Latest count, semantic anchor, follow intent and restoration policy.', 'Physical scrollTop and mounted probes are observations, not application truth.'],
   ['06', 'Physical List Adapter', 'mounted lifetime', 'Virtua/Vue handle, ResizeObserver, DOM row samples and measurement reconciliation.', 'Replaceable adapter; layout events cannot redefine semantics.'],
   ['07', 'Renderer + Product Adapter', 'replaceable presentation', 'Renderer registry, Markdown/code/tool components, containment, responsive layout and theme.', 'A product redesign must not require changing session or viewport algorithms.'],
+]
+
+const harnessLessons = [
+  ['Turn / Step coordinates', 'A Turn and a model request are not the same lifetime.', 'Keep turnId required, stepId producer-owned/optional, and expose both on renderer-ready nodes.'],
+  ['Stable business correlation', 'Separate records must not be attached to “the latest unfinished row”.', 'Tool call/result share a producer-owned callId; future cross-event nodes must carry the same stable key on every update.'],
+  ['Apply semantics, coalesce paint', 'Event order and UI publication cadence are separate concerns.', 'Keep canonical mutations ordered; coalesce streaming/render publication without deriving business state from render count.'],
+  ['Scenario-triggered abstraction', 'A generic node/plugin engine is not free architecture.', 'Add a cross-event assembler only when review/job/deliverable state genuinely spans durable records.'],
 ]
 
 const hotPaths = [
@@ -30,7 +37,7 @@ const hotPaths = [
 const renderers = [
   ['Markdown', 'GFM · tasks · tables · fences · sanitized HTML · long documents', 'fence-safe chunks + bounded HTML LRU; table/pre contain their own overflow'],
   ['Reasoning', 'collapsed disclosure + tokens/duration', 'only user-touched fold state is retained, in a bounded preference LRU'],
-  ['Tool call/result', 'structured input/output/status', 'tool semantics stay canonical; expansion is renderer-local presentation state'],
+  ['Tool call/result', 'structured input/output/status + stable callId', 'correlation is producer-owned; renderer expansion remains local presentation state'],
   ['Code / Diff', 'large source and patches', 'bounded line chunks; internal scroll; Shiki highlighting off the main rendering contract'],
   ['Image', 'known intrinsic dimensions', 'reserve aspect ratio before load; never expand the page inline size'],
   ['HTML / Artifact', 'sanitized rich output', 'contained output; scripts never execute'],
@@ -47,6 +54,8 @@ const failures = [
   ['14.015625px overlap', 'Padding lived on the virtualizer measured wrapper.', 'Measured wrapper is geometry-pure; product spacing belongs inside NodeSeat.'],
   ['+1023 reader drift', 'Reader was derived from hot-window center.', 'Reader is semantic state; windows are disposable physical working sets.'],
   ['False measurement-probe anchor', 'Mounted DOM was treated as committed viewport truth.', 'Anchor candidates are filtered through semantic reader policy.'],
+  ['Responsive anchor disappeared', 'Programmatic jump committed an anchor before virtualizer measurement converged.', 'Explicit navigation waits for stable measurement frames before committing its semantic anchor.'],
+  ['124px tail gap after composer growth', 'Virtualizer viewportSize briefly lagged the real CSS-grid scroll container.', 'Bottom detection uses physical scroll geometry; tail pin scrolls past max and lets the real container clamp.'],
   ['575px responsive drift', 'A giant partially visible row and later layout scroll could replace the intended anchor.', 'Choose the row nearest the viewport edge and freeze the committed anchor across a reflow transaction.'],
   ['Long Markdown CPU growth', 'Stable DOM chunks still came from re-scanning the whole growing source.', 'Streaming emits a semantic append patch; ProjectionEngine re-chunks only mutable tail + delta.'],
   ['Unbounded disclosure memory', 'Renderer fold state outlived rows with no retention policy.', 'Only touched disclosures are retained and the preference map is LRU-bounded.'],
@@ -65,10 +74,10 @@ const failures = [
       <div class="hero-copy">
         <span class="architecture-kicker">reference template · executable local + Pages proof</span>
         <h1>Scale the <em>conversation model and lifetimes</em>, not only the scroll list.</h1>
-        <p>A production Agent workspace has independent histories, background executions, heterogeneous outputs, resumable Turns and unstable physical heights. The template makes ownership and discardability explicit before Vue or a virtualizer is involved.</p>
-        <div class="hero-actions"><a class="primary-link" href="#lab">Exercise the framework</a><a class="secondary-link" href="https://github.com/topabomb/demo1/blob/feat/million-message-lab/docs/agent-workspace-reference-architecture.md">Read canonical architecture</a></div>
+        <p>A production Agent workspace has independent histories, background executions, heterogeneous outputs, resumable Turns and unstable physical heights. The template makes ownership, stable identity and discardability explicit before Vue or a virtualizer is involved.</p>
+        <div class="hero-actions"><a class="primary-link" href="#lab">Exercise the framework</a><a class="secondary-link" href="https://github.com/topabomb/demo1/blob/main/docs/agent-workspace-reference-architecture.md">Read canonical architecture</a></div>
       </div>
-      <div class="hero-proof"><span>Normal hot path</span><strong>O(changed + hot + visible)</strong><p>Total history and cold-session count must not enter streaming, rendering or scrolling complexity.</p><div><b>Provider-neutral model</b><b>Rebuildable projection</b><b>Semantic viewport</b><b>Replaceable UI</b></div></div>
+      <div class="hero-proof"><span>Normal hot path</span><strong>O(changed + hot + visible)</strong><p>Total history and cold-session count must not enter streaming, rendering or scrolling complexity.</p><div><b>Provider-neutral model</b><b>Stable business identity</b><b>Semantic viewport</b><b>Replaceable UI</b></div></div>
     </section>
 
     <section id="state" class="architecture-section">
@@ -90,13 +99,19 @@ const failures = [
       </div>
     </section>
 
+    <section class="architecture-section">
+      <header class="section-heading"><span>03 · DeepSeek Harness lessons</span><h2>Borrow invariants by scenario, not a general plugin runtime</h2><p>Harness is a broader Agent runtime. demo1 only absorbs the identity, replay and publication rules that directly improve a conversation client.</p></header>
+      <div class="scenario-table"><div v-for="row in harnessLessons" :key="row[0]" class="scenario-row"><strong>{{ row[0] }}<small style="display:block;margin-top:4px;opacity:.6">{{ row[1] }}</small></strong><span>{{ row[2] }}</span></div></div>
+    </section>
+
     <section id="efficiency" class="architecture-section split-section">
       <div>
-        <header class="section-heading compact"><span>03 · Projection path</span><h2>Canonical content is not a component tree</h2></header>
+        <header class="section-heading compact"><span>04 · Projection path</span><h2>Canonical content is not a component tree</h2></header>
         <div class="code-diagram"><pre>Backend / execution events
         │
         ▼
 LogicalMessage
+├─ turnId / stepId?
 └─ ContentBlock[]
         │
         ▼
@@ -118,23 +133,23 @@ Physical List Port
 Renderer Registry</pre></div>
       </div>
       <div>
-        <header class="section-heading compact"><span>04 · Hot-path budgets</span><h2>Complexity is part of the contract</h2></header>
+        <header class="section-heading compact"><span>05 · Hot-path budgets</span><h2>Complexity is part of the contract</h2></header>
         <div class="scenario-table"><div v-for="row in hotPaths" :key="row[0]" class="scenario-row"><strong>{{ row[0] }}<small style="display:block;margin-top:4px;opacity:.65">{{ row[1] }}</small></strong><span>{{ row[2] }}</span></div></div>
       </div>
     </section>
 
     <section class="architecture-section">
-      <header class="section-heading"><span>05 · Renderer protocol</span><h2>Semantic extensibility and physical containment are different responsibilities</h2></header>
+      <header class="section-heading"><span>06 · Renderer protocol</span><h2>Semantic extensibility and physical containment are different responsibilities</h2></header>
       <div class="scenario-table"><div v-for="row in renderers" :key="row[0]" class="scenario-row"><strong>{{ row[0] }}</strong><span>{{ row[1] }}<small style="display:block;margin-top:4px;opacity:.65">{{ row[2] }}</small></span></div></div>
     </section>
 
     <section class="architecture-section">
-      <header class="section-heading"><span>06 · Product portability</span><h2>Responsive layout is a physical reflow transaction, not conversation state.</h2></header>
+      <header class="section-heading"><span>07 · Product portability</span><h2>Responsive layout is a physical reflow transaction, not conversation state.</h2></header>
       <div class="workspace-band"><span>Desktop → tablet → phone</span><strong>freeze committed semantic anchor → product reflow → renderer/virtualizer measurement → restore the same coordinate</strong><p>Tables/code own internal overflow, images reserve intrinsic ratio, Recent moves into a drawer, and the composer consumes layout space instead of overlaying history.</p></div>
     </section>
 
     <section id="evidence" class="architecture-section">
-      <header class="section-heading"><span>07 · Executable evidence</span><h2>The template is defined by falsifiable invariants</h2><p>Diagnostics expose both product behavior and projection economics; local production and public Pages run the same Chromium scenarios.</p></header>
+      <header class="section-heading"><span>08 · Executable evidence</span><h2>The template is defined by falsifiable invariants</h2><p>Diagnostics expose both product behavior and projection economics; local production and public Pages run the same Chromium scenarios.</p></header>
       <div class="invariant-grid"><article v-for="entry in invariants" :key="entry[1]"><strong>{{ entry[0] }}</strong><span>{{ entry[1] }}</span></article></div>
       <div class="scenario-table"><div class="scenario-head"><span>Failure found in practice</span><span>Permanent framework correction</span></div><div v-for="row in failures" :key="row[0]" class="scenario-row"><strong>{{ row[0] }}<small style="display:block;margin-top:4px;opacity:.6">{{ row[1] }}</small></strong><span>{{ row[2] }}</span></div></div>
     </section>
