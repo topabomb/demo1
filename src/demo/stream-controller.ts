@@ -1,5 +1,5 @@
-import type { ConversationExecutionController, SubmitDisposition } from '../conversation/contracts'
-import type { ConversationSessionKernel } from '../conversation/session-kernel'
+import type { ConversationExecutionController, SubmitDisposition } from '../engine/conversation/contracts'
+import type { ConversationSessionKernel } from '../engine/conversation/session-kernel'
 
 const MAX_RUN_PUBLISHES = 1800
 const REASONING_PUBLISHES = 18
