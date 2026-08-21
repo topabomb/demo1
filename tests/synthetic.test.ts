@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { SyntheticConversationSource } from '../src/demo/synthetic'
-import { projectMessage } from '../src/presentation/projector-registry'
+import { projectMessage } from '../src/engine/presentation/projector-registry'
 
 describe('SyntheticConversationSource', () => {
   it('addresses one million messages without materializing them', () => {
