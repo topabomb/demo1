@@ -1,85 +1,90 @@
 # Framework / Template Review
 
-This review treats `demo1` as a reference implementation to copy from, not merely a stress demo to keep running. The governing question is: **which decisions should survive when Vue, Virtua, the synthetic backend and the product shell are replaced?**
+This review treats `demo1` as a reusable reference implementation rather than a stress-demo codebase.
 
 ## Keep as the framework contract
 
-1. **Canonical content model** — provider/runtime events normalize into stable `LogicalMessage + ContentBlock[]` records before presentation concerns appear.
-2. **Session kernel independent of viewport lifetime** — execution, blockers, usage and canonical history remain correct when no UI runtime is mounted.
-3. **Disposable hot presentation runtime** — only a bounded logical window is projected; cold history stays cold.
-4. **Keyed projection** — stable RenderUnit IDs let one streaming node update without invalidating list order or sibling subscribers.
-5. **Semantic viewport policy** — reader, Latest, follow-tail and committed anchors are semantic state; DOM measurements are adapter input only.
-6. **Renderer registry** — new content types extend projection + rendering rather than branching the session kernel.
+1. **Canonical conversation model** — provider/runtime events normalize into stable `LogicalMessage + ContentBlock[]` records before presentation concerns appear.
+2. **SessionKernel independent of viewport lifetime** — execution, blockers, usage and canonical history stay correct with zero mounted UI.
+3. **Ordered semantic events + independently coalesced UI publication** — business order cannot be lost because a reactive summary batches updates.
+4. **Bounded hot presentation runtime** — only a small logical segment is projected; cold history stays cold.
+5. **Keyed projection** — stable RenderUnit IDs let one streaming Block update without invalidating unrelated rows.
+6. **Semantic viewport policy** — reader, Latest, follow and committed anchors are application state; DOM measurements are adapter input only.
+7. **Registry-driven rendering** — normal new content types extend model/projection/renderer, not session/history logic.
+8. **Host-scoped engine CSS** — the reusable conversation surface does not style the host document.
 
-These boundaries produce the intended hot-path cost: **changed + hot + visible**, independent of total history size.
+These boundaries preserve the intended cost: **changed + hot + visible**, independent of total history size.
 
-## Demo-only / compatibility surface
+## Final repository boundaries
 
-The current repository still contains evolutionary seams that should not become a product API:
+- `src/engine/index.ts` — framework-neutral public surface.
+- `src/model/` — canonical semantic data.
+- `src/conversation/` — backend/runtime contracts, kernel and session semantics.
+- `src/presentation/` — projection, keyed RenderUnits and bounded presentation state.
+- `src/viewport/` — semantic viewport contracts/state.
+- `src/runtime/` — composition of kernel + hot presentation + viewport memory.
+- `src/core/` — only framework-neutral data-structure/notifier primitives.
+- `src/vue/` + `src/components/` — reference Vue/physical-list/rendering adapters.
+- `src/demo/` — synthetic history, execution, scenarios, workspace composition and diagnostics.
 
-- `src/core/types.ts` and `src/presentation/content-model.ts` are compatibility barrels. New code should import canonical and presentation types directly.
-- Synthetic `kind/seed/intensity/content` fields on `LogicalMessage` exist for the million-message generator. They are optional compatibility metadata; production adapters should emit canonical `blocks` and stable semantic IDs.
-- `legacyBlocksForMessage` and synthetic fixture generation currently live beside projector policy. They should move under a demo/fixtures package before this code is published as a standalone library.
-- `ConversationProjectionStore` currently sits in conversation contracts while exposing `RenderUnit`. The final package split should move that port to the presentation boundary so domain/session contracts do not depend on presentation types.
-- `ConversationViewport.vue` is intentionally an integration proof, but it currently combines the Virtua adapter, anchor/follow orchestration, composer behavior and diagnostics. A product extraction should keep the pure policy in `viewport/` and split the physical adapter from product controls; do not move DOM state back into the session kernel.
-
-These are **extraction seams**, not reasons to add another abstraction layer now. The demo should first keep one executable vertical slice and prove the boundaries with tests.
+Legacy compatibility re-export files were removed. Old mixed CSS entrypoints were removed rather than kept as aliases.
 
 ## Scenario-driven lessons from DeepSeek Harness
 
-The useful lesson from DeepSeek Harness is not “make everything a plugin”. For this focused client template, adopt only the invariants demanded by concrete Agent-conversation scenarios. See [`deepseek-harness-design-lessons.md`](deepseek-harness-design-lessons.md) for the detailed mapping.
+The useful lesson is not “turn everything into a plugin”. Adopt only invariants demanded by real Agent-conversation scenarios:
 
-| Scenario | Contract in demo1 | Do not add yet |
+| Scenario | Contract here | Do not add yet |
 |---|---|---|
-| model execution has Turn / model-request boundaries | `turnId` plus optional `stepId`; renderer-ready nodes expose both when known | no Agent loop/runtime implementation in the UI |
-| separate tool call and result records | one producer-owned stable `callId`; never infer by DOM adjacency or “latest unfinished” | no generic cross-event assembler for ordinary blocks |
-| future job/review/deliverable spans many events | introduce a keyed assembler only for that business row; replay/prepend/append must be equivalent | no global plugin/node engine before the first real cross-event feature |
-| many visual consumers observe one Session | business truth stays outside Vue; presentation is derived/rebuildable | no renderer walking Session/history state |
-| responsive/composer changes physical geometry | freeze semantic anchor or tail intent, let measurements settle, then restore | no scrollbar remainder as `Latest` truth |
-| a capability has two real implementations | add a narrow Definition / Provider / Consumer style port | no Cordis/service graph copied into this repository |
+| model execution has user-turn and model-request boundaries | required `turnId`, optional stable `stepId` | no Agent loop implementation in UI |
+| tool call/result are separate records | producer-owned stable `callId` | no correlation by adjacency/latest unfinished |
+| future review/job/deliverable spans many events | introduce a keyed assembler for that feature with deterministic replay laws | no generic cross-event node engine before a real need |
+| many UI consumers observe one Session | business truth stays outside Vue; presentation is derived | no renderer scans Session/history |
+| responsive/composer changes geometry | preserve semantic anchor/tail intent through physical reflow | no scrollbar remainder as Latest truth |
+| a capability has multiple real implementations | introduce a narrow Definition/Provider/Consumer-style port | no Cordis/service graph copied wholesale |
 
-The stable-ID rule is especially important: every record that contributes to one business object must carry or independently derive the same ID. “Attach this event to the latest unfinished row” is explicitly not a valid framework strategy.
+## Rendering and memory rules
 
-## Rendering-efficiency rules
+- Never materialize total history into reactive UI state.
+- Hot logical window and projection cache are bounded.
+- Cache hits preserve stable immutable RenderUnit collections.
+- Streaming Markdown updates only mutable tail + delta.
+- Keyed patches publish order only when membership/order changes.
+- RenderUnits expose message/Turn/Step/Block location directly.
+- Renderer caches are bounded and local.
+- Bottom detection uses the real scroll container when virtualizer cached geometry may lag reflow.
+- Explicit jumps commit only after stable measurement frames.
+- Responsive/composer changes preserve semantic anchors while physical layout converges.
 
-The template should preserve these invariants:
+FPS/heap remain diagnostics. Deterministic hot-work, DOM and semantic correctness are the release contract.
 
-- Never materialize total history into Vue/reactive state.
-- A hot runtime owns a bounded segment and a bounded projection cache.
-- Cache hits return stable immutable RenderUnit collections rather than cloning containers on every read.
-- Streaming Markdown uses append-only tail projection and preserves settled RenderUnit identity.
-- Keyed node patches do not publish a new list order unless IDs actually enter, leave or move.
-- Markdown/highlight caches remain bounded and renderer-local.
-- RenderUnits carry stable message/Turn/Step/Block location so renderers do not reverse-scan Session state.
-- Tail pinning and bottom detection use physical scroll-container geometry when virtualizer cached viewport measurements may lag a product reflow.
-- Explicit jumps commit their semantic anchor only after the virtualizer has held the target through stable measurement frames.
-- Responsive reflow may require multiple physical measurement frames; semantic anchors must remain stable while the virtualizer converges.
-- FPS/heap are diagnostics. Deterministic bounds on hot work, DOM count and semantic correctness are the CI contract.
+## CSS contract
 
-If profiling later shows stream publication scanning the whole hot segment, optimize that implementation with a message-index span/index. Do not introduce a global reactive index pre-emptively; the current bounded window keeps this a local optimization.
+`src/styles/engine.css` is scoped from `[data-conversation-engine].conversation-shell`; it owns conversation layout, virtualizer geometry, composer and renderer containment. `src/styles/demo.css` owns the demo shell and is the only style surface that may target `html`, `body` or `#app`.
 
-## Missing pieces before library extraction
+A browser gate injects hostile host-global element rules after engine styles and requires the conversation surface to retain valid geometry and overflow behavior. This gives a practical default isolation boundary without imposing Shadow DOM on every integration.
 
-These are deliberately deferred until there is a consumer that needs them:
+## What remains intentionally product-specific
 
-1. Move synthetic generation out of canonical/presentation packages and remove demo metadata from the extracted public message type entirely.
-2. Move presentation-store contracts out of the session/domain contract surface.
-3. Add typed RenderUnit payloads only if independent renderer packages need compile-time payload contracts; `Record<string, unknown>` is acceptable inside this reference app.
-4. Define an explicit persistence/transport adapter package when a real backend exists. The demo must not invent a persistence framework.
-5. Split the large Vue viewport into physical-list adapter and product/composer integration when a second UI shell or virtualizer is introduced.
-6. Add a cross-event ConversationNode assembler only when a real row spans multiple durable records; its laws are already documented, but unused generic code should not ship.
+These are extension points, not unfinished migration work:
+
+1. **Transport/persistence adapters** — add when a real backend exists; do not invent a persistence framework in the demo.
+2. **Alternative physical-list/UI adapter** — split further only when a second virtualizer or frontend shell exists.
+3. **Typed renderer payload packages** — useful only if independently versioned renderer packages need compile-time payload contracts.
+4. **Cross-event ConversationNode assembler** — add with the first real multi-record business lifecycle and enforce replay/prepend/append equivalence.
+5. **Shadow DOM hard isolation** — optional for hosts that need stronger CSS containment than the tested scoped-root contract.
 
 ## CI and release policy
 
-The repository is a template only if its build is reproducible and its public demo corresponds to validated source:
+There is one workflow and one acceptance chain:
 
-- commit `pnpm-lock.yaml` and use `pnpm install --frozen-lockfile`;
-- pull requests run unit tests, typecheck/build and the full local Chromium suite;
-- feature branches never replace the public Pages site;
-- `main` deploys only after the validation job succeeds;
-- the deployed URL then runs the same Chromium suite, so CDN/base-path/responsive behavior is part of acceptance;
-- Pages base path is derived from `GITHUB_REPOSITORY`, not hard-coded to `demo1`, so forks/templates deploy correctly.
+- PR: frozen install → unit/architecture tests → strict type/build → full local Chromium;
+- `main`: the same validation first;
+- only validated `main` deploys GitHub Pages;
+- the deployed page then runs the same full Chromium suite;
+- feature branches never publish Pages.
+
+The workflow deliberately stays monolithic enough to make release ordering obvious and small enough to maintain.
 
 ## Decision
 
-The architecture is strong enough to serve as a reference template. The main risk is **not insufficient abstraction**; it is allowing demo compatibility paths or physical-list behavior to become implicit business semantics. Keep the seven-layer dependency direction, make stable semantic identity explicit, add cross-event machinery only for a real cross-event scenario, and remove compatibility seams incrementally when consumers justify the extraction.
+The current repository is suitable as a reference template. The important protection is not more abstraction; it is preserving dependency direction, stable business identity, bounded presentation work, semantic viewport state and explicit host/rendering boundaries as new product features are added.
