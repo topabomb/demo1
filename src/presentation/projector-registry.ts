@@ -113,7 +113,8 @@ export function projectMessages(messages: readonly LogicalMessage[], registry = 
 
 export function legacyBlocksForMessage(message: LogicalMessage): ContentBlock[] {
   const kind = message.kind ?? 'markdown'
-  const { seed, intensity } = message
+  const seed = message.seed ?? 0
+  const intensity = message.intensity ?? 5
 
   if (message.content !== undefined) {
     return [block('runtime-content', 'markdown', { markdown: message.content }, message.revision ?? 0)]
@@ -171,7 +172,8 @@ export function legacyBlocksForMessage(message: LogicalMessage): ContentBlock[] 
     const [phase, rawName] = rawVariant.split(':')
     const name = rawName || `tool_${seed % 17}`
     const rows = intBetween(seed + 7, 3, 8 + intensity)
-    const callId = `call_${Math.floor(message.index / 2).toString(36)}_${seed.toString(36).slice(0, 4)}`
+    const pairIndex = phase === 'result' ? Math.max(0, message.index - 1) : message.index
+    const callId = `call_${pairIndex.toString(36)}_${name}`
     const input = { path: `/workspace/src/${name}-${message.index % 31}.ts`, query: sentence(seed, 7), limit: intBetween(seed + 5, 10, 200), recursive: seed % 2 === 0 }
     const outputRows = Array.from({ length: rows }, (_, i) => ({ line: intBetween(seed + i * 17, 1, 4000), score: Number((((seed + i * 19) % 1000) / 1000).toFixed(3)), preview: sentence(seed + i * 29, 10 + (i % 8)) }))
     const status = phase === 'result' && seed % 17 === 0 ? 'error' : phase === 'result' ? 'success' : 'running'
@@ -202,12 +204,16 @@ export function makeRenderUnit(
     id: `${message.id}:${contentBlock.id}:${suffix}`,
     messageId: message.id,
     messageIndex: message.index,
+    turnId: message.turnId,
+    stepId: message.stepId,
+    blockId: contentBlock.id,
     kind,
     revision,
     estimatePx,
     payload: {
       role: message.role,
       turnId: message.turnId,
+      stepId: message.stepId,
       variant: message.variant,
       live: message.live === true,
       blockId: contentBlock.id,
