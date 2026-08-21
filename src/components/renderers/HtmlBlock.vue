@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import DOMPurify from 'dompurify'
-import type { RenderUnit } from '../../core/types'
+import type { RenderUnit } from '../../presentation/render-unit'
 
 const props = defineProps<{ unit: RenderUnit }>()
 const html = computed(() => DOMPurify.sanitize(String(props.unit.payload.html ?? ''), {
