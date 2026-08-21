@@ -73,6 +73,8 @@ Local production and deployed Pages must both exercise:
 - architecture page exposing the same ownership boundaries implemented in code;
 - **host CSS isolation**: later host-global `button/input/textarea/select/img/table` rules cannot break conversation geometry, overflow or row layout.
 
+Streaming/performance diagnostics are **eventually observed outputs**, not a same-render-frame contract. Semantic mutations are applied synchronously in producer order, while Vue/workspace summary publication may be coalesced independently. E2E therefore waits for stream-publish and projection counters to reach their required values separately; it never weakens the quantitative thresholds just to accommodate scheduling jitter.
+
 ## Non-negotiable thresholds
 
 ```text
