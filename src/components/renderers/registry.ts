@@ -4,6 +4,8 @@ import MarkdownBlock from './MarkdownBlock.vue'
 import ThinkingBlock from './ThinkingBlock.vue'
 import CodeBlock from './CodeBlock.vue'
 import ImageBlock from './ImageBlock.vue'
+import AttachmentBlock from './AttachmentBlock.vue'
+import AudioBlock from './AudioBlock.vue'
 import HtmlBlock from './HtmlBlock.vue'
 import ToolBlock from './ToolBlock.vue'
 import DiffBlock from './DiffBlock.vue'
@@ -20,6 +22,8 @@ const renderers = new Map<string, Component>([
   ['thinking', ThinkingBlock],
   ['code', CodeBlock],
   ['image', ImageBlock],
+  ['attachments', AttachmentBlock],
+  ['audio', AudioBlock],
   ['html', HtmlBlock],
   ['tool', ToolBlock],
   ['diff', DiffBlock],
