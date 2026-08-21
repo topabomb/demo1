@@ -10,10 +10,6 @@ export type RenderKind =
 
 export type LogicalRole = 'user' | 'assistant' | 'tool' | 'system'
 
-/**
- * Backend-neutral canonical timeline item. Adapters for DSH/OpenCode/other runtimes
- * should normalize their native events into this shape before presentation logic.
- */
 export interface LogicalMessage {
   id: string
   index: number
@@ -22,14 +18,12 @@ export interface LogicalMessage {
   kind: RenderKind
   seed: number
   intensity: number
+  revision?: number
+  content?: string
   live?: boolean
   variant?: string
 }
 
-/**
- * Presentation-level unit. One backend message may project to many bounded-height
- * RenderUnits. The virtualizer and Vue components never depend on backend messages.
- */
 export interface RenderUnit {
   id: string
   messageId: string
