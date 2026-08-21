@@ -1,4 +1,4 @@
-import type { RenderUnit } from '../core/types'
+import type { RenderUnit } from '../presentation/render-unit'
 import type { ConversationProjectionStore } from './contracts'
 import { BatchedNotifier, type Unsubscribe } from './notifier'
 

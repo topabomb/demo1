@@ -1,17 +1,17 @@
 # Verification
 
-Status: **pending final-head dual validation**.
+Status: **candidate awaiting final main + public Pages validation**.
 
 This file is intentionally separate from the architecture. The architecture defines reusable invariants; this document records how the `demo1` reference implementation proves them.
 
 ## Gates
 
-Every candidate must pass the exact same source tree through two independent browser gates:
+Every candidate is validated in one ordered pipeline:
 
-1. **Pull-request CI** — unit tests, strict Vue/TypeScript typecheck, production Vite build, Chromium E2E against the local production server.
-2. **GitHub Pages** — build and deploy the exact branch SHA, then run the same Chromium suite against `https://topabomb.github.io/demo1/`.
+1. **Pull-request / main validation** — unit tests, strict Vue/TypeScript typecheck, production Vite build and Chromium E2E against the local production server.
+2. **GitHub Pages (main only)** — after the validation job succeeds, build the Pages artifact from the same SHA, deploy it, then run the full Chromium suite against the public URL.
 
-A public Pages success is published back to the commit as `pages-public-e2e=success`.
+Feature branches cannot replace the public demo. A Pages deployment is not considered accepted merely because upload/deploy succeeded; the deployed-site browser gate must also pass.
 
 ## Unit / architecture matrix
 
@@ -22,6 +22,7 @@ A public Pages success is published back to the commit as `pages-public-e2e=succ
 | Workspace store | ≥4 working SessionKernels while hot `ConversationSessionRuntime` count stays ≤3 |
 | Runtime eviction | a working viewport can be evicted without destroying execution |
 | Keyed projection | node patch does not invalidate order/sibling node subscribers |
+| Projection cache | bounded cache, stable cache-hit RenderUnit containers and append-only Markdown tail projection |
 | Segment manager | bounded far jump, reader-ending cold restore, 512-message neighboring shifts |
 | Semantic viewport | measurement probes rejected as anchors; exact messages-after calculation |
 | Fenwick/page index | aggregate prefix/update/navigation behavior remains deterministic |
@@ -29,19 +30,19 @@ A public Pages success is published back to the commit as `pages-public-e2e=succ
 
 ## Chromium product / stress matrix
 
-The browser suite must exercise all of these on both local production and public Pages:
+The browser suite must exercise all of these on local production and the public Pages build:
 
 - 1,000,000 logical messages with bounded hot projection and `<180` mounted rows;
 - 60 Hz streaming with bounded presentation chunks;
 - user upward-scroll escape from tail follow;
 - far semantic jump and reverse 512-message prepend;
 - prepend/history anchor drift `<4px`;
+- responsive desktop/tablet/mobile reflow preserving a committed semantic anchor;
 - many asynchronous SessionKernels outliving the three-runtime hot LRU;
 - historical conversation send → stop → send again → eviction → semantic restore;
 - failed last Turn → resumable new working Turn;
 - queued follow-up persistence;
-- approval blocker persistence;
-- question blocker persistence;
+- approval and question blocker persistence;
 - exact Recent indicators for Working / Completed / Blocked / Failed / Interrupted;
 - durable input/output/cache/context statistics updating during execution;
 - New Session and session search;
@@ -70,6 +71,10 @@ virtual wrapper block gap   exactly 0 px margin/padding
 
 Performance counters (FPS, long tasks, heap) remain diagnostics rather than hard cross-run thresholds because shared CI hardware is noisy. The architecture gate is bounded work/DOM and deterministic behavior, not a misleading absolute FPS number.
 
+## Reproducibility
+
+`pnpm-lock.yaml` is part of the candidate source and CI uses `pnpm install --frozen-lockfile`. Pages base-path construction is repository-derived so the same source can be used as a GitHub template/fork without editing `vite.config.ts`.
+
 ## Final evidence
 
-The final exact SHA, CI run, Pages run and public Chromium result will be recorded here only after the canonical docs and implementation are frozen and that final head passes both gates. No earlier checkpoint is considered final evidence.
+Record the final exact `main` SHA, CI run, Pages deployment and public Chromium result here only after both stages are green. Earlier feature-branch deployments are development evidence, not final release evidence.

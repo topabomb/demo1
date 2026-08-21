@@ -15,11 +15,11 @@ concurrency:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
 
-      - name: Setup pnpm and store cache
+      - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 10.15.1
@@ -33,6 +33,15 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile --prefer-offline
+
+      # Temporary bootstrap artifact: this repository pre-dates a committed lockfile.
+      # The next commit consumes this artifact and switches all installs to frozen mode.
+      - name: Upload generated lockfile
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-pnpm-lock
+          path: pnpm-lock.yaml
+          retention-days: 1
 
       - name: Unit tests
         run: pnpm test
@@ -48,5 +57,65 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+  deploy-pages:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.1
+          run_install: false
+          cache: true
+          cache_dependency_path: package.json
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile --prefer-offline
+
+      - name: Build Pages artifact
+        run: pnpm exec vite build
+        env:
+          GITHUB_PAGES: 'true'
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Verify deployed site with the full Chromium suite
+        env:
+          PLAYWRIGHT_BASE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: pnpm test:e2e
+
+      - name: Upload deployed-site Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pages-playwright-report
           path: playwright-report/
           retention-days: 7

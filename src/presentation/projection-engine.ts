@@ -55,23 +55,24 @@ export class ProjectionEngine {
     }
   }
 
-  projectMessage(message: LogicalMessage): RenderUnit[] {
+  projectMessage(message: LogicalMessage): readonly RenderUnit[] {
     const revision = message.revision ?? 0
     const cached = this.#cache.get(message.id)
     if (cached && cached.revision === revision) {
       this.#cacheHits += 1
       this.#touch(message.id, cached)
-      return [...cached.units]
+      return cached.units
     }
 
     this.#fullProjects += 1
     const units = projectMessageWithRegistry(message, this.registry)
-    this.#remember(message, units)
-    return units
+    return this.#remember(message, units)
   }
 
   projectMessages(messages: readonly LogicalMessage[]): RenderUnit[] {
-    return messages.flatMap(message => this.projectMessage(message))
+    const units: RenderUnit[] = []
+    for (const message of messages) units.push(...this.projectMessage(message))
+    return units
   }
 
   /**
@@ -80,7 +81,7 @@ export class ProjectionEngine {
    * RenderUnit objects remain byte/identity stable. Multi-block or non-append updates
    * intentionally fall back to the general projector.
    */
-  appendMarkdownDelta(message: LogicalMessage, blockId: string, delta: string): RenderUnit[] {
+  appendMarkdownDelta(message: LogicalMessage, blockId: string, delta: string): readonly RenderUnit[] {
     const cached = this.#cache.get(message.id)
     const contentBlock = message.blocks?.find(entry => entry.id === blockId && entry.type === 'markdown') as ContentBlock<'markdown'> | undefined
     if (!cached || !contentBlock || !delta || cached.markdownBlockId !== blockId || cached.markdownSource === null) {
@@ -118,19 +119,19 @@ export class ProjectionEngine {
 
     const units = [...settledPrefix, ...tailUnits]
     this.#incrementalPatches += 1
-    this.#remember(message, units)
-    return units
+    return this.#remember(message, units)
   }
 
   clear(): void { this.#cache.clear() }
 
-  #remember(message: LogicalMessage, units: readonly RenderUnit[]): void {
+  #remember(message: LogicalMessage, units: readonly RenderUnit[]): readonly RenderUnit[] {
+    const ownedUnits = Object.freeze([...units])
     const markdownBlocks = message.blocks?.filter(entry => entry.type === 'markdown') ?? []
-    const singleMarkdown = markdownBlocks.length === 1 && units.length > 0 && units.every(unit => unit.payload.blockId === markdownBlocks[0]!.id)
+    const singleMarkdown = markdownBlocks.length === 1 && ownedUnits.length > 0 && ownedUnits.every(unit => unit.payload.blockId === markdownBlocks[0]!.id)
     const markdownBlock = singleMarkdown ? markdownBlocks[0] as ContentBlock<'markdown'> : null
     const entry: ProjectionCacheEntry = {
       revision: message.revision ?? 0,
-      units: [...units],
+      units: ownedUnits,
       markdownBlockId: markdownBlock?.id ?? null,
       markdownSource: markdownBlock?.data.markdown ?? null,
     }
@@ -141,6 +142,7 @@ export class ProjectionEngine {
       this.#cache.delete(oldest)
       this.#evictions += 1
     }
+    return ownedUnits
   }
 
   #touch(id: string, entry: ProjectionCacheEntry): void {

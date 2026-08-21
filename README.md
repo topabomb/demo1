@@ -5,7 +5,8 @@ Executable reference template for production-style Agent workspaces with **very 
 - Live lab: **https://topabomb.github.io/demo1/**
 - Architecture page: **https://topabomb.github.io/demo1/#architecture**
 - Canonical design: [`docs/agent-workspace-reference-architecture.md`](docs/agent-workspace-reference-architecture.md)
-- Verification: [`docs/verification.md`](docs/verification.md)
+- Template review / extraction guide: [`docs/template-review.md`](docs/template-review.md)
+- Verification contract: [`docs/verification.md`](docs/verification.md)
 
 The claim is not “Vue can render one million messages”. The framework separates state by lifetime and responsibility:
 
@@ -37,6 +38,10 @@ Renderer + responsive Product Adapter
 | ephemeral physical | DOM, measured heights, renderer caches | mounted/render lifetime only |
 
 The hot-path target is **`O(changed + hot + visible)`**, not `O(total history)`.
+
+## Template boundary
+
+The reusable contract is `model/ + conversation kernel/ports + presentation/ + viewport policy`. Vue, Virtua, renderer components, synthetic fixtures, diagnostics and product CSS are reference adapters. Compatibility barrels and synthetic-message fields exist because this repository evolved from a stress demo; they are not recommended API surface for a new product. See the template review for the remaining extraction seams and the order in which to remove them.
 
 ## What the lab exercises
 
@@ -74,10 +79,10 @@ Conversation algorithms do not read product widths, colors, gaps or breakpoints.
 ## Validate
 
 ```bash
-pnpm install
+pnpm install --frozen-lockfile
 pnpm test
 pnpm build
 pnpm test:e2e
 ```
 
-Acceptance is recorded only when the **exact final SHA** passes unit/type/build + full local-production Chromium and the same suite against the public Pages deployment.
+Pull requests run the complete local gate. A push to `main` is deployed only after that gate passes, then the same Chromium suite is run against the public Pages URL. Acceptance is recorded only for an exact SHA that passes both stages.
