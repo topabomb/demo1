@@ -45,7 +45,7 @@ export {
   type ContentProjectionContext,
   type ContentProjector,
 } from '../presentation/projector-registry'
-export { ProjectionEngine, type ProjectionStats } from '../presentation/projection-engine'
+export { ProjectionEngine, type ProjectionEngineStats } from '../presentation/projection-engine'
 export { KeyedConversationProjection } from '../presentation/keyed-node-store'
 export { type ConversationProjectionStore } from '../presentation/contracts'
 export { type BuiltinRenderKind, type RenderKind, type RenderUnit } from '../presentation/render-unit'
