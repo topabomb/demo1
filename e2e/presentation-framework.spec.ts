@@ -19,6 +19,28 @@ async function jump(page: Page, index: number): Promise<void> {
   await expect.poll(async () => Math.abs(numeric(await page.getByTestId('reader-position').textContent()) - index), { timeout: 15_000 }).toBeLessThan(48)
 }
 
+async function visibleAnchor(page: Page): Promise<{ id: string; top: number } | null> {
+  return page.getByTestId('scrollport').evaluate(stage => {
+    const viewport = stage.getBoundingClientRect()
+    const readerText = document.querySelector<HTMLElement>('[data-testid="reader-position"]')?.textContent ?? '0'
+    const reader = Number(readerText.replace(/[^0-9-]/g, ''))
+    const rows = [...stage.querySelectorAll<HTMLElement>('[data-virtual-item="true"]')]
+      .map(row => ({ row, rect: row.getBoundingClientRect(), messageIndex: Number(row.dataset.messageIndex ?? '-1') }))
+      .filter(({ rect, messageIndex }) => rect.bottom > viewport.top && rect.top < viewport.bottom && messageIndex <= reader)
+      .sort((a, b) => Math.abs(a.rect.top - viewport.top) - Math.abs(b.rect.top - viewport.top))
+    const first = rows[0]
+    return first?.row.dataset.renderUnit ? { id: first.row.dataset.renderUnit, top: first.rect.top - viewport.top } : null
+  })
+}
+
+async function anchorDrift(page: Page, anchor: { id: string; top: number }): Promise<number> {
+  return page.locator(`[data-render-unit="${anchor.id}"]`).evaluate((element, expectedTop) => {
+    const viewport = element.closest<HTMLElement>('[data-testid="scrollport"]')
+    if (!viewport) return Number.POSITIVE_INFINITY
+    return Math.abs((element.getBoundingClientRect().top - viewport.getBoundingClientRect().top) - Number(expectedTop))
+  }, anchor.top).catch(() => Number.POSITIVE_INFINITY)
+}
+
 async function assertNoRowOverlap(page: Page): Promise<void> {
   const overlap = await page.getByTestId('scrollport').evaluate((stage) => {
     const viewport = stage.getBoundingClientRect()
@@ -101,20 +123,21 @@ test('Markdown compatibility gallery covers GFM structures, sanitization and lon
   await assertNoRowOverlap(page)
 })
 
-test('responsive reflow preserves containment, mobile session access and semantic rendering', async ({ page }) => {
+test('responsive reflow preserves containment, semantic anchor and mobile session access', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await openApp(page)
   await switchSession(page, 'dsh-transport')
   await page.getByTestId('inject-markdown-gallery').click()
   await expect(page.getByTestId('logical-count')).toHaveText('180,006')
   await jump(page, 180_002)
+  const desktopAnchor = await visibleAnchor(page)
+  expect(desktopAnchor).not.toBeNull()
 
   await page.setViewportSize({ width: 390, height: 844 })
-  await page.waitForTimeout(350)
+  await expect.poll(() => anchorDrift(page, desktopAnchor!), { timeout: 12_000 }).toBeLessThan(6)
   expect(await bodyOverflow(page)).toBeLessThanOrEqual(1)
   await expect(page.getByTestId('mobile-session-toggle')).toBeVisible()
 
-  // Diagnostics is a product overlay on phone; close it before exercising the workspace drawer.
   const closeDiagnostics = page.locator('.diagnostics-panel .icon-button')
   if (await closeDiagnostics.isVisible()) await closeDiagnostics.click()
   await page.getByTestId('mobile-session-toggle').click()
@@ -124,7 +147,6 @@ test('responsive reflow preserves containment, mobile session access and semanti
   await page.getByTestId('mobile-session-toggle').click()
   await page.getByTestId('session-dsh-transport').click()
 
-  // Reopen diagnostics only to drive semantic jumps. Product layout remains single-column.
   await page.getByTestId('diagnostics-open').click()
   await jump(page, 180_002)
   const table = page.locator('[data-message-index="180002"]').first().locator('.markdown-body table')
@@ -137,8 +159,9 @@ test('responsive reflow preserves containment, mobile session access and semanti
   expect(await bodyOverflow(page)).toBeLessThanOrEqual(1)
 
   await page.getByTestId('inject-mixed-five').click()
-  // Gallery added 6 messages; mixed fixtures start at 180006. Ordinal 2 image lands at 180012.
-  await jump(page, 180_012)
+  // Gallery used ordinal 1; mixed fixtures therefore begin with ordinal 2 at index 180006.
+  // Ordinal 2's rich assistant message is the image message at 180007.
+  await jump(page, 180_007)
   const image = page.getByTestId('image-block').locator('img')
   await expect(image).toBeVisible()
   const imageFits = await image.evaluate(element => {
@@ -149,8 +172,10 @@ test('responsive reflow preserves containment, mobile session access and semanti
   expect(await bodyOverflow(page)).toBeLessThanOrEqual(1)
   await assertNoRowOverlap(page)
 
+  const phoneAnchor = await visibleAnchor(page)
+  expect(phoneAnchor).not.toBeNull()
   await page.setViewportSize({ width: 980, height: 820 })
-  await page.waitForTimeout(300)
+  await expect.poll(() => anchorDrift(page, phoneAnchor!), { timeout: 12_000 }).toBeLessThan(6)
   expect(await bodyOverflow(page)).toBeLessThanOrEqual(1)
   await assertNoRowOverlap(page)
 })
