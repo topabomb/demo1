@@ -110,7 +110,16 @@ test('semantic viewport survives a different product layout and composer height 
   await switchSession(page, 'event-normalization')
   await jump(page, 50_000)
 
-  const wrapperGeometry = await page.locator('[data-virtual-item="true"]').first().evaluate(element => {
+  // Read one actually visible measured wrapper in a single DOM transaction. A
+  // virtualizer is allowed to recycle an earlier locator between resolution and
+  // evaluation, but any mounted visible wrapper must remain geometry-pure.
+  const wrapperGeometry = await page.getByTestId('scrollport').evaluate(stage => {
+    const viewport = stage.getBoundingClientRect()
+    const element = [...stage.querySelectorAll<HTMLElement>('[data-virtual-item="true"]')].find(row => {
+      const rect = row.getBoundingClientRect()
+      return rect.height > 0 && rect.bottom > viewport.top && rect.top < viewport.bottom
+    })
+    if (!element) return null
     const style = getComputedStyle(element)
     return { paddingTop: style.paddingTop, paddingBottom: style.paddingBottom, marginTop: style.marginTop, marginBottom: style.marginBottom }
   })
