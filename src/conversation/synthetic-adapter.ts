@@ -9,8 +9,9 @@ export class SyntheticHistoryAdapter implements ConversationHistoryAdapter {
     public readonly sessionId: string,
     public readonly count: number,
     seedOffset = 0,
+    liveTail = false,
   ) {
-    this.#source = new SyntheticConversationSource(count, sessionId, seedOffset)
+    this.#source = new SyntheticConversationSource(count, sessionId, seedOffset, liveTail)
   }
 
   loadRange(start: number, count: number): readonly LogicalMessage[] {
