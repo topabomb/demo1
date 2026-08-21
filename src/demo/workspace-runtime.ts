@@ -6,16 +6,22 @@ import { ConversationSessionRuntime } from '../engine/runtime/session-runtime'
 import type { SessionViewMemory } from '../engine/viewport/state'
 import { SyntheticHistoryAdapter } from './history-adapter'
 import { SyntheticStreamController } from './stream-controller'
-import { newSessionSeed, RECENT_SESSIONS, type DemoSessionSeed } from './workspace-fixtures'
+import {
+  newSessionSeed,
+  RECENT_SESSIONS,
+  type DemoSessionDescriptor,
+  type DemoSessionSeed,
+} from './workspace-fixtures'
 
 export const HOT_SESSION_LIMIT = 3
 
-/** Demo composition only. The reusable engine owns a SessionKernel/SessionRuntime; this shell seeds fake sessions and execution. */
+/** Demo composition only. The reusable engine owns a SessionKernel/SessionRuntime; this shell seeds fake sessions and product list metadata. */
 export class DemoWorkspaceRuntime {
   #kernels = new Map<string, ConversationSessionKernel>()
   #executions = new Map<string, SyntheticStreamController>()
   #snapshots = new Map<string, SessionViewMemory>()
   #runtimes = new Map<string, ConversationSessionRuntime>()
+  #ages = new Map<string, string>()
   #lastAccess = new Map<string, number>()
   #kernelUnsubs = new Map<string, Unsubscribe>()
   #summarySignatures = new Map<string, string>()
@@ -34,7 +40,9 @@ export class DemoWorkspaceRuntime {
   }
 
   subscribe(listener: () => void): Unsubscribe { return this.#notifier.subscribe(listener) }
-  get descriptors(): readonly ConversationDescriptor[] { return this.#order.map(id => this.kernelFor(id).summary) }
+  get descriptors(): readonly DemoSessionDescriptor[] {
+    return this.#order.map(id => ({ ...this.kernelFor(id).summary, age: this.#ages.get(id) ?? 'now' }))
+  }
   get activeSessionId(): string { return this.#activeSessionId }
   get activeSession(): ConversationSessionRuntime { return this.ensureRuntime(this.#activeSessionId) }
   get activeKernel(): ConversationSessionKernel { return this.kernelFor(this.#activeSessionId) }
@@ -112,13 +120,14 @@ export class DemoWorkspaceRuntime {
     for (const execution of this.#executions.values()) execution.dispose()
     for (const runtime of this.#runtimes.values()) runtime.dispose()
     for (const unsubscribe of this.#kernelUnsubs.values()) unsubscribe()
-    this.#executions.clear(); this.#runtimes.clear(); this.#kernels.clear(); this.#kernelUnsubs.clear()
+    this.#executions.clear(); this.#runtimes.clear(); this.#kernels.clear(); this.#kernelUnsubs.clear(); this.#ages.clear()
   }
 
   #register(descriptor: DemoSessionSeed, prepend = false): void {
     const adapter = new SyntheticHistoryAdapter(descriptor.id, descriptor.logicalCount, descriptor.seedOffset, descriptor.liveTail === true)
     const kernel = new ConversationSessionKernel(descriptor, adapter)
     this.#kernels.set(descriptor.id, kernel)
+    this.#ages.set(descriptor.id, descriptor.age)
     this.#executions.set(descriptor.id, new SyntheticStreamController(kernel))
     this.#snapshots.set(descriptor.id, defaultSnapshot(descriptor))
     if (prepend) this.#order.unshift(descriptor.id); else this.#order.push(descriptor.id)
