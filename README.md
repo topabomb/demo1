@@ -1,79 +1,54 @@
-# Resumable Agent Workspace Architecture Lab
+# Agent Workspace Reference Architecture Lab
 
-This repository is a **reference architecture + executable browser proof** for Agent workspaces that must handle extremely long, heterogeneous conversations **and many independent asynchronous sessions** without coupling product state to OpenCode, DSH, a provider protocol, Vue, Virtua, or a specific renderer.
+An **executable reference architecture** for Agent workspaces with very long heterogeneous conversations and many independent asynchronous/resumable sessions.
 
 Live lab: **https://topabomb.github.io/demo1/**  
 Architecture view: **https://topabomb.github.io/demo1/#architecture**
 
-The claim is not “Vue can render one million messages”. It is:
+The claim is not “Vue can render one million messages”. The claim is:
 
-> **Agent execution, hot presentation state and physical viewport state are different lifetimes. Rendering cost scales with hot/visible content, while many sessions may continue running or waiting independently.**
+> **Provider protocol, durable session execution, bounded semantic projection, semantic viewport policy, physical virtualization and product styling are separate ownership boundaries.**
 
-## Reusable architecture
+Normal hot-path cost scales with changed/hot/visible content rather than total history, while many sessions may keep running, waiting or remain resumable without keeping a heavyweight viewport alive.
+
+## Architecture
 
 ```text
-Backend / DSH / OpenCode
-        │
-        ▼
 Backend Adapter
-        │ canonical messages/events
-        ▼
-Workspace Session Registry
-├─ SessionKernel A · working
-├─ SessionKernel B · idle
-├─ SessionKernel C · needs approval
-├─ SessionKernel D · working
-└─ ...
-        │ activate / recent LRU
-        ▼
-ConversationSessionRuntime  ≤ 3 hot
-├─ ~2,048-message semantic segment
-├─ stable keyed RenderUnit projection
-└─ page / height indexes
-        │
-        ▼
-Committed Semantic Viewport
-        │
-        ▼
-Virtua + Vue
-~20–100 mounted rows
+      ↓ canonical messages/events
+SessionKernel / Execution Registry
+      ↓ hot/visible session only
+Bounded ConversationRuntime + keyed projection
+      ↓
+Framework-neutral Semantic Viewport Policy
+      ↓
+Virtua/Vue physical adapter
+      ↓
+Replaceable Product UI / CSS
 ```
 
-### Four lifecycles
+The demo proves both scaling dimensions at once:
 
-1. **Backend lifetime** — protocol translation and paging stay behind the adapter boundary.
-2. **Session/execution lifetime** — lightweight `SessionKernel` owns appended turns, current run, queue, pending approval/question and unread activity. It survives viewport destruction.
-3. **Hot semantic lifetime** — disposable `ConversationSessionRuntime` owns only a bounded history segment, keyed projection and semantic reader/anchor state. The workspace LRU keeps at most three heavy runtimes.
-4. **Physical viewport lifetime** — Virtua measurements, DOM nodes and scroll coordinates are ephemeral. Only the **committed semantic viewport**, not arbitrary mounted measurement probes, may define application anchors.
+- `1,000,000+` addressable logical messages with a bounded ~2,048-message hot projection and `<180` mounted rows;
+- `>=4` concurrent working SessionKernels while heavyweight conversation runtimes remain `<=3`.
 
-The critical v2 invariant is:
+## Session model
 
-> **N concurrently working Agent sessions do not imply N heavyweight conversation viewports.**
+A session deliberately does **not** have one overloaded status.
 
-## Product behaviors proven by the lab
+- **Live execution:** `idle | working | waiting | interrupted`
+- **Last Turn result:** `completed | aborted | blocked | error | max-tokens | interrupted`
+- **Human blocker:** `approval | question`
+- **Workspace attention:** unread + queued follow-ups
+- **Durable projections:** turns/steps, input/output/reasoning tokens, cache read/write/hit, context occupancy, structured failure
 
-- At least one million logical messages remain addressable without eager Vue/DOM materialization.
-- Historical sessions are **resumable**, not read-only: sending appends a real user turn and a new assistant run.
-- Multiple sessions may execute in the background while only `≤3` heavyweight runtimes stay hot.
-- A **working** session may lose its hot runtime and continue streaming; reopening rehydrates from session-owned state.
-- Submitting while working creates a session-owned **queued follow-up**.
-- Pending **approval/question** state survives switching and runtime eviction and blocks the composer until resolved.
-- New Session starts with zero history and becomes a normal resumable session after its first prompt.
-- Recent exposes Working / Idle / Needs approval / Interrupted / unread / queued state and supports search.
-- `Latest` is computed from logical reader state, never from scrollbar remainder.
-- Variable-height composer owns layout space; history anchors are reconciled from committed visible rows.
-- Thinking/tool/code/diff/image/HTML renderers remain isolated behind stable `RenderUnit` keys.
-- Long assistant output is split into bounded presentation chunks while retaining one canonical logical message.
+A failed/completed/interrupted historical session remains resumable. Blockers, queues, execution and usage statistics belong to the SessionKernel and survive viewport eviction.
 
-## Practice changed the architecture
+## Layout portability
 
-The browser lab intentionally records failures rather than hiding them behind looser assertions. Important discoveries include:
+The viewport algorithm does not read CSS widths, colors or composer limits. The only CSS coupled to physical virtualization is the small geometry contract in `src/virtua-layout.css`: the scroll stage must size correctly and the virtualizer-owned measured wrapper must have zero vertical margin/padding.
 
-- `14.015625px` adjacent-row overlap traced to `7px + 7px` decoration on a Virtua-owned measurement wrapper → virtualizer wrappers must be geometry-pure.
-- repeatable `+1023` reader drift for a 2048-message window → semantic reader is not a window center.
-- Virtua measurement probes appearing in DOM before navigation committed → `mounted DOM != visible DOM != committed semantic viewport`.
-- execution controller owning `ConversationSessionRuntime` → working sessions became non-evictable and concurrency broke the hot-runtime bound.
-- treating historical `completed` sessions as read-only → incompatible with real resumable Agent workflows.
+Everything else—including sidebar width, content width, row gap and composer min/max height—is replaceable reference styling in `src/product-ux.css`. Browser tests change those values at runtime and re-run semantic anchor/non-overlap assertions.
 
 ## Validation
 
@@ -84,7 +59,9 @@ pnpm build
 pnpm test:e2e
 ```
 
-The CI suite covers architecture/unit contracts plus Chromium UX/stress scenarios. The Pages workflow then deploys the exact production build and runs the **same complete Chromium suite against the public Pages URL**. Dependency installation uses the pnpm store cache so repeated Actions runs reuse the package store.
+CI runs the complete Chromium suite against the production build. The Pages workflow then deploys the exact branch SHA and runs the **same suite against the public URL**.
 
-Design record for the current architecture: [`docs/agent-workspace-architecture-v2.md`](docs/agent-workspace-architecture-v2.md)  
-Long-history v1 investigation and failure history: [`docs/agent-conversation-architecture-lab.md`](docs/agent-conversation-architecture-lab.md)
+Canonical documentation:
+
+- [`docs/agent-workspace-reference-architecture.md`](docs/agent-workspace-reference-architecture.md) — ownership, state/store model, DSH-aligned semantics, token/cache accounting, viewport/CSS boundaries, failure-derived invariants and template checklist.
+- [`docs/verification.md`](docs/verification.md) — executable acceptance matrix and final exact-SHA evidence.
