@@ -1,6 +1,6 @@
-/*
- * Replaceable reference product theme.
- * Semantic session state and viewport algorithms do not read these values.
+/* Replaceable reference product theme/state styling.
+ * Breakpoints live only in responsive-ux.css. Semantic/session/viewport code never
+ * reads these values.
  */
 :root {
   --session-sidebar-width: 268px;
@@ -52,7 +52,7 @@
 .session-empty { padding:20px 10px;color:#596776;font-size:10px;text-align:center; }
 @keyframes agentPulse { 0%,100%{opacity:.45}50%{opacity:1} }
 
-/* Product spacing belongs inside the virtualizer-owned measured item. */
+/* Product spacing lives inside, never on, the virtualizer-owned measured wrapper. */
 .node-seat {
   width: 100%;
   min-width: 0;
@@ -136,16 +136,3 @@
 .session-scope-card small { color:#7b8998;font-size:9px; }
 .diagnostics-reopen { position:fixed;z-index:30;top:10px;right:10px;width:32px;height:32px;padding:0;opacity:.5;transition:opacity .15s ease; }
 .diagnostics-reopen:hover { opacity:1; }
-.architecture-route-button { top:auto!important;right:auto!important;left:12px!important;bottom:9px!important;opacity:.42;border-color:#283543!important;background:rgba(10,15,21,.82)!important;color:#7890a8!important; }
-.architecture-route-button:hover { opacity:1;color:#a8c9eb!important; }
-
-@media (max-width:1100px){
-  :root { --session-sidebar-width: 236px; }
-  .secondary-model{display:none}
-  .pending-interaction{grid-template-columns:auto minmax(0,1fr)}
-  .pending-actions{grid-column:2}
-}
-@media (max-width:760px){
-  .agent-app,.agent-app.diagnostics-closed { grid-template-columns: minmax(0,1fr); }
-  .session-sidebar { display:none; }
-}
