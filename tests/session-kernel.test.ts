@@ -14,6 +14,7 @@ describe('ConversationSessionKernel', () => {
     const kernel = new ConversationSessionKernel(descriptor, new SyntheticHistoryAdapter('resume', 100), 9)
     const execution = new SyntheticStreamController(kernel)
     const inputBefore = kernel.usage.inputTokens
+    const reasoningBefore = kernel.usage.reasoningTokens
     expect(execution.submit('continue this task')).toBe('started')
     expect(kernel.count).toBe(102)
     expect(kernel.getMessage(100)).toMatchObject({
@@ -22,18 +23,36 @@ describe('ConversationSessionKernel', () => {
     })
     expect(kernel.getMessage(101)).toMatchObject({
       role: 'assistant', live: true, turnId: 'resume:runtime-turn-100', stepId: 'resume:runtime-turn-100:step-0',
-      blocks: [{ id: 'answer', type: 'markdown', data: { markdown: '' } }],
+      blocks: [
+        { id: 'reasoning', type: 'reasoning', data: { text: '', status: 'streaming' } },
+        { id: 'answer', type: 'markdown', data: { markdown: '' } },
+      ],
     })
     expect(kernel.status).toBe('working')
     expect(kernel.lastTurnReason).toBeNull()
     expect(kernel.usage.inputTokens).toBeGreaterThan(inputBefore)
+
+    kernel.appendCurrentReasoningDelta('Inspect stable identities before rendering. ')
+    expect(kernel.getMessage(101)).toMatchObject({
+      blocks: [
+        { id: 'reasoning', type: 'reasoning', data: { text: 'Inspect stable identities before rendering. ', status: 'streaming' } },
+        { id: 'answer', type: 'markdown', data: { markdown: '' } },
+      ],
+    })
+    expect(kernel.lastEvent.contentPatch).toMatchObject({ kind: 'append-reasoning', blockId: 'reasoning' })
+    expect(kernel.usage.reasoningTokens).toBeGreaterThan(reasoningBefore)
+
     kernel.appendAssistantDelta('A streamed answer adds output-token accounting. ')
     expect(kernel.getMessage(101)).toMatchObject({
-      blocks: [{ id: 'answer', type: 'markdown', data: { markdown: 'A streamed answer adds output-token accounting. ' } }],
+      blocks: [
+        { id: 'reasoning', type: 'reasoning' },
+        { id: 'answer', type: 'markdown', data: { markdown: 'A streamed answer adds output-token accounting. ' } },
+      ],
     })
     expect(kernel.lastEvent.contentPatch).toMatchObject({ kind: 'append-markdown', blockId: 'answer' })
     expect(kernel.usage.outputTokens).toBeGreaterThan(10)
     kernel.completeCurrent()
+    expect(kernel.getMessage(101)).toMatchObject({ live: false, blocks: [{ data: { status: 'complete' } }] })
     expect(kernel.lastTurnReason).toBe('completed')
     execution.dispose()
   })
@@ -43,14 +62,15 @@ describe('ConversationSessionKernel', () => {
     const kernel = new ConversationSessionKernel(descriptor, new SyntheticHistoryAdapter('events', 0), 4)
     const events: string[] = []
     let summaries = 0
-    const unsubscribeEvents = kernel.subscribeEvents(event => events.push(event.kind))
+    const unsubscribeEvents = kernel.subscribeEvents(event => events.push(event.contentPatch?.kind ?? event.kind))
     const unsubscribeSummary = kernel.subscribe(() => { summaries += 1 })
 
     kernel.beginTurn('first')
+    kernel.appendCurrentReasoningDelta('r')
     kernel.appendAssistantDelta('a')
     kernel.appendAssistantDelta('b')
 
-    expect(events).toEqual(['append', 'content', 'content'])
+    expect(events).toEqual(['append', 'append-reasoning', 'append-markdown', 'append-markdown'])
     expect(summaries).toBe(0)
     await Promise.resolve()
     expect(summaries).toBe(1)
