@@ -13,8 +13,5 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', syncHash))
 
 <template>
   <ArchitectureOverview v-if="view === 'architecture'" />
-  <div v-else class="lab-route-shell">
-    <a class="architecture-route-button" href="#architecture" data-testid="architecture-link">Architecture</a>
-    <AgentWorkspace />
-  </div>
+  <AgentWorkspace v-else />
 </template>
