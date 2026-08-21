@@ -12,7 +12,7 @@ import {
   sessionIndicatorLabel,
   type SessionIndicator,
 } from '../conversation/session-semantics'
-import { createMarkdownGalleryTurn, createMixedDemoTurns } from '../presentation/demo-fixtures'
+import { createAgentScenarioPack, createMarkdownGalleryTurn, createMixedDemoTurns } from '../presentation/demo-fixtures'
 import { registeredRendererIds } from './renderers/registry'
 import { touchedFoldStateCount } from './renderers/fold-state'
 import { highlightCacheSize } from './renderers/highlight-client'
@@ -117,6 +117,13 @@ async function injectMarkdownGallery(): Promise<void> {
   await Promise.resolve()
   await viewportRef.value?.jumpToLatest()
 }
+
+async function injectAgentScenarios(): Promise<void> {
+  if (!canInjectFixtures.value) return
+  activeSession.value.kernel.appendCanonicalMessages(createAgentScenarioPack(activeSession.value.id, fixtureOrdinal.value++))
+  await Promise.resolve()
+  await viewportRef.value?.jumpToLatest()
+}
 </script>
 
 <template>
@@ -166,8 +173,9 @@ async function injectMarkdownGallery(): Promise<void> {
           <button data-testid="inject-mixed-one" :disabled="!canInjectFixtures" @click="injectMixed(1)">+ 1 mixed turn</button>
           <button data-testid="inject-mixed-five" :disabled="!canInjectFixtures" @click="injectMixed(5)">+ 5 mixed turns</button>
           <button class="secondary" data-testid="inject-markdown-gallery" :disabled="!canInjectFixtures" @click="injectMarkdownGallery">Markdown gallery</button>
+          <button class="secondary" data-testid="inject-agent-scenarios" :disabled="!canInjectFixtures" @click="injectAgentScenarios">Agent scenario pack</button>
         </div>
-        <small class="control-note">Appends canonical ContentBlock[] messages; no DOM-side fixture shortcut.</small>
+        <small class="control-note">Canonical scenarios: streaming output, uploads, image generation, TTS/ASR and diverse tool results; no DOM-side fixture shortcut.</small>
       </div>
 
       <div class="control-group"><label>Live LLM output</label><div class="inline-control"><select :value="activeUiState.streamRate" @change="onRateChange"><option :value="5">5 Hz</option><option :value="20">20 Hz</option><option :value="60">60 Hz</option></select><button data-testid="stream-start" :disabled="activeUiState.sessionStatus !== 'working'" @click="viewportRef?.restartStream()">Resume</button><button class="secondary" :disabled="activeUiState.sessionStatus !== 'working'" @click="viewportRef?.pauseStream()">Pause</button></div></div>
@@ -198,7 +206,7 @@ async function injectMarkdownGallery(): Promise<void> {
         <div><span>fold state</span><strong>{{ foldStateCount }}</strong></div><div><span>highlight LRU</span><strong>{{ highlightEntries }}</strong></div><div><span>markdown LRU</span><strong>{{ markdownEntries }}</strong></div><div><span>renderer registry</span><strong>{{ registeredRendererIds().length }}</strong></div><div><span>virtual epoch</span><strong>{{ activeUiState.virtualEpoch }}</strong></div>
       </div>
 
-      <div class="architecture-note"><strong>Durable domain / rebuildable presentation</strong><span>Canonical ContentBlock[] lives in the session model. ProjectionEngine keeps only bounded hot memoization and patches the mutable Markdown tail during streaming.</span><span>Hot runtime LRU: <b data-testid="hot-session-ids">{{ hotSessionIds }}</b></span><span>Viewport policy consumes semantic keys/geometry; Virtua and product CSS remain replaceable physical adapters.</span><span>Global page index: {{ activeSession.pageHeights.pageCount.toLocaleString() }} Fenwick leaves.</span></div>
+      <div class="architecture-note"><strong>Durable domain / rebuildable presentation</strong><span>Canonical ContentBlock[] lives in the session model. ProjectionEngine keeps bounded hot memoization and incrementally patches live reasoning and the mutable Markdown tail.</span><span>Hot runtime LRU: <b data-testid="hot-session-ids">{{ hotSessionIds }}</b></span><span>Viewport policy consumes semantic keys/geometry; Virtua and product CSS remain replaceable physical adapters.</span><span>Global page index: {{ activeSession.pageHeights.pageCount.toLocaleString() }} Fenwick leaves.</span></div>
     </aside>
 
     <button v-if="!diagnosticsOpen" class="diagnostics-reopen" data-testid="diagnostics-open" title="Architecture diagnostics" @click="diagnosticsOpen = true">◫</button>
