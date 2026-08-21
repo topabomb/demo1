@@ -5,6 +5,7 @@ Executable reference template for production-style Agent workspaces with **very 
 - Live lab: **https://topabomb.github.io/demo1/**
 - Architecture page: **https://topabomb.github.io/demo1/#architecture**
 - Canonical design: [`docs/agent-workspace-reference-architecture.md`](docs/agent-workspace-reference-architecture.md)
+- DeepSeek Harness design lessons: [`docs/deepseek-harness-design-lessons.md`](docs/deepseek-harness-design-lessons.md)
 - Template review / extraction guide: [`docs/template-review.md`](docs/template-review.md)
 - Verification contract: [`docs/verification.md`](docs/verification.md)
 
@@ -67,6 +68,14 @@ Adding `citation`, `terminal-session`, `file-tree`, `chart`, `artifact` or `suba
 5. add canonical unit/browser fixtures.
 
 It should **not** require edits to SessionKernel, history segmentation or semantic viewport policy.
+
+A different case is a visual row whose state spans **multiple durable records** (for example a long-running review/job or deliverable lifecycle). That is the point to introduce a stable-ID ConversationNode assembler with replay/prepend/append laws; do not force ordinary single-message `ContentBlock` rendering through that abstraction.
+
+## Design influence: DeepSeek Harness
+
+The template borrows several proven conversation-runtime invariants from [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) without copying Cordis or its plugin/package system: durable/model facts stay upstream of UI, Turn/Step are semantic coordinates, related records carry producer-owned stable IDs, high-frequency publication is independently coalesced, and renderers consume keyed renderer-ready data rather than scanning Session state.
+
+See [`docs/deepseek-harness-design-lessons.md`](docs/deepseek-harness-design-lessons.md) for the scenario-by-scenario mapping and the explicit “do not generalize yet” boundaries.
 
 ## Physical/CSS boundary
 
