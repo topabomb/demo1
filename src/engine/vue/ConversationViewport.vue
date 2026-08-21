@@ -24,7 +24,6 @@ import ConversationNodeSeat from './ConversationNodeSeat.vue'
 
 const props = defineProps<{ runtime: ConversationSessionRuntime; stream: ConversationExecutionController; uiState: SessionUiSnapshot; diagnostics?: boolean }>()
 
-// Virtua adapter tuning: physical renderer hints, never semantic state.
 const VIRTUAL_BUFFER_PX = 900
 const VIRTUAL_ITEM_HINT_PX = 180
 
@@ -50,18 +49,13 @@ let navigationRunning = false
 
 let pendingComposerAnchor: CommittedViewportAnchor | null = null
 let pendingComposerPinned = false
-/**
- * Last user/programmatic navigation coordinate that was semantically committed.
- * Layout-induced Virtua scroll events must never overwrite it before resize
- * reconciliation, otherwise the adapter preserves the already-drifted position.
- */
 let lastCommittedAnchor: CommittedViewportAnchor | null = null
 
 const messagesAfter = computed(() => uiState.value.messagesAfter)
 const showLatest = computed(() => props.runtime.logicalCount > 0 && (!uiState.value.atVisualBottom || messagesAfter.value > 0))
 const followLabel = computed(() => uiState.value.followTail ? 'following tail' : 'tail paused')
 const sessionIndicator = computed(() => {
-  void uiState.value.streamRenderTicks
+  void uiState.value.eventRevision
   return deriveSessionIndicator(props.runtime.kernel.summary)
 })
 const statusLabel = computed(() => sessionIndicatorLabel(sessionIndicator.value))
@@ -73,7 +67,7 @@ const composerPlaceholder = computed(() => uiState.value.pendingInteraction
     ? 'Queue a follow-up while the agent is working…'
     : 'Ask the agent anything…')
 const tokenUsage = computed(() => {
-  void uiState.value.streamRenderTicks
+  void uiState.value.eventRevision
   return props.runtime.kernel.usage
 })
 const billedInput = computed(() => billedInputTokens(tokenUsage.value))
@@ -125,7 +119,6 @@ function sampleRows(): ViewportRowSample[] {
   })
 }
 
-/** DOM measurement is adapter input; anchor selection itself stays pure policy. */
 function captureCommittedAnchor(): CommittedViewportAnchor | null {
   const stage = scrollStageRef.value
   if (!stage) return null
@@ -384,9 +377,6 @@ async function jumpToLatest(): Promise<void> {
   }
 }
 
-function restartStream(): void { props.stream.start(false) }
-function pauseStream(): void { props.stream.stop(false) }
-function setStreamRate(rate: number): void { props.stream.setRate(rate) }
 function abortRun(): void { props.stream.abort() }
 function resolveInteraction(approved: boolean): void { props.stream.resolveInteraction(approved) }
 
@@ -499,7 +489,7 @@ function attachViewportObserver(): void {
   rememberCommittedAnchor()
 }
 
-watch(() => props.uiState.streamRenderTicks, (next, previous) => {
+watch(() => props.uiState.eventRevision, (next, previous) => {
   if (next === previous || !props.uiState.followTail) return
   void nextTick().then(() => listRef.value?.scrollToIndex(Math.max(0, order.value.length - 1), { align: 'end' }))
 })
@@ -518,7 +508,7 @@ onBeforeUnmount(() => {
   if (viewportResizeFrame) cancelAnimationFrame(viewportResizeFrame)
 })
 
-defineExpose({ captureSnapshot, jumpToMessage, jumpToLatest, shiftBackward, shiftForward, restartStream, pauseStream, setStreamRate })
+defineExpose({ captureSnapshot, jumpToMessage, jumpToLatest, shiftBackward, shiftForward })
 </script>
 
 <template>
