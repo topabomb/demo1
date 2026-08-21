@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
 import { usePerformanceMetrics } from '../core/perf'
-import type { ConversationDescriptor, ViewportSnapshot } from '../conversation/contracts'
+import type { ConversationDescriptor } from '../conversation/contracts'
+import type { SessionViewMemory } from '../viewport/state'
 import {
   billedInputTokens,
   cacheHitPercent,
@@ -12,7 +13,7 @@ import {
   sessionIndicatorLabel,
   type SessionIndicator,
 } from '../conversation/session-semantics'
-import { createAgentScenarioPack, createMarkdownGalleryTurn, createMixedDemoTurns } from '../presentation/demo-fixtures'
+import { createAgentScenarioPack, createMarkdownGalleryTurn, createMixedDemoTurns } from '../demo/scenarios'
 import { registeredRendererIds } from './renderers/registry'
 import { touchedFoldStateCount } from './renderers/fold-state'
 import { highlightCacheSize } from './renderers/highlight-client'
@@ -21,7 +22,7 @@ import { useWorkspaceRuntime } from '../vue/use-workspace-runtime'
 import ConversationViewport from './ConversationViewport.vue'
 
 interface ViewportHandle {
-  captureSnapshot(): ViewportSnapshot
+  captureSnapshot(): SessionViewMemory
   jumpToMessage(index?: number): Promise<void>
   jumpToLatest(): Promise<void>
   shiftBackward(): Promise<void>
