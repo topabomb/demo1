@@ -21,7 +21,7 @@ test('many asynchronous SessionKernels outlive the 3-hot viewport LRU', async ({
   ] as const) {
     await switchTo(page, id)
     await send(page, prompt)
-    await expect(page.locator('.run-status')).toContainText('working')
+    await expect(page.locator('.run-status')).toContainText('Working')
   }
 
   expect(numeric(await page.getByTestId('running-kernels').textContent())).toBeGreaterThanOrEqual(5)
@@ -43,7 +43,7 @@ test('a historical conversation can be resumed, stopped, resumed again, evicted 
   await send(page, 'first continuation after historical restore')
   await expect(page.getByTestId('logical-count')).toHaveText('95,002')
   await page.getByTestId('composer-stop').click()
-  await expect(page.locator('.run-status')).toContainText('interrupted')
+  await expect(page.locator('.run-status')).toContainText('Interrupted')
 
   await send(page, 'second continuation after stopping the first run')
   await expect(page.getByTestId('logical-count')).toHaveText('95,004')
@@ -55,11 +55,6 @@ test('a historical conversation can be resumed, stopped, resumed again, evicted 
   await switchTo(page, 'event-normalization')
   await expect(page.getByTestId('logical-count')).toHaveText('95,004')
   await expect.poll(async () => numeric(await page.getByTestId('stream-ticks').textContent())).toBeGreaterThan(1)
-
-  // The assistant keeps growing while this session is off-screen. On a slower/public
-  // deployment the prior user row may correctly be outside Virtua's mounted buffer
-  // when we return at the live tail. Persistence is a semantic property: navigate
-  // to the canonical index and verify the appended turn is still addressable.
   await jump(page, 95_002)
   await expect(page.locator('[data-message-index="95002"]')).toContainText('second continuation')
 })
@@ -74,16 +69,16 @@ test('pending approval is session-owned and survives switching plus viewport evi
   await expect(page.getByTestId('pending-interaction')).toBeVisible()
   await page.getByTestId('approve-interaction').click()
   await expect(page.getByTestId('pending-interaction')).toHaveCount(0)
-  await expect(page.locator('.run-status')).toContainText('idle')
+  await expect(page.locator('.run-status')).toContainText('Completed')
 
   await send(page, 'continue after approval')
   await expect(page.getByTestId('logical-count')).toHaveText('420,002')
-  await expect(page.locator('.run-status')).toContainText('working')
+  await expect(page.locator('.run-status')).toContainText('Working')
 })
 
 test('working sessions queue follow-ups independently of the mounted viewport', async ({ page }) => {
   await open(page)
-  await expect(page.locator('.run-status')).toContainText('working')
+  await expect(page.locator('.run-status')).toContainText('Working')
   await send(page, 'follow up after the current million-message run')
   await expect(page.getByTestId('queue-banner')).toContainText('1 follow-up')
   await expect(page.getByTestId('queued-prompts')).toHaveText('1')
