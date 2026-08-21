@@ -4,7 +4,7 @@ import { SyntheticHistoryAdapter } from '../src/conversation/synthetic-adapter'
 import { SyntheticStreamController } from '../src/conversation/stream-controller'
 
 describe('ConversationSessionKernel', () => {
-  it('turns an idle historical conversation into a new resumable turn with durable accounting', () => {
+  it('turns an idle historical conversation into a canonical resumable turn with durable accounting', () => {
     const descriptor = {
       id: 'resume', title: 'Resume', age: 'now', status: 'idle' as const, logicalCount: 100,
       usage: { inputTokens: 20, outputTokens: 10, cacheReadTokens: 40, cacheWriteTokens: 5, reasoningTokens: 2 },
@@ -16,12 +16,22 @@ describe('ConversationSessionKernel', () => {
     const inputBefore = kernel.usage.inputTokens
     expect(execution.submit('continue this task')).toBe('started')
     expect(kernel.count).toBe(102)
-    expect(kernel.getMessage(100)).toMatchObject({ role: 'user', content: 'continue this task' })
-    expect(kernel.getMessage(101)).toMatchObject({ role: 'assistant', live: true })
+    expect(kernel.getMessage(100)).toMatchObject({
+      role: 'user',
+      blocks: [{ id: 'prompt', type: 'markdown', data: { markdown: 'continue this task' } }],
+    })
+    expect(kernel.getMessage(101)).toMatchObject({
+      role: 'assistant', live: true,
+      blocks: [{ id: 'answer', type: 'markdown', data: { markdown: '' } }],
+    })
     expect(kernel.status).toBe('working')
     expect(kernel.lastTurnReason).toBeNull()
     expect(kernel.usage.inputTokens).toBeGreaterThan(inputBefore)
     kernel.appendAssistantDelta('A streamed answer adds output-token accounting. ')
+    expect(kernel.getMessage(101)).toMatchObject({
+      blocks: [{ id: 'answer', type: 'markdown', data: { markdown: 'A streamed answer adds output-token accounting. ' } }],
+    })
+    expect(kernel.lastEvent.contentPatch).toMatchObject({ kind: 'append-markdown', blockId: 'answer' })
     expect(kernel.usage.outputTokens).toBeGreaterThan(10)
     kernel.completeCurrent()
     expect(kernel.lastTurnReason).toBe('completed')

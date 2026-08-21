@@ -1,6 +1,5 @@
 import { hash32 } from '../core/prng'
-import type { LogicalMessage } from '../core/types'
-import type { AppendCanonicalMessage } from '../presentation/content-model'
+import { block, type AppendCanonicalMessage, type ContentBlock, type LogicalMessage } from '../model/conversation'
 import type {
   ConversationDescriptor,
   ConversationHistoryAdapter,
@@ -15,11 +14,17 @@ import { defaultTurnReason, normalizeTokenUsage } from './session-semantics'
 import { BatchedNotifier, type Unsubscribe } from './notifier'
 
 export type SessionKernelEventKind = 'content' | 'append' | 'status' | 'queue' | 'interaction' | 'foreground' | 'usage'
-export interface SessionKernelEvent { kind: SessionKernelEventKind; messageIndex?: number }
+export interface SessionKernelContentPatch { kind: 'append-markdown'; blockId: string; delta: string }
+export interface SessionKernelEvent {
+  kind: SessionKernelEventKind
+  messageIndex?: number
+  contentPatch?: SessionKernelContentPatch
+}
 
 /**
  * Lightweight durable session state. It owns canonical appended turns, execution
- * semantics and whole-session projections, but never owns Vue, DOM or a virtualizer.
+ * semantics and whole-session projections, but never owns Vue, DOM, RenderUnits or
+ * a virtualizer. Production implementations can persist/replace its history port.
  */
 export class ConversationSessionKernel {
   readonly id: string
@@ -75,14 +80,11 @@ export class ConversationSessionKernel {
       this.#lastTurnReason = null
       this.#runStartedAt = now()
       const tail = backend.loadRange(backend.count - 1, 1)[0]
-      if (tail) {
-        this.#overrides.set(tail.index, {
-          ...tail,
-          revision: (tail.revision ?? 0) + 1,
-          live: true,
-          content: '### Background run\n\nThe agent is continuing work while this session may be off-screen. ',
-        })
-      }
+      if (tail) this.#overrides.set(tail.index, replaceMarkdownContent(
+        tail,
+        '### Background run\n\nThe agent is continuing work while this session may be off-screen. ',
+        true,
+      ))
     }
   }
 
@@ -152,10 +154,7 @@ export class ConversationSessionKernel {
     return out
   }
 
-  /**
-   * Canonical ingestion seam used by the lab and by real adapters after protocol
-   * normalization. This deliberately appends semantic blocks, never DOM/UI fixtures.
-   */
+  /** Canonical ingestion seam. Fixtures and real adapters use the same path. */
   appendCanonicalMessages(entries: readonly AppendCanonicalMessage[]): readonly number[] {
     if (entries.length === 0) return []
     const indexes: number[] = []
@@ -169,7 +168,7 @@ export class ConversationSessionKernel {
         index,
         turnId: entry.turnId,
         role: entry.role,
-        blocks: entry.blocks.map(contentBlock => ({ ...contentBlock, data: { ...contentBlock.data } })) as LogicalMessage['blocks'],
+        blocks: cloneBlocks(entry.blocks),
         seed: hash32(index + this.seedOffset),
         intensity: 5,
         revision: 0,
@@ -189,9 +188,30 @@ export class ConversationSessionKernel {
     if (!text || this.#pendingInteraction) return null
     const userIndex = this.count
     const turnId = `${this.id}:runtime-turn-${userIndex}`
-    this.#appended.push({ id: `${this.id}:m-${userIndex}`, index: userIndex, turnId, role: 'user', kind: 'markdown', seed: hash32(userIndex + this.seedOffset), intensity: 3, revision: 0, content: text, variant: 'runtime-user' })
+    this.#appended.push({
+      id: `${this.id}:m-${userIndex}`,
+      index: userIndex,
+      turnId,
+      role: 'user',
+      blocks: [block('prompt', 'markdown', { markdown: text })],
+      seed: hash32(userIndex + this.seedOffset),
+      intensity: 3,
+      revision: 0,
+      variant: 'runtime-user',
+    })
     const assistantIndex = this.count
-    this.#appended.push({ id: `${this.id}:m-${assistantIndex}`, index: assistantIndex, turnId, role: 'assistant', kind: 'markdown', seed: hash32(assistantIndex + this.seedOffset), intensity: 5, revision: 0, content: '', live: true, variant: 'runtime-assistant' })
+    this.#appended.push({
+      id: `${this.id}:m-${assistantIndex}`,
+      index: assistantIndex,
+      turnId,
+      role: 'assistant',
+      blocks: [block('answer', 'markdown', { markdown: '' })],
+      seed: hash32(assistantIndex + this.seedOffset),
+      intensity: 5,
+      revision: 0,
+      live: true,
+      variant: 'runtime-assistant',
+    })
     this.#currentAssistantIndex = assistantIndex
     this.#status = 'working'
     this.#lastTurnReason = null
@@ -227,9 +247,8 @@ export class ConversationSessionKernel {
     const index = this.#currentAssistantIndex
     if (index === null || !delta) return
     const current = this.getMessage(index)
-    const next = { ...current, revision: (current.revision ?? 0) + 1, content: `${current.content ?? ''}${delta}`, live: true }
-    if (index < this.backend.count) this.#overrides.set(index, next)
-    else this.#appended[index - this.backend.count] = next
+    const patched = appendMarkdownContent(current, delta)
+    this.#writeMessage(index, patched.message)
 
     const output = estimateTokens(delta)
     this.#usage.outputTokens += output
@@ -238,16 +257,20 @@ export class ConversationSessionKernel {
     if (this.#firstOutputAt === 0) { this.#firstOutputAt = now(); this.#lastTtftMs = Math.max(0, this.#firstOutputAt - this.#runStartedAt) }
     this.streamRenderTicks += 1
     this.#touchUnread()
-    this.#emit({ kind: 'content', messageIndex: index })
+    this.#emit({
+      kind: 'content',
+      messageIndex: index,
+      contentPatch: { kind: 'append-markdown', blockId: patched.blockId, delta },
+    })
   }
 
   completeCurrent(): void {
     const index = this.#currentAssistantIndex
     if (index !== null) {
       const current = this.getMessage(index)
-      const next = { ...current, revision: (current.revision ?? 0) + 1, live: false, content: (current.content ?? '').trim() || 'Completed.' }
-      if (index < this.backend.count) this.#overrides.set(index, next)
-      else this.#appended[index - this.backend.count] = next
+      const text = markdownText(current).trim()
+      const next = text ? { ...current, revision: (current.revision ?? 0) + 1, live: false } : replaceMarkdownContent(current, 'Completed.', false)
+      this.#writeMessage(index, next)
     }
     this.#finishRun('completed', null)
     this.#emit({ kind: 'status', messageIndex: index ?? undefined })
@@ -257,9 +280,8 @@ export class ConversationSessionKernel {
     const index = this.#currentAssistantIndex
     if (index !== null) {
       const current = this.getMessage(index)
-      const next = { ...current, revision: (current.revision ?? 0) + 1, live: false, content: `${current.content ?? ''}\n\n_Stopped by user._` }
-      if (index < this.backend.count) this.#overrides.set(index, next)
-      else this.#appended[index - this.backend.count] = next
+      const patched = appendMarkdownContent(current, '\n\n_Stopped by user._')
+      this.#writeMessage(index, { ...patched.message, live: false })
     }
     this.#status = 'interrupted'
     this.#queuedPrompts = []
@@ -271,9 +293,7 @@ export class ConversationSessionKernel {
     const index = this.#currentAssistantIndex
     if (index !== null) {
       const current = this.getMessage(index)
-      const next = { ...current, revision: (current.revision ?? 0) + 1, live: false }
-      if (index < this.backend.count) this.#overrides.set(index, next)
-      else this.#appended[index - this.backend.count] = next
+      this.#writeMessage(index, { ...current, revision: (current.revision ?? 0) + 1, live: false })
     }
     this.#finishRun('error', failure)
     this.#emit({ kind: 'status', messageIndex: index ?? undefined })
@@ -291,6 +311,11 @@ export class ConversationSessionKernel {
 
   setStreamRate(rate: number): void { this.streamRate = Math.max(1, Math.floor(rate)); this.#emit({ kind: 'status' }, false) }
   incrementIngress(): void { this.streamIngressTicks += 1 }
+
+  #writeMessage(index: number, message: LogicalMessage): void {
+    if (index < this.backend.count) this.#overrides.set(index, message)
+    else this.#appended[index - this.backend.count] = message
+  }
 
   #accountPrompt(text: string): void {
     const promptTokens = Math.max(1, estimateTokens(text))
@@ -316,6 +341,59 @@ export class ConversationSessionKernel {
 
   #touchUnread(): void { if (!this.#foreground) this.#unread = true }
   #emit(event: SessionKernelEvent, markUnread = true): void { this.#lastEvent = event; if (markUnread) this.#touchUnread(); this.#notifier.markDirty() }
+}
+
+function cloneBlocks(blocks: readonly ContentBlock[]): ContentBlock[] {
+  return blocks.map(contentBlock => ({ ...contentBlock, data: { ...contentBlock.data } })) as ContentBlock[]
+}
+
+function appendMarkdownContent(message: LogicalMessage, delta: string): { message: LogicalMessage; blockId: string } {
+  const blocks = canonicalBlocks(message)
+  let targetIndex = -1
+  for (let i = blocks.length - 1; i >= 0; i -= 1) if (blocks[i]?.type === 'markdown') { targetIndex = i; break }
+  if (targetIndex < 0) {
+    const created = block(message.role === 'user' ? 'prompt' : 'answer', 'markdown', { markdown: delta }, 1)
+    return {
+      blockId: created.id,
+      message: { ...message, blocks: [...blocks, created], content: undefined, revision: (message.revision ?? 0) + 1, live: true },
+    }
+  }
+
+  const current = blocks[targetIndex] as ContentBlock<'markdown'>
+  const nextBlock = block(current.id, 'markdown', { ...current.data, markdown: `${current.data.markdown}${delta}` }, (current.revision ?? 0) + 1)
+  blocks[targetIndex] = nextBlock
+  return {
+    blockId: current.id,
+    message: { ...message, blocks, content: undefined, revision: (message.revision ?? 0) + 1, live: true },
+  }
+}
+
+function replaceMarkdownContent(message: LogicalMessage, markdown: string, live: boolean): LogicalMessage {
+  const blocks = canonicalBlocks(message)
+  let targetIndex = -1
+  for (let i = blocks.length - 1; i >= 0; i -= 1) if (blocks[i]?.type === 'markdown') { targetIndex = i; break }
+  const id = targetIndex >= 0 ? blocks[targetIndex]!.id : (message.role === 'user' ? 'prompt' : 'answer')
+  const previousRevision = targetIndex >= 0 ? blocks[targetIndex]!.revision ?? 0 : 0
+  const nextBlock = block(id, 'markdown', { markdown }, previousRevision + 1)
+  if (targetIndex >= 0) blocks[targetIndex] = nextBlock
+  else blocks.push(nextBlock)
+  return { ...message, blocks, content: undefined, revision: (message.revision ?? 0) + 1, live }
+}
+
+function canonicalBlocks(message: LogicalMessage): ContentBlock[] {
+  if (message.blocks?.length) return cloneBlocks(message.blocks)
+  if (message.content !== undefined) return [block(message.role === 'user' ? 'prompt' : 'answer', 'markdown', { markdown: message.content }, message.revision ?? 0)]
+  return []
+}
+
+function markdownText(message: LogicalMessage): string {
+  if (message.blocks?.length) {
+    for (let i = message.blocks.length - 1; i >= 0; i -= 1) {
+      const contentBlock = message.blocks[i]
+      if (contentBlock?.type === 'markdown') return contentBlock.data.markdown
+    }
+  }
+  return message.content ?? ''
 }
 
 function estimateTokens(text: string): number { return Math.max(1, Math.ceil(text.length / 4)) }

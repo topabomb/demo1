@@ -1,7 +1,8 @@
 import { PageHeightIndex, DEFAULT_PAGE_SIZE } from '../core/page-index'
-import { projectMessage, projectMessages } from '../core/projector'
 import { SegmentManager } from '../core/segment-manager'
-import type { RenderUnit, SegmentRange } from '../core/types'
+import type { SegmentRange } from '../core/types'
+import { ProjectionEngine } from '../presentation/projection-engine'
+import type { RenderUnit } from '../presentation/render-unit'
 import type { PendingInteraction, SessionStatus, ViewportSnapshot } from './contracts'
 import { KeyedConversationProjection } from './keyed-node-store'
 import { BatchedNotifier, type Unsubscribe } from './notifier'
@@ -32,6 +33,10 @@ export interface SessionUiSnapshot {
   messagesAfter: number
   liveChunkCount: number
   projectionSize: number
+  projectionCacheSize: number
+  projectionCacheHits: number
+  projectionFullProjects: number
+  projectionIncrementalPatches: number
   virtualEpoch: number
   estimatedTotalHeight: number
   sessionStatus: SessionStatus
@@ -39,9 +44,13 @@ export interface SessionUiSnapshot {
   pendingInteraction: PendingInteraction | null
 }
 
-/** Heavyweight hot semantic runtime. It is explicitly disposable and never owns execution. */
+/**
+ * Disposable hot presentation runtime. Execution/history remain in SessionKernel;
+ * this object owns only bounded segment projection, keyed nodes and reader snapshot.
+ */
 export class ConversationSessionRuntime {
   readonly projection = new KeyedConversationProjection()
+  readonly projectionEngine = new ProjectionEngine()
   readonly kernel: ConversationSessionKernel
   pageHeights: PageHeightIndex
   segment: SegmentManager
@@ -79,7 +88,7 @@ export class ConversationSessionRuntime {
     this.#kernelUnsubscribe = kernel.subscribe(() => this.#syncKernel())
   }
 
-  dispose(): void { this.#kernelUnsubscribe() }
+  dispose(): void { this.#kernelUnsubscribe(); this.projectionEngine.clear() }
   get id(): string { return this.kernel.id }
   get title(): string { return this.kernel.title }
   get status(): SessionStatus { return this.kernel.status }
@@ -92,6 +101,7 @@ export class ConversationSessionRuntime {
 
   get uiSnapshot(): SessionUiSnapshot {
     const target = this.kernel.currentAssistantIndex
+    const projectionStats = this.projectionEngine.stats
     return {
       rangeStart: this.range.start,
       rangeEnd: this.range.end,
@@ -106,6 +116,10 @@ export class ConversationSessionRuntime {
       messagesAfter: this.messagesAfterCurrent,
       liveChunkCount: target === null ? 0 : this.#activeUnits.filter(unit => unit.messageIndex === target).length,
       projectionSize: this.projection.size,
+      projectionCacheSize: projectionStats.cacheSize,
+      projectionCacheHits: projectionStats.cacheHits,
+      projectionFullProjects: projectionStats.fullProjects,
+      projectionIncrementalPatches: projectionStats.incrementalPatches,
       virtualEpoch: this.virtualEpoch,
       estimatedTotalHeight: this.estimatedTotalHeight,
       sessionStatus: this.kernel.status,
@@ -218,9 +232,7 @@ export class ConversationSessionRuntime {
       const wasPinned = this.followTail || this.atVisualBottom
       this.#knownLogicalCount = newCount
       this.segment.setTotalMessages(newCount)
-      if (Math.ceil(Math.max(1, newCount) / DEFAULT_PAGE_SIZE) !== this.pageHeights.pageCount) {
-        this.pageHeights = new PageHeightIndex(newCount)
-      }
+      if (Math.ceil(Math.max(1, newCount) / DEFAULT_PAGE_SIZE) !== this.pageHeights.pageCount) this.pageHeights = new PageHeightIndex(newCount)
       if (wasPinned && newCount > 0) {
         this.segment.setEndingAt(newCount - 1)
         this.currentLogicalPosition = newCount - 1
@@ -232,7 +244,10 @@ export class ConversationSessionRuntime {
     }
 
     if (event.messageIndex !== undefined && event.messageIndex >= this.range.start && event.messageIndex < this.range.end) {
-      const units = projectMessage(this.kernel.getMessage(event.messageIndex))
+      const message = this.kernel.getMessage(event.messageIndex)
+      const units = event.contentPatch?.kind === 'append-markdown'
+        ? this.projectionEngine.appendMarkdownDelta(message, event.contentPatch.blockId, event.contentPatch.delta)
+        : this.projectionEngine.projectMessage(message)
       const existing = this.#activeUnits.filter(unit => unit.messageIndex === event.messageIndex)
       const sameIds = existing.length === units.length && existing.every((unit, index) => unit.id === units[index]?.id)
       if (sameIds) {
@@ -240,7 +255,9 @@ export class ConversationSessionRuntime {
         this.#activeUnits = this.#activeUnits.map(unit => byId.get(unit.id) ?? unit)
         for (const unit of units) this.projection.patch(unit)
       } else {
-        this.#activeUnits = this.#materialize(this.range)
+        const before = this.#activeUnits.filter(unit => unit.messageIndex < event.messageIndex!)
+        const after = this.#activeUnits.filter(unit => unit.messageIndex > event.messageIndex!)
+        this.#activeUnits = [...before, ...units, ...after]
         this.projection.replace(this.#activeUnits)
       }
     }
@@ -252,7 +269,7 @@ export class ConversationSessionRuntime {
 
   #materializeRange(start: number, end: number): RenderUnit[] {
     if (end <= start) return []
-    return projectMessages(this.kernel.loadRange(start, end - start))
+    return this.projectionEngine.projectMessages(this.kernel.loadRange(start, end - start))
   }
 
   #refreshPageEstimates(): void {
@@ -260,10 +277,7 @@ export class ConversationSessionRuntime {
     for (const unit of this.#activeUnits) {
       const page = Math.floor(unit.messageIndex / DEFAULT_PAGE_SIZE)
       let bucket = byPage.get(page)
-      if (!bucket) {
-        bucket = { height: 0, messages: new Set() }
-        byPage.set(page, bucket)
-      }
+      if (!bucket) { bucket = { height: 0, messages: new Set() }; byPage.set(page, bucket) }
       bucket.height += unit.estimatePx
       bucket.messages.add(unit.messageIndex)
     }

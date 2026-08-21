@@ -1,44 +1,12 @@
-export type BuiltinRenderKind =
-  | 'text'
-  | 'markdown'
-  | 'thinking'
-  | 'code'
-  | 'image'
-  | 'html'
-  | 'tool'
-  | 'diff'
-  | 'unknown'
+import type { LogicalMessage } from '../model/conversation'
 
-/** Renderer IDs are intentionally open; product packages may register more. */
-export type RenderKind = BuiltinRenderKind | (string & {})
-
-export type LogicalRole = 'user' | 'assistant' | 'tool' | 'system'
-
-export interface LogicalMessage {
-  id: string
-  index: number
-  turnId: string
-  role: LogicalRole
-  /** Legacy synthetic hint. New adapters should prefer `blocks`. */
-  kind?: RenderKind
-  blocks?: readonly import('../presentation/content-model').ContentBlock[]
-  seed: number
-  intensity: number
-  revision?: number
-  content?: string
-  live?: boolean
-  variant?: string
-}
-
-export interface RenderUnit {
-  id: string
-  messageId: string
-  messageIndex: number
-  kind: RenderKind
-  revision: number
-  estimatePx: number
-  payload: Record<string, unknown>
-}
+/**
+ * Compatibility barrel for the original demo layout.
+ * New framework code should import canonical model types from `model/` and
+ * presentation node types from `presentation/` so dependency direction stays explicit.
+ */
+export type { ContentBlock, ContentBlockMap, ContentBlockType, LogicalMessage, LogicalRole } from '../model/conversation'
+export type { BuiltinRenderKind, RenderKind, RenderUnit } from '../presentation/render-unit'
 
 export interface ConversationSource {
   readonly count: number

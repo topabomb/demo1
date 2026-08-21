@@ -1,6 +1,7 @@
 import { intBetween } from '../core/prng'
-import type { LogicalMessage, RenderUnit } from '../core/types'
-import { block, type ContentBlock } from './content-model'
+import type { ContentBlock, LogicalMessage } from '../model/conversation'
+import { block } from '../model/conversation'
+import type { RenderKind, RenderUnit } from './render-unit'
 import { splitMarkdown } from './markdown-chunks'
 
 export interface ContentProjectionContext {
@@ -11,7 +12,7 @@ export interface ContentProjectionContext {
 
 export type ContentProjector = (context: ContentProjectionContext) => readonly RenderUnit[]
 
-/** Semantic ContentBlock → bounded RenderUnit registry. Framework-free. */
+/** Framework-free semantic ContentBlock -> bounded RenderUnit registry. */
 export class ContentProjectorRegistry {
   #projectors = new Map<string, ContentProjector>()
 
@@ -20,11 +21,18 @@ export class ContentProjectorRegistry {
     return this
   }
 
+  clone(): ContentProjectorRegistry {
+    const next = new ContentProjectorRegistry()
+    for (const [type, projector] of this.#projectors) next.register(type, projector)
+    return next
+  }
+
   has(type: string): boolean { return this.#projectors.has(type) }
+  get size(): number { return this.#projectors.size }
 
   project(message: LogicalMessage, contentBlock: ContentBlock, blockIndex: number): readonly RenderUnit[] {
     const projector = this.#projectors.get(contentBlock.type)
-    if (!projector) return [makeUnit(message, contentBlock, `unknown-${blockIndex}`, 'unknown', 96, {
+    if (!projector) return [makeRenderUnit(message, contentBlock, `unknown-${blockIndex}`, 'unknown', 96, {
       blockType: contentBlock.type,
       data: contentBlock.data,
     })]
@@ -32,73 +40,71 @@ export class ContentProjectorRegistry {
   }
 }
 
-export const defaultContentProjectors = new ContentProjectorRegistry()
+export function createDefaultContentProjectors(): ContentProjectorRegistry {
+  return new ContentProjectorRegistry()
+    .register('text', ({ message, block: contentBlock }) => {
+      const data = contentBlock.data as { text: string }
+      return [makeRenderUnit(message, contentBlock, 'text', 'text', 74 + Math.min(320, data.text.length * 0.16), { text: data.text })]
+    })
+    .register('markdown', ({ message, block: contentBlock }) => {
+      const data = contentBlock.data as { markdown: string }
+      const chunks = splitMarkdown(data.markdown)
+      return chunks.map(chunk => makeRenderUnit(message, contentBlock, `md-${chunk.index}`, 'markdown', estimateMarkdown(chunk.text), {
+        markdown: chunk.text,
+        markdownHash: chunk.hash,
+      }, chunk.hash))
+    })
+    .register('reasoning', ({ message, block: contentBlock }) => {
+      const data = contentBlock.data as { text: string; tokenCount?: number; durationMs?: number; defaultOpen?: boolean }
+      return [makeRenderUnit(message, contentBlock, 'thinking', 'thinking', 72, {
+        text: data.text,
+        tokenCount: data.tokenCount ?? Math.round(data.text.length / 3.8),
+        durationMs: data.durationMs ?? 0,
+        defaultOpen: data.defaultOpen ?? false,
+      })]
+    })
+    .register('code', ({ message, block: contentBlock }) => {
+      const data = contentBlock.data as { code: string; language?: string; filename?: string; defaultOpen?: boolean }
+      const lines = data.code.split('\n')
+      return chunkArray(lines, 80).map((part, index) => makeRenderUnit(message, contentBlock, `code-${index}`, 'code', 110 + Math.min(30, part.length) * 20, {
+        language: data.language ?? 'text',
+        code: part.join('\n'),
+        filename: data.filename,
+        defaultOpen: data.defaultOpen ?? part.length <= 34,
+      }))
+    })
+    .register('image', ({ message, block: contentBlock }) => {
+      const data = contentBlock.data as { src?: string; width: number; height: number; alt?: string; seed?: number }
+      return [makeRenderUnit(message, contentBlock, 'image', 'image', 110 + Math.min(620, (data.height / Math.max(1, data.width)) * 820), data)]
+    })
+    .register('html', ({ message, block: contentBlock }) => {
+      const data = contentBlock.data as { html: string }
+      return [makeRenderUnit(message, contentBlock, 'html', 'html', 240 + Math.min(620, data.html.length * 0.08), data)]
+    })
+    .register('tool-call', ({ message, block: contentBlock }) => {
+      const data = contentBlock.data as Record<string, unknown>
+      return [makeRenderUnit(message, contentBlock, 'tool-call', 'tool', 76, { ...data, phase: 'call', status: data.status ?? 'running' })]
+    })
+    .register('tool-result', ({ message, block: contentBlock }) => {
+      const data = contentBlock.data as Record<string, unknown>
+      return [makeRenderUnit(message, contentBlock, 'tool-result', 'tool', 76, { ...data, phase: 'result', status: data.status ?? 'success' })]
+    })
+    .register('diff', ({ message, block: contentBlock }) => {
+      const data = contentBlock.data as { file: string; lines: readonly string[]; defaultOpen?: boolean }
+      return chunkArray([...data.lines], 72).map((lines, index) => makeRenderUnit(message, contentBlock, `diff-${index}`, 'diff', 110 + Math.min(28, lines.length) * 20, {
+        file: data.file,
+        lines,
+        defaultOpen: data.defaultOpen ?? lines.length <= 32,
+      }))
+    })
+}
 
-defaultContentProjectors
-  .register('text', ({ message, block: contentBlock }) => {
-    const data = contentBlock.data as { text: string }
-    return [makeUnit(message, contentBlock, 'text', 'text', 74 + Math.min(320, data.text.length * 0.16), { text: data.text })]
-  })
-  .register('markdown', ({ message, block: contentBlock }) => {
-    const data = contentBlock.data as { markdown: string }
-    const chunks = splitMarkdown(data.markdown)
-    return chunks.map(chunk => makeUnit(message, contentBlock, `md-${chunk.index}`, 'markdown', estimateMarkdown(chunk.text), {
-      markdown: chunk.text,
-      markdownHash: chunk.hash,
-    }, chunk.hash))
-  })
-  .register('reasoning', ({ message, block: contentBlock }) => {
-    const data = contentBlock.data as { text: string; tokenCount?: number; durationMs?: number; defaultOpen?: boolean }
-    return [makeUnit(message, contentBlock, 'thinking', 'thinking', 72, {
-      text: data.text,
-      tokenCount: data.tokenCount ?? Math.round(data.text.length / 3.8),
-      durationMs: data.durationMs ?? 0,
-      defaultOpen: data.defaultOpen ?? false,
-    })]
-  })
-  .register('code', ({ message, block: contentBlock }) => {
-    const data = contentBlock.data as { code: string; language?: string; filename?: string; defaultOpen?: boolean }
-    const lines = data.code.split('\n')
-    return chunkArray(lines, 80).map((part, index) => makeUnit(message, contentBlock, `code-${index}`, 'code', 110 + Math.min(30, part.length) * 20, {
-      language: data.language ?? 'text',
-      code: part.join('\n'),
-      filename: data.filename,
-      defaultOpen: data.defaultOpen ?? part.length <= 34,
-    }))
-  })
-  .register('image', ({ message, block: contentBlock }) => {
-    const data = contentBlock.data as { src?: string; width: number; height: number; alt?: string; seed?: number }
-    return [makeUnit(message, contentBlock, 'image', 'image', 110 + Math.min(620, (data.height / Math.max(1, data.width)) * 820), data)]
-  })
-  .register('html', ({ message, block: contentBlock }) => {
-    const data = contentBlock.data as { html: string }
-    return [makeUnit(message, contentBlock, 'html', 'html', 240 + Math.min(620, data.html.length * 0.08), data)]
-  })
-  .register('tool-call', ({ message, block: contentBlock }) => {
-    const data = contentBlock.data as Record<string, unknown>
-    return [makeUnit(message, contentBlock, 'tool-call', 'tool', 76, { ...data, phase: 'call', status: data.status ?? 'running' })]
-  })
-  .register('tool-result', ({ message, block: contentBlock }) => {
-    const data = contentBlock.data as Record<string, unknown>
-    return [makeUnit(message, contentBlock, 'tool-result', 'tool', 76, { ...data, phase: 'result', status: data.status ?? 'success' })]
-  })
-  .register('diff', ({ message, block: contentBlock }) => {
-    const data = contentBlock.data as { file: string; lines: readonly string[]; defaultOpen?: boolean }
-    return chunkArray([...data.lines], 72).map((lines, index) => makeUnit(message, contentBlock, `diff-${index}`, 'diff', 110 + Math.min(28, lines.length) * 20, {
-      file: data.file,
-      lines,
-      defaultOpen: data.defaultOpen ?? lines.length <= 32,
-    }))
-  })
+/** Compatibility singleton. Production composition should inject its own registry instance. */
+export const defaultContentProjectors = createDefaultContentProjectors()
 
 export function projectMessage(message: LogicalMessage, registry = defaultContentProjectors): RenderUnit[] {
   const blocks = message.blocks?.length ? [...message.blocks] : legacyBlocksForMessage(message)
-  const units = blocks.flatMap((contentBlock, blockIndex) => [...registry.project(message, contentBlock, blockIndex)])
-  const count = units.length
-  return units.map((entry, index) => ({
-    ...entry,
-    payload: { ...entry.payload, partIndex: index, partCount: count },
-  }))
+  return blocks.flatMap((contentBlock, blockIndex) => [...registry.project(message, contentBlock, blockIndex)])
 }
 
 export function projectMessages(messages: readonly LogicalMessage[], registry = defaultContentProjectors): RenderUnit[] {
@@ -110,7 +116,7 @@ export function legacyBlocksForMessage(message: LogicalMessage): ContentBlock[] 
   const { seed, intensity } = message
 
   if (message.content !== undefined) {
-    return [block('runtime-content', message.role === 'user' ? 'markdown' : 'markdown', { markdown: message.content }, message.revision ?? 0)]
+    return [block('runtime-content', 'markdown', { markdown: message.content }, message.revision ?? 0)]
   }
 
   if (kind === 'markdown') {
@@ -183,7 +189,15 @@ export function legacyBlocksForMessage(message: LogicalMessage): ContentBlock[] 
   return [block('unknown', 'text', { text: `[${String(kind)}] unsupported legacy content` })]
 }
 
-function makeUnit(message: LogicalMessage, contentBlock: ContentBlock, suffix: string, kind: string, estimatePx: number, payload: Record<string, unknown>, revision = contentBlock.revision ?? message.revision ?? 0): RenderUnit {
+export function makeRenderUnit(
+  message: LogicalMessage,
+  contentBlock: ContentBlock,
+  suffix: string,
+  kind: RenderKind,
+  estimatePx: number,
+  payload: Record<string, unknown>,
+  revision = contentBlock.revision ?? message.revision ?? 0,
+): RenderUnit {
   return {
     id: `${message.id}:${contentBlock.id}:${suffix}`,
     messageId: message.id,
@@ -191,11 +205,19 @@ function makeUnit(message: LogicalMessage, contentBlock: ContentBlock, suffix: s
     kind,
     revision,
     estimatePx,
-    payload: { role: message.role, turnId: message.turnId, variant: message.variant, live: message.live === true, blockType: contentBlock.type, ...payload },
+    payload: {
+      role: message.role,
+      turnId: message.turnId,
+      variant: message.variant,
+      live: message.live === true,
+      blockId: contentBlock.id,
+      blockType: contentBlock.type,
+      ...payload,
+    },
   }
 }
 
-function estimateMarkdown(markdown: string): number {
+export function estimateMarkdown(markdown: string): number {
   const lines = Math.max(1, markdown.split('\n').length)
   return Math.min(1800, 100 + markdown.length * 0.11 + lines * 10)
 }
