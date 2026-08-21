@@ -15,7 +15,7 @@ export {
   type LogicalMessage,
   type LogicalRole,
   type ToolCategory,
-} from '../model/conversation'
+} from './model/conversation'
 
 export {
   type ConversationBackend,
@@ -29,13 +29,13 @@ export {
   type SubmitDisposition,
   type TokenUsage,
   type TurnEndReasonKind,
-} from '../conversation/contracts'
+} from './conversation/contracts'
 export {
   ConversationSessionKernel,
   type SessionKernelContentPatch,
   type SessionKernelEvent,
   type SessionKernelEventKind,
-} from '../conversation/session-kernel'
+} from './conversation/session-kernel'
 
 export {
   ContentProjectorRegistry,
@@ -44,11 +44,11 @@ export {
   projectMessages,
   type ContentProjectionContext,
   type ContentProjector,
-} from '../presentation/projector-registry'
-export { ProjectionEngine, type ProjectionEngineStats } from '../presentation/projection-engine'
-export { KeyedConversationProjection } from '../presentation/keyed-node-store'
-export { type ConversationProjectionStore } from '../presentation/contracts'
-export { type BuiltinRenderKind, type RenderKind, type RenderUnit } from '../presentation/render-unit'
+} from './presentation/projector-registry'
+export { ProjectionEngine, type ProjectionEngineStats } from './presentation/projection-engine'
+export { KeyedConversationProjection } from './presentation/keyed-node-store'
+export { type ConversationProjectionStore } from './presentation/contracts'
+export { type BuiltinRenderKind, type RenderKind, type RenderUnit } from './presentation/render-unit'
 
 export {
   VIEWPORT_POLICY,
@@ -60,8 +60,8 @@ export {
   type CommittedViewportAnchor,
   type PhysicalListPort,
   type ViewportRowSample,
-} from '../viewport/contracts'
-export { type SemanticViewportSnapshot, type SessionViewMemory } from '../viewport/state'
+} from './viewport/contracts'
+export { type SemanticViewportSnapshot, type SessionViewMemory } from './viewport/state'
 
 export {
   ConversationSessionRuntime,
@@ -69,4 +69,4 @@ export {
   WINDOW_MESSAGES,
   type SessionUiSnapshot,
   type ShiftPlan,
-} from '../runtime/session-runtime'
+} from './runtime/session-runtime'
