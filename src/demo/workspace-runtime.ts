@@ -2,7 +2,7 @@ import type { ConversationDescriptor, PendingInteraction } from '../conversation
 import { deriveSessionIndicator } from '../conversation/session-semantics'
 import { ConversationSessionKernel } from '../conversation/session-kernel'
 import { BatchedNotifier, type Unsubscribe } from '../core/notifier'
-import { ConversationSessionRuntime } from '../conversation/session-runtime'
+import { ConversationSessionRuntime } from '../runtime/session-runtime'
 import type { SessionViewMemory } from '../viewport/state'
 import { SyntheticHistoryAdapter } from './history-adapter'
 import { SyntheticStreamController } from './stream-controller'
