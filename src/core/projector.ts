@@ -14,27 +14,16 @@ function sentence(seed: number, count: number): string {
 }
 
 function commonPayload(message: LogicalMessage): Record<string, unknown> {
-  return {
-    role: message.role,
-    turnId: message.turnId,
-    variant: message.variant,
-    live: message.live === true,
-  }
+  return { role: message.role, turnId: message.turnId, variant: message.variant, live: message.live === true }
 }
 
-function unit(
-  message: LogicalMessage,
-  suffix: string,
-  kind: RenderUnit['kind'],
-  estimatePx: number,
-  payload: RenderUnit['payload'],
-): RenderUnit {
+function unit(message: LogicalMessage, suffix: string, kind: RenderUnit['kind'], estimatePx: number, payload: RenderUnit['payload']): RenderUnit {
   return {
     id: `${message.id}:${suffix}`,
     messageId: message.id,
     messageIndex: message.index,
     kind,
-    revision: 0,
+    revision: message.revision ?? 0,
     estimatePx,
     payload: { ...commonPayload(message), ...payload },
   }
@@ -42,18 +31,33 @@ function unit(
 
 function annotateParts(units: RenderUnit[]): RenderUnit[] {
   const count = units.length
-  return units.map((entry, index) => ({
-    ...entry,
-    payload: { ...entry.payload, partIndex: index, partCount: count },
+  return units.map((entry, index) => ({ ...entry, payload: { ...entry.payload, partIndex: index, partCount: count } }))
+}
+
+function runtimeContentUnits(message: LogicalMessage): RenderUnit[] {
+  const content = message.content ?? ''
+  if (message.role === 'user') {
+    const lines = Math.max(1, content.split('\n').length)
+    return annotateParts([
+      unit(message, 'runtime-0', 'markdown', Math.min(520, 82 + content.length * 0.18 + lines * 12), { markdown: content, runtime: true }),
+    ])
+  }
+
+  const chunkSize = 6000
+  const source = content || (message.live ? 'Working…' : '')
+  const chunks = Math.max(1, Math.ceil(source.length / chunkSize))
+  return annotateParts(Array.from({ length: chunks }, (_, index) => {
+    const markdown = source.slice(index * chunkSize, (index + 1) * chunkSize)
+    const lines = Math.max(1, markdown.split('\n').length)
+    return unit(message, `runtime-${index}`, 'markdown', Math.min(1800, 110 + markdown.length * 0.13 + lines * 11), { markdown, runtime: true })
   }))
 }
 
 function markdownUnits(message: LogicalMessage): RenderUnit[] {
+  if (message.content !== undefined) return runtimeContentUnits(message)
   if (message.live) {
     return annotateParts([
-      unit(message, 'live', 'markdown', 190, {
-        markdown: '### Working on it…\n\nThe latest assistant response is streaming. New model deltas are coalesced to animation frames before Vue publication.',
-      }),
+      unit(message, 'live', 'markdown', 190, { markdown: '### Working on it…\n\nThe latest assistant response is streaming. New model deltas are coalesced before UI publication.' }),
     ])
   }
 
@@ -62,7 +66,7 @@ function markdownUnits(message: LogicalMessage): RenderUnit[] {
     ? intBetween(seed + 2, 1, 2)
     : intBetween(seed + 2, 1, Math.min(6, 2 + Math.ceil(intensity / 2)))
 
-  const units = Array.from({ length: sectionCount }, (_, i) => {
+  return annotateParts(Array.from({ length: sectionCount }, (_, i) => {
     const paragraphs = intBetween(seed + i * 19, 1, message.role === 'user' ? 3 : 6)
     const title = message.role === 'user'
       ? `Request ${message.index.toLocaleString()}`
@@ -72,8 +76,7 @@ function markdownUnits(message: LogicalMessage): RenderUnit[] {
       ...Array.from({ length: paragraphs }, (__, p) => sentence(seed + p * 23 + i * 7, 22 + intensity * 5)),
     ].join('\n\n')
     return unit(message, `md-${i}`, 'markdown', 120 + paragraphs * 96, { markdown: body })
-  })
-  return annotateParts(units)
+  }))
 }
 
 function thinkingUnits(message: LogicalMessage): RenderUnit[] {
@@ -82,14 +85,8 @@ function thinkingUnits(message: LogicalMessage): RenderUnit[] {
     const prefix = i === 0 ? 'I need to inspect the current state before changing anything.' : 'Then I should validate the next dependency and preserve the existing invariant.'
     return `${prefix} ${sentence(message.seed + i * 31, 24 + message.intensity * 4)}`
   }).join('\n\n')
-
   return annotateParts([
-    unit(message, 'thinking', 'thinking', 72, {
-      text: thoughts,
-      tokenCount: Math.round(thoughts.length / 3.8),
-      durationMs: intBetween(message.seed + 43, 900, 28_000),
-      defaultOpen: false,
-    }),
+    unit(message, 'thinking', 'thinking', 72, { text: thoughts, tokenCount: Math.round(thoughts.length / 3.8), durationMs: intBetween(message.seed + 43, 900, 28_000), defaultOpen: false }),
   ])
 }
 
@@ -105,12 +102,7 @@ function codeUnits(message: LogicalMessage): RenderUnit[] {
   return annotateParts(Array.from({ length: chunks }, (_, chunk) => {
     const code = all.slice(chunk * chunkSize, (chunk + 1) * chunkSize).join('\n')
     const lineCount = code.split('\n').length
-    return unit(message, `code-${chunk}`, 'code', 110 + Math.min(28, lineCount) * 20, {
-      language: 'typescript',
-      code,
-      filename: `src/agent/turn-${message.index % 97}.ts`,
-      defaultOpen: lineCount <= 34,
-    })
+    return unit(message, `code-${chunk}`, 'code', 110 + Math.min(28, lineCount) * 20, { language: 'typescript', code, filename: `src/agent/turn-${message.index % 97}.ts`, defaultOpen: lineCount <= 34 })
   }))
 }
 
@@ -120,32 +112,11 @@ function toolUnit(message: LogicalMessage): RenderUnit[] {
   const toolName = rawName || `tool_${message.seed % 17}`
   const rows = intBetween(message.seed + 7, 3, 8 + message.intensity)
   const callId = `call_${Math.floor(message.index / 2).toString(36)}_${message.seed.toString(36).slice(0, 4)}`
-
-  const input = {
-    path: `/workspace/src/${toolName}-${message.index % 31}.ts`,
-    query: sentence(message.seed, 7),
-    limit: intBetween(message.seed + 5, 10, 200),
-    recursive: message.seed % 2 === 0,
-  }
-
-  const outputRows = Array.from({ length: rows }, (_, i) => ({
-    line: intBetween(message.seed + i * 17, 1, 4000),
-    score: Number((((message.seed + i * 19) % 1000) / 1000).toFixed(3)),
-    preview: sentence(message.seed + i * 29, 10 + (i % 8)),
-  }))
-
+  const input = { path: `/workspace/src/${toolName}-${message.index % 31}.ts`, query: sentence(message.seed, 7), limit: intBetween(message.seed + 5, 10, 200), recursive: message.seed % 2 === 0 }
+  const outputRows = Array.from({ length: rows }, (_, i) => ({ line: intBetween(message.seed + i * 17, 1, 4000), score: Number((((message.seed + i * 19) % 1000) / 1000).toFixed(3)), preview: sentence(message.seed + i * 29, 10 + (i % 8)) }))
   const status = phase === 'result' && message.seed % 17 === 0 ? 'error' : phase === 'result' ? 'success' : 'running'
   return annotateParts([
-    unit(message, 'tool', 'tool', 76, {
-      phase,
-      name: toolName,
-      callId,
-      durationMs: intBetween(message.seed, 5, 9000),
-      status,
-      input,
-      output: { rows: outputRows, truncated: rows > 10, exitCode: status === 'error' ? 1 : 0 },
-      defaultOpen: false,
-    }),
+    unit(message, 'tool', 'tool', 76, { phase, name: toolName, callId, durationMs: intBetween(message.seed, 5, 9000), status, input, output: { rows: outputRows, truncated: rows > 10, exitCode: status === 'error' ? 1 : 0 }, defaultOpen: false }),
   ])
 }
 
@@ -153,31 +124,24 @@ export function projectMessage(message: LogicalMessage): RenderUnit[] {
   const { seed, intensity } = message
   switch (message.kind) {
     case 'text': {
+      if (message.content !== undefined) return runtimeContentUnits(message)
       const lines = intBetween(seed + 1, 1, 8 + intensity)
-      return annotateParts([
-        unit(message, 'text', 'text', 70 + lines * 22, { text: sentence(seed, lines * 9) }),
-      ])
+      return annotateParts([unit(message, 'text', 'text', 70 + lines * 22, { text: sentence(seed, lines * 9) })])
     }
-    case 'markdown':
-      return markdownUnits(message)
-    case 'thinking':
-      return thinkingUnits(message)
-    case 'code':
-      return codeUnits(message)
+    case 'markdown': return markdownUnits(message)
+    case 'thinking': return thinkingUnits(message)
+    case 'code': return codeUnits(message)
     case 'image': {
       const width = intBetween(seed + 4, 720, 1600)
       const height = intBetween(seed + 5, 320, 1100)
-      return annotateParts([
-        unit(message, 'image', 'image', 110 + Math.min(620, (height / width) * 820), { width, height, seed, alt: `Generated artifact preview ${message.index}` }),
-      ])
+      return annotateParts([unit(message, 'image', 'image', 110 + Math.min(620, (height / width) * 820), { width, height, seed, alt: `Generated artifact preview ${message.index}` })])
     }
     case 'html': {
       const cards = intBetween(seed + 6, 2, 7)
       const html = `<section class="synthetic-html"><h3>Generated interactive artifact</h3><p>This HTML is intentionally passed through the renderer boundary and sanitized before mounting.</p>${Array.from({ length: cards }, (_, i) => `<div class="html-chip"><strong>Node ${i + 1}</strong><span>${sentence(seed + i, 12)}</span></div>`).join('')}<script>window.__unsafeSyntheticPayload = true</script></section>`
       return annotateParts([unit(message, 'html', 'html', 150 + cards * 58, { html })])
     }
-    case 'tool':
-      return toolUnit(message)
+    case 'tool': return toolUnit(message)
     case 'diff': {
       const lineCount = intBetween(seed + 8, 35, 100 + intensity * 24)
       const chunkSize = 72
@@ -189,16 +153,12 @@ export function projectMessage(message: LogicalMessage): RenderUnit[] {
           const n = start + i
           return `${n % 3 === 0 ? '+' : n % 5 === 0 ? '-' : ' '} ${String(n + 1).padStart(4, ' ')}  ${sentence(seed + n, 8 + (n % 11))}`
         })
-        return unit(message, `diff-${chunk}`, 'diff', 110 + Math.min(28, lines.length) * 20, {
-          file: `src/generated-${message.index % 29}.ts`,
-          lines,
-          defaultOpen: lines.length <= 32,
-        })
+        return unit(message, `diff-${chunk}`, 'diff', 110 + Math.min(28, lines.length) * 20, { file: `src/generated-${message.index % 29}.ts`, lines, defaultOpen: lines.length <= 32 })
       }))
     }
   }
 }
 
-export function projectMessages(messages: LogicalMessage[]): RenderUnit[] {
+export function projectMessages(messages: readonly LogicalMessage[]): RenderUnit[] {
   return messages.flatMap(projectMessage)
 }
