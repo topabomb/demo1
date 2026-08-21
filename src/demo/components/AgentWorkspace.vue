@@ -4,22 +4,16 @@ import { usePerformanceMetrics } from '../use-performance-metrics'
 import type { ConversationDescriptor } from '../../engine/conversation/contracts'
 import type { SessionViewMemory } from '../../engine/viewport/state'
 import {
-  billedInputTokens,
   cacheHitPercent,
-  contextOccupancyPercent,
   deriveSessionIndicator,
-  formatTokens,
   sessionIndicatorGlyph,
   sessionIndicatorLabel,
   type SessionIndicator,
 } from '../../engine/conversation/session-semantics'
 import { createAgentScenarioPack, createMarkdownGalleryTurn, createMixedDemoTurns } from '../scenarios'
-import { registeredRendererIds } from '../../engine/vue/renderers/registry'
-import { touchedFoldStateCount } from '../../engine/vue/renderers/fold-state'
-import { highlightCacheSize } from '../../engine/vue/renderers/highlight-client'
-import { markdownCacheSize } from '../../engine/vue/renderers/markdown-cache'
 import { useWorkspaceRuntime } from '../vue/use-workspace-runtime'
 import ConversationViewport from '../../engine/vue/ConversationViewport.vue'
+import DemoDiagnosticsPanel from './DemoDiagnosticsPanel.vue'
 
 interface ViewportHandle {
   captureSnapshot(): SessionViewMemory
@@ -50,16 +44,7 @@ const hotSessionCount = computed(() => { void workspaceRevision.value; return wo
 const runningSessionCount = computed(() => { void workspaceRevision.value; return workspace.runningSessionCount })
 const blockedSessionCount = computed(() => { void workspaceRevision.value; return workspace.blockedSessionCount })
 const failedSessionCount = computed(() => { void workspaceRevision.value; return workspace.failedSessionCount })
-const foldStateCount = computed(() => { void activeUiState.value; return touchedFoldStateCount() })
-const highlightEntries = computed(() => { void activeUiState.value; return highlightCacheSize() })
-const markdownEntries = computed(() => { void activeUiState.value; return markdownCacheSize() })
-const activeUsage = computed(() => { void activeUiState.value.eventRevision; return activeSession.value.kernel.usage })
-const activeCacheHit = computed(() => cacheHitPercent(activeUsage.value))
-const activeContext = computed(() => contextOccupancyPercent(activeSession.value.kernel.context))
 const canInjectFixtures = computed(() => activeUiState.value.sessionStatus !== 'working' && !activeUiState.value.pendingInteraction)
-const streamRate = computed(() => { void activeUiState.value.eventRevision; return activeStream.value.rate })
-const streamIngressTicks = computed(() => { void activeUiState.value.eventRevision; return activeStream.value.ingressTicks })
-const streamPublishTicks = computed(() => { void activeUiState.value.eventRevision; return activeStream.value.publishTicks })
 
 function switchSession(id: string): void {
   if (id !== activeSession.value.id) {
@@ -92,17 +77,10 @@ async function openAgentScenarios(): Promise<void> {
   mobileSessionsOpen.value = false
 }
 
-function jump(): void { void viewportRef.value?.jumpToMessage(activeSession.value.jumpInput) }
-function randomJump(): void {
-  const runtime = activeSession.value
-  if (runtime.logicalCount <= 0) return
-  const next = (Math.imul(activeUiState.value.reader + 17, 1103515245) + 12345) >>> 0
-  runtime.jumpInput = next % runtime.logicalCount
-  void viewportRef.value?.jumpToMessage(runtime.jumpInput)
+function jump(target = activeSession.value.jumpInput): void {
+  activeSession.value.jumpInput = target
+  void viewportRef.value?.jumpToMessage(target)
 }
-function onRateChange(event: Event): void { activeStream.value.setRate(Number((event.target as HTMLSelectElement).value)) }
-function resumeStream(): void { activeStream.value.start(false) }
-function pauseStream(): void { activeStream.value.pause() }
 function indicator(descriptor: ConversationDescriptor): SessionIndicator { return deriveSessionIndicator(descriptor) }
 function indicatorDetail(descriptor: ConversationDescriptor): string {
   const state = indicator(descriptor)
@@ -179,54 +157,29 @@ async function injectAgentScenarios(): Promise<void> {
 
     <ConversationViewport data-conversation-engine="vue" :key="activeSession.id" ref="viewportRef" :runtime="activeSession" :stream="activeStream" :ui-state="activeUiState" :diagnostics="diagnosticsOpen" />
 
-    <aside v-show="diagnosticsOpen" class="diagnostics-panel">
-      <div class="diagnostics-head"><div><span class="eyebrow">Architecture proof</span><strong>Session diagnostics</strong></div><button class="icon-button" @click="diagnosticsOpen = false">×</button></div>
-      <div class="session-scope-card" data-testid="active-session-card"><span>active scope</span><strong data-testid="active-session-id">{{ activeSession.id }}</strong><small>{{ activeSession.title }}</small></div>
-
-      <div class="control-group"><label for="jump">Jump to global message</label><div class="inline-control"><input id="jump" v-model.number="activeSession.jumpInput" data-testid="jump-input" type="number" min="0" :max="Math.max(0, activeSession.logicalCount - 1)" /><button data-testid="jump-button" :disabled="activeSession.logicalCount === 0" @click="jump">Jump</button></div><button class="secondary wide" :disabled="activeSession.logicalCount === 0" @click="randomJump">Deterministic random jump</button></div>
-      <div class="control-group"><label>History window</label><div class="inline-control"><button class="secondary" data-testid="prepend-button" @click="viewportRef?.shiftBackward()">← prepend 512</button><button class="secondary" @click="viewportRef?.shiftForward()">append 512 →</button></div></div>
-
-      <div class="control-group">
-        <label>Runtime heterogeneous content</label>
-        <div class="fixture-grid">
-          <button data-testid="inject-mixed-one" :disabled="!canInjectFixtures" @click="injectMixed(1)">+ 1 mixed turn</button>
-          <button data-testid="inject-mixed-five" :disabled="!canInjectFixtures" @click="injectMixed(5)">+ 5 mixed turns</button>
-          <button class="secondary" data-testid="inject-markdown-gallery" :disabled="!canInjectFixtures" @click="injectMarkdownGallery">Markdown gallery</button>
-          <button class="secondary" data-testid="inject-agent-scenarios" :disabled="!canInjectFixtures" @click="injectAgentScenarios">Agent scenario pack</button>
-        </div>
-        <small class="control-note">Canonical scenarios: streaming output, uploads, image generation, TTS/ASR and diverse tool results; no DOM-side fixture shortcut.</small>
-      </div>
-
-      <div class="control-group"><label>Live LLM output</label><div class="inline-control"><select :value="streamRate" @change="onRateChange"><option :value="5">5 Hz</option><option :value="20">20 Hz</option><option :value="60">60 Hz</option></select><button data-testid="stream-start" :disabled="activeUiState.sessionStatus !== 'working'" @click="resumeStream">Resume</button><button class="secondary" :disabled="activeUiState.sessionStatus !== 'working'" @click="pauseStream">Pause</button></div></div>
-
-      <div class="metrics" data-testid="metrics">
-        <div><span>logical</span><strong data-testid="logical-count">{{ activeSession.logicalCount.toLocaleString() }}</strong></div>
-        <div><span>running kernels</span><strong data-testid="running-kernels">{{ runningSessionCount }}</strong></div>
-        <div><span>blocked sessions</span><strong data-testid="blocked-sessions">{{ blockedSessionCount }}</strong></div>
-        <div><span>failed last turn</span><strong data-testid="failed-sessions">{{ failedSessionCount }}</strong></div>
-        <div><span>hot sessions</span><strong data-testid="hot-sessions">{{ hotSessionCount }}</strong></div>
-        <div><span>hot messages</span><strong>{{ (activeUiState.rangeEnd - activeUiState.rangeStart).toLocaleString() }}</strong></div>
-        <div><span>render units</span><strong data-testid="active-units">{{ activeUiState.projectionSize.toLocaleString() }}</strong></div>
-        <div><span>DOM rows</span><strong data-testid="mounted-rows">{{ activeUiState.mountedRows }}</strong></div>
-        <div><span>projection cache</span><strong data-testid="projection-cache">{{ activeUiState.projectionCacheSize }}</strong></div>
-        <div><span>projection hits</span><strong data-testid="projection-cache-hits">{{ activeUiState.projectionCacheHits }}</strong></div>
-        <div><span>full projects</span><strong data-testid="projection-full-projects">{{ activeUiState.projectionFullProjects }}</strong></div>
-        <div><span>incremental patches</span><strong data-testid="projection-incremental">{{ activeUiState.projectionIncrementalPatches }}</strong></div>
-        <div><span>messages after</span><strong data-testid="messages-after-metric">{{ activeUiState.messagesAfter.toLocaleString() }}</strong></div>
-        <div><span>queue</span><strong data-testid="queued-prompts">{{ activeUiState.queuedPrompts }}</strong></div>
-        <div><span>input tokens</span><strong data-testid="diagnostic-input-tokens">{{ formatTokens(billedInputTokens(activeUsage)) }}</strong></div>
-        <div><span>output tokens</span><strong data-testid="diagnostic-output-tokens">{{ formatTokens(activeUsage.outputTokens) }}</strong></div>
-        <div><span>cache hit</span><strong data-testid="diagnostic-cache-hit">{{ activeCacheHit === null ? 'n/a' : `${activeCacheHit}%` }}</strong></div>
-        <div><span>context</span><strong data-testid="diagnostic-context">{{ activeContext === null ? 'n/a' : `${activeContext}%` }}</strong></div>
-        <div><span>last turn</span><strong data-testid="last-turn-reason">{{ activeSession.kernel.lastTurnReason ?? 'active' }}</strong></div>
-        <div><span>failure</span><strong data-testid="last-failure-code">{{ activeSession.kernel.lastFailure?.code ?? '—' }}</strong></div>
-        <div><span>FPS</span><strong>{{ fps }}</strong></div><div><span>frame p95</span><strong>{{ frameP95 }} ms</strong></div><div><span>long tasks</span><strong>{{ longTasks }}</strong></div><div><span>JS heap</span><strong>{{ heapMb === null ? 'n/a' : `${heapMb} MB` }}</strong></div>
-        <div><span>stream ingress</span><strong data-testid="stream-ingress">{{ streamIngressTicks }}</strong></div><div><span>UI publishes</span><strong data-testid="stream-ticks">{{ streamPublishTicks }}</strong></div><div><span>live chunks</span><strong data-testid="live-chunks">{{ activeUiState.liveChunkCount }}</strong></div>
-        <div><span>fold state</span><strong>{{ foldStateCount }}</strong></div><div><span>highlight LRU</span><strong>{{ highlightEntries }}</strong></div><div><span>markdown LRU</span><strong>{{ markdownEntries }}</strong></div><div><span>renderer registry</span><strong>{{ registeredRendererIds().length }}</strong></div><div><span>virtual epoch</span><strong>{{ activeUiState.virtualEpoch }}</strong></div>
-      </div>
-
-      <div class="architecture-note"><strong>Durable domain / rebuildable presentation</strong><span>Canonical ContentBlock[] lives in the session model. ProjectionEngine keeps bounded hot memoization and incrementally patches live reasoning and the mutable Markdown tail.</span><span>Hot runtime LRU: <b data-testid="hot-session-ids">{{ hotSessionIds }}</b></span><span>Viewport policy consumes semantic keys/geometry; Virtua and product CSS remain replaceable physical adapters.</span><span>Global page index: {{ activeSession.pageHeights.pageCount.toLocaleString() }} Fenwick leaves.</span></div>
-    </aside>
+    <DemoDiagnosticsPanel
+      v-show="diagnosticsOpen"
+      :runtime="activeSession"
+      :ui-state="activeUiState"
+      :stream="activeStream"
+      :hot-session-ids="hotSessionIds"
+      :hot-session-count="hotSessionCount"
+      :running-session-count="runningSessionCount"
+      :blocked-session-count="blockedSessionCount"
+      :failed-session-count="failedSessionCount"
+      :fps="fps"
+      :frame-p95="frameP95"
+      :long-tasks="longTasks"
+      :heap-mb="heapMb"
+      :can-inject-fixtures="canInjectFixtures"
+      @close="diagnosticsOpen = false"
+      @jump="jump"
+      @shift-backward="viewportRef?.shiftBackward()"
+      @shift-forward="viewportRef?.shiftForward()"
+      @inject-mixed="injectMixed"
+      @inject-markdown="injectMarkdownGallery"
+      @inject-agent="injectAgentScenarios"
+    />
 
     <button v-if="!diagnosticsOpen" class="diagnostics-reopen" data-testid="diagnostics-open" title="Architecture diagnostics" @click="diagnosticsOpen = true">◫</button>
   </section>
