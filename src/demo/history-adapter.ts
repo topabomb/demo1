@@ -1,5 +1,5 @@
-import type { ConversationHistoryAdapter } from '../conversation/contracts'
-import type { LogicalMessage } from '../model/conversation'
+import type { ConversationHistoryAdapter } from '../engine/conversation/contracts'
+import type { LogicalMessage } from '../engine/model/conversation'
 import { SyntheticConversationSource } from './synthetic'
 
 /** Demo-only cold-history adapter. Real products replace this port with DB/network paging. */
