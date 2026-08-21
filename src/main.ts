@@ -4,7 +4,6 @@ import './styles.css'
 import './agent-renderers.css'
 import './virtua-layout.css'
 import './architecture.css'
-import './lab-route.css'
 import './product-ux.css'
 
 createApp(App).mount('#app')
