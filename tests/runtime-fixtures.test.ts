@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { ConversationSessionKernel } from '../src/conversation/session-kernel'
 import { SyntheticHistoryAdapter } from '../src/conversation/synthetic-adapter'
-import { createMarkdownGalleryTurn, createMixedDemoTurns } from '../src/presentation/demo-fixtures'
+import { createMarkdownGalleryTurn, createMixedDemoTurns, MARKDOWN_COMPATIBILITY_FIXTURES } from '../src/presentation/demo-fixtures'
 import { projectMessage } from '../src/core/projector'
 
 describe('runtime heterogeneous fixture path', () => {
@@ -16,11 +16,11 @@ describe('runtime heterogeneous fixture path', () => {
     expect(kinds).toEqual(new Set(['markdown', 'thinking', 'code', 'tool', 'diff', 'image', 'html']))
   })
 
-  it('appends the full Markdown compatibility gallery as normal canonical history', () => {
+  it('appends the full Markdown compatibility gallery as normal addressable canonical history', () => {
     const descriptor = { id: 'markdown', title: 'Markdown', age: 'now', status: 'idle' as const, logicalCount: 0 }
     const kernel = new ConversationSessionKernel(descriptor, new SyntheticHistoryAdapter('markdown', 0), 1)
-    kernel.appendCanonicalMessages(createMarkdownGalleryTurn('markdown', 1))
-    const units = projectMessage(kernel.getMessage(0))
-    expect(units.filter(unit => unit.kind === 'markdown').length).toBeGreaterThanOrEqual(6)
+    const indexes = kernel.appendCanonicalMessages(createMarkdownGalleryTurn('markdown', 1))
+    expect(indexes).toHaveLength(MARKDOWN_COMPATIBILITY_FIXTURES.length)
+    expect(indexes.every(index => projectMessage(kernel.getMessage(index)).every(unit => unit.kind === 'markdown'))).toBe(true)
   })
 })
