@@ -1,54 +1,64 @@
-# Agent Workspace Reference Architecture Lab
+# Agent Conversation Presentation Framework Lab
 
-An **executable reference architecture** for Agent workspaces with very long heterogeneous conversations and many independent asynchronous/resumable sessions.
+An **executable reference architecture** for production-style Agent workspaces with very long heterogeneous conversations and many independent asynchronous/resumable sessions.
 
-Live lab: **https://topabomb.github.io/demo1/**  
-Architecture view: **https://topabomb.github.io/demo1/#architecture**
+- Live lab: **https://topabomb.github.io/demo1/**
+- Architecture: **https://topabomb.github.io/demo1/#architecture**
 
-The claim is not “Vue can render one million messages”. The claim is:
-
-> **Provider protocol, durable session execution, bounded semantic projection, semantic viewport policy, physical virtualization and product styling are separate ownership boundaries.**
-
-Normal hot-path cost scales with changed/hot/visible content rather than total history, while many sessions may keep running, waiting or remain resumable without keeping a heavyweight viewport alive.
-
-## Architecture
+The claim is not “Vue can render one million messages”. The framework separates seven ownership contracts:
 
 ```text
 Backend Adapter
       ↓ canonical messages/events
 SessionKernel / Execution Registry
-      ↓ hot/visible session only
-Bounded ConversationRuntime + keyed projection
+      ↓ LogicalMessage + ContentBlock[]
+Content Projector Registry
+      ↓ bounded stable RenderUnit[]
+Hot keyed Projection Runtime
       ↓
 Framework-neutral Semantic Viewport Policy
       ↓
-Virtua/Vue physical adapter
+Virtua/Vue Physical List Adapter
       ↓
-Replaceable Product UI / CSS
+Renderer Registry + replaceable responsive Product UI
 ```
 
-The demo proves both scaling dimensions at once:
+## What the lab proves
 
-- `1,000,000+` addressable logical messages with a bounded ~2,048-message hot projection and `<180` mounted rows;
-- `>=4` concurrent working SessionKernels while heavyweight conversation runtimes remain `<=3`.
+- `1,000,000+` addressable logical messages without eager framework state;
+- `>=4` concurrent working SessionKernels while heavyweight hot runtimes stay `<=3`;
+- historical sessions remain resumable after completed/failed/interrupted Turns;
+- approval/question blockers, queues, drafts, unread state and token/cache/context projections survive viewport eviction;
+- one canonical message can contain heterogeneous `ContentBlock[]`;
+- semantic projectors and frontend renderers are independent extension registries;
+- Markdown, reasoning, tool call/result, code, diff, image and sanitized HTML all use the same canonical path;
+- long Markdown is fence-safe chunked and cached so settled prefix chunks keep stable revisions during streaming;
+- runtime controls append mixed Turns and a Markdown compatibility gallery through SessionKernel rather than DOM mocks;
+- exact Latest/messages-after, semantic anchors, user escape from tail-follow and variable composer height;
+- desktop/tablet/phone layout changes do not remove session access or create page-level horizontal overflow;
+- renderer containment and virtualizer geometry remain valid under responsive reflow;
+- local production Chromium and deployed GitHub Pages run the same browser suite.
 
-## Session model
+## Extension model
 
-A session deliberately does **not** have one overloaded status.
+Adding a new output such as `citation`, `terminal-session`, `file-tree`, `chart` or `subagent` should require only:
 
-- **Live execution:** `idle | working | waiting | interrupted`
-- **Last Turn result:** `completed | aborted | blocked | error | max-tokens | interrupted`
-- **Human blocker:** `approval | question`
-- **Workspace attention:** unread + queued follow-ups
-- **Durable projections:** turns/steps, input/output/reasoning tokens, cache read/write/hit, context occupancy, structured failure
+1. extending the canonical `ContentBlockMap`;
+2. registering `ContentBlock → RenderUnit[]` projection;
+3. registering the frontend renderer component;
+4. defining renderer containment/responsive behavior;
+5. adding canonical unit/browser fixtures.
 
-A failed/completed/interrupted historical session remains resumable. Blockers, queues, execution and usage statistics belong to the SessionKernel and survive viewport eviction.
+SessionKernel, long-history paging and semantic scroll policy should remain unchanged.
 
-## Layout portability
+## CSS/layout boundary
 
-The viewport algorithm does not read CSS widths, colors or composer limits. The only CSS coupled to physical virtualization is the small geometry contract in `src/virtua-layout.css`: the scroll stage must size correctly and the virtualizer-owned measured wrapper must have zero vertical margin/padding.
+- `src/virtua-layout.css` — tiny non-negotiable physical geometry contract;
+- `src/renderer-content.css` — renderer containment (Markdown/pre/table/code/diff/image/tool/HTML);
+- `src/product-ux.css` — replaceable product theme;
+- `src/responsive-ux.css` — replaceable desktop/tablet/phone adapter.
 
-Everything else—including sidebar width, content width, row gap and composer min/max height—is replaceable reference styling in `src/product-ux.css`. Browser tests change those values at runtime and re-run semantic anchor/non-overlap assertions.
+Conversation algorithms do not read CSS widths, colors, row gaps or composer limits.
 
 ## Validation
 
@@ -59,9 +69,9 @@ pnpm build
 pnpm test:e2e
 ```
 
-CI runs the complete Chromium suite against the production build. The Pages workflow then deploys the exact branch SHA and runs the **same suite against the public URL**.
+CI runs unit/type/build plus the full Chromium suite against the local production build. The Pages workflow deploys the exact branch SHA and runs the **same suite against the public site**.
 
 Canonical documentation:
 
-- [`docs/agent-workspace-reference-architecture.md`](docs/agent-workspace-reference-architecture.md) — ownership, state/store model, DSH-aligned semantics, token/cache accounting, viewport/CSS boundaries, failure-derived invariants and template checklist.
-- [`docs/verification.md`](docs/verification.md) — executable acceptance matrix and final exact-SHA evidence.
+- [`docs/agent-workspace-reference-architecture.md`](docs/agent-workspace-reference-architecture.md) — framework contracts, store/session model, renderer/projector extension protocol, Markdown/streaming strategy, responsive/CSS boundaries and failure-derived invariants.
+- [`docs/verification.md`](docs/verification.md) — executable acceptance matrix and exact final-SHA evidence.
