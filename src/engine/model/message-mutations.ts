@@ -4,13 +4,24 @@ export function cloneBlocks(blocks: readonly ContentBlock[]): ContentBlock[] {
   return blocks.map(contentBlock => ({ ...contentBlock, data: { ...contentBlock.data } })) as ContentBlock[]
 }
 
-export function appendReasoningContent(message: LogicalMessage, delta: string, durationMs: number): { message: LogicalMessage; blockId: string } | null {
+export function appendReasoningContent(
+  message: LogicalMessage,
+  delta: string,
+  durationMs: number,
+  tokenCount?: number,
+): { message: LogicalMessage; blockId: string } | null {
   const blocks = cloneBlocks(message.blocks)
   const targetIndex = blocks.findIndex(entry => entry.type === 'reasoning')
   if (targetIndex < 0) return null
   const current = blocks[targetIndex] as ContentBlock<'reasoning'>
   const text = `${current.data.text}${delta}`
-  blocks[targetIndex] = block(current.id, 'reasoning', { ...current.data, text, tokenCount: estimateTokens(text), durationMs, status: 'streaming' }, (current.revision ?? 0) + 1)
+  blocks[targetIndex] = block(current.id, 'reasoning', {
+    ...current.data,
+    text,
+    ...(tokenCount === undefined ? {} : { tokenCount }),
+    durationMs,
+    status: 'streaming',
+  }, (current.revision ?? 0) + 1)
   return { blockId: current.id, message: { ...message, blocks, revision: (message.revision ?? 0) + 1, live: true } }
 }
 
@@ -54,5 +65,3 @@ export function markdownText(message: LogicalMessage): string {
   }
   return ''
 }
-
-export function estimateTokens(text: string): number { return Math.max(1, Math.ceil(text.length / 4)) }
