@@ -5,11 +5,7 @@ import { SyntheticHistoryAdapter } from '../src/conversation/synthetic-adapter'
 
 function runtimeAt(position: number, status: 'idle' | 'working' = 'idle') {
   const descriptor = { id: 'identity-test', title: 'identity test', age: 'now', status, logicalCount: 1_000_000 } as const
-  const kernel = new ConversationSessionKernel(
-    descriptor,
-    new SyntheticHistoryAdapter(descriptor.id, descriptor.logicalCount, 73, status === 'working'),
-    73,
-  )
+  const kernel = new ConversationSessionKernel(descriptor, new SyntheticHistoryAdapter(descriptor.id, descriptor.logicalCount, 73, status === 'working'), 73)
   const runtime = new ConversationSessionRuntime(kernel, {
     logicalPosition: position,
     anchorUnitId: null,
@@ -45,13 +41,16 @@ describe('ConversationSessionRuntime', () => {
     runtime.dispose()
   })
 
-  it('rehydrates appended turns from the lightweight kernel', async () => {
+  it('rehydrates appended canonical turns from the lightweight kernel', async () => {
     const { kernel, runtime } = runtimeAt(999_999)
     kernel.beginTurn('continue the old session')
     kernel.appendAssistantDelta('new answer')
     await Promise.resolve()
     runtime.jump(kernel.count - 1)
-    expect(runtime.projection.order.some(id => id.includes('runtime-0'))).toBe(true)
+    const tailNodes = runtime.projection.order
+      .map(id => runtime.projection.getNode(id))
+      .filter(node => node?.messageIndex === kernel.count - 1)
+    expect(tailNodes.some(node => String(node?.payload.markdown ?? '').includes('new answer'))).toBe(true)
     expect(runtime.logicalCount).toBe(1_000_002)
     runtime.dispose()
   })
