@@ -244,20 +244,21 @@ export class ConversationSessionRuntime {
       }
     }
 
-    if (event.messageIndex !== undefined && event.messageIndex >= this.range.start && event.messageIndex < this.range.end) {
-      const message = this.kernel.getMessage(event.messageIndex)
+    const messageIndex = event.messageIndex
+    if (messageIndex !== undefined && messageIndex >= this.range.start && messageIndex < this.range.end) {
+      const message = this.kernel.getMessage(messageIndex)
       const units = event.contentPatch?.kind === 'append-markdown'
         ? this.projectionEngine.appendMarkdownDelta(message, event.contentPatch.blockId, event.contentPatch.delta)
         : this.projectionEngine.projectMessage(message)
-      const existing = this.#activeUnits.filter(unit => unit.messageIndex === event.messageIndex)
+      const existing = this.#activeUnits.filter(unit => unit.messageIndex === messageIndex)
       const sameIds = existing.length === units.length && existing.every((unit, index) => unit.id === units[index]?.id)
       if (sameIds) {
         const byId = new Map(units.map(unit => [unit.id, unit]))
         this.#activeUnits = this.#activeUnits.map(unit => byId.get(unit.id) ?? unit)
         for (const unit of units) this.projection.patch(unit)
       } else {
-        const before = this.#activeUnits.filter(unit => unit.messageIndex < event.messageIndex)
-        const after = this.#activeUnits.filter(unit => unit.messageIndex > event.messageIndex)
+        const before = this.#activeUnits.filter(unit => unit.messageIndex < messageIndex)
+        const after = this.#activeUnits.filter(unit => unit.messageIndex > messageIndex)
         this.#activeUnits = [...before, ...units, ...after]
         this.projection.replace(this.#activeUnits)
       }
