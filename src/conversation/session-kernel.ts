@@ -1,4 +1,3 @@
-import { hash32 } from '../core/prng'
 import { block, type AppendCanonicalMessage, type ContentBlock, type LogicalMessage } from '../model/conversation'
 import type {
   ConversationDescriptor,
@@ -31,6 +30,7 @@ export class ConversationSessionKernel {
   readonly title: string
   readonly age: string
   readonly backend: ConversationHistoryAdapter
+  /** Synthetic-constructor compatibility only; canonical messages no longer depend on it. */
   readonly seedOffset: number
 
   #appended: LogicalMessage[] = []
@@ -41,6 +41,7 @@ export class ConversationSessionKernel {
   #foreground = false
   #unread = false
   #notifier = new BatchedNotifier()
+  #eventListeners = new Set<(event: SessionKernelEvent) => void>()
   #lastEvent: SessionKernelEvent = { kind: 'status' }
   #currentAssistantIndex: number | null = null
   #lastTurnReason: TurnEndReasonKind | null
@@ -88,7 +89,14 @@ export class ConversationSessionKernel {
     }
   }
 
+  /** Coalesced session-summary notification for UI/workspace consumers. */
   subscribe(listener: () => void): Unsubscribe { return this.#notifier.subscribe(listener) }
+  /** Ordered semantic mutation feed for hot incremental consumers. No event is collapsed. */
+  subscribeEvents(listener: (event: SessionKernelEvent) => void): Unsubscribe {
+    this.#eventListeners.add(listener)
+    return () => this.#eventListeners.delete(listener)
+  }
+  /** Compatibility/debug snapshot only; incremental code should subscribeEvents(). */
   get lastEvent(): SessionKernelEvent { return this.#lastEvent }
   get status(): SessionStatus { return this.#status }
   get pendingInteraction(): PendingInteraction | null { return this.#pendingInteraction }
@@ -159,25 +167,28 @@ export class ConversationSessionKernel {
     if (entries.length === 0) return []
     const indexes: number[] = []
     const turns = new Set<string>()
+    const steps = new Set<string>()
     for (const entry of entries) {
       const index = this.count
       indexes.push(index)
       turns.add(entry.turnId)
+      if (entry.stepId) steps.add(entry.stepId)
       this.#appended.push({
         id: `${this.id}:m-${index}`,
         index,
         turnId: entry.turnId,
+        stepId: entry.stepId,
         role: entry.role,
         blocks: cloneBlocks(entry.blocks),
-        seed: hash32(index + this.seedOffset),
-        intensity: 5,
         revision: 0,
         live: entry.live,
         variant: entry.variant,
       })
     }
     this.#turnCount += turns.size
-    this.#stepCount += entries.length
+    // If the producer has Step identity, count distinct Steps. Older/turn-only
+    // adapters retain the previous per-record approximation rather than invent IDs.
+    this.#stepCount += steps.size > 0 ? steps.size : entries.length
     this.#touchUnread()
     this.#emit({ kind: 'append', messageIndex: indexes[indexes.length - 1] })
     return indexes
@@ -188,14 +199,16 @@ export class ConversationSessionKernel {
     if (!text || this.#pendingInteraction) return null
     const userIndex = this.count
     const turnId = `${this.id}:runtime-turn-${userIndex}`
+    // Current demo execution has exactly one model request per user Turn. The
+    // explicit Step coordinate keeps the contract ready for real multi-step loops.
+    const stepId = `${turnId}:step-0`
     this.#appended.push({
       id: `${this.id}:m-${userIndex}`,
       index: userIndex,
       turnId,
+      stepId,
       role: 'user',
       blocks: [block('prompt', 'markdown', { markdown: text })],
-      seed: hash32(userIndex + this.seedOffset),
-      intensity: 3,
       revision: 0,
       variant: 'runtime-user',
     })
@@ -204,10 +217,9 @@ export class ConversationSessionKernel {
       id: `${this.id}:m-${assistantIndex}`,
       index: assistantIndex,
       turnId,
+      stepId,
       role: 'assistant',
       blocks: [block('answer', 'markdown', { markdown: '' })],
-      seed: hash32(assistantIndex + this.seedOffset),
-      intensity: 5,
       revision: 0,
       live: true,
       variant: 'runtime-assistant',
@@ -340,7 +352,14 @@ export class ConversationSessionKernel {
   }
 
   #touchUnread(): void { if (!this.#foreground) this.#unread = true }
-  #emit(event: SessionKernelEvent, markUnread = true): void { this.#lastEvent = event; if (markUnread) this.#touchUnread(); this.#notifier.markDirty() }
+  #emit(event: SessionKernelEvent, markUnread = true): void {
+    this.#lastEvent = event
+    if (markUnread) this.#touchUnread()
+    // Semantic consumers receive every mutation synchronously and in producer order;
+    // separate BatchedNotifier publication coalesces workspace/UI refreshes.
+    for (const listener of this.#eventListeners) listener(event)
+    this.#notifier.markDirty()
+  }
 }
 
 function cloneBlocks(blocks: readonly ContentBlock[]): ContentBlock[] {
