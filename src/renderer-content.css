@@ -11,6 +11,8 @@
 .code-card,
 .diff-card,
 .image-card,
+.attachment-card,
+.audio-card,
 .html-card,
 .unknown-card { min-width: 0; max-width: 100%; box-sizing: border-box; }
 
@@ -30,7 +32,10 @@
 .code-card pre,.diff-card pre,.tool-pane pre,.unknown-card pre,.shiki-host { max-width:100%; overflow:auto; overscroll-behavior:contain; }
 .code-card code,.diff-card code,.tool-pane code { white-space:pre; overflow-wrap:normal; word-break:normal; }
 
-.image-card img { display:block; width:100%; max-width:100%; height:auto; object-fit:contain; }
+.image-card img,
+.attachment-image img { display:block; width:100%; max-width:100%; height:auto; object-fit:contain; }
+.attachment-grid,.attachment-files,.attachment-file,.audio-waveform,.audio-transcript { min-width:0;max-width:100%;box-sizing:border-box; }
+.audio-card audio { max-width:100%;box-sizing:border-box; }
 .html-card > div { max-width:100%; overflow-x:auto; }
 .synthetic-html { max-width:100%; }
 .synthetic-html .html-chip { min-width:0; overflow-wrap:anywhere; }
