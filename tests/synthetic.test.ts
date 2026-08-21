@@ -25,4 +25,13 @@ describe('SyntheticConversationSource', () => {
     })
     expect(candidate).toBeDefined()
   })
+
+  it('uses one producer-owned callId for a synthetic tool call/result pair', () => {
+    const source = new SyntheticConversationSource(24, 'tool-id')
+    const call = projectMessage(source.getMessage(2))[0]!
+    const result = projectMessage(source.getMessage(3))[0]!
+    expect(call.payload.callId).toBe(result.payload.callId)
+    expect(call.payload.phase).toBe('call')
+    expect(result.payload.phase).toBe('result')
+  })
 })
