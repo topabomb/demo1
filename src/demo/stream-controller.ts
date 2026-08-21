@@ -1,6 +1,6 @@
 import type { ConversationExecutionController, LlmFailure, SubmitDisposition, TokenUsage } from '../engine/conversation/contracts'
 import type { ConversationSessionKernel } from '../engine/conversation/session-kernel'
-import { block } from '../engine/model/conversation'
+import { block, type LogicalMessage } from '../engine/model/conversation'
 import {
   appendMarkdownContent,
   appendReasoningContent,
@@ -202,7 +202,7 @@ export class SyntheticStreamController implements ConversationExecutionControlle
   }
 }
 
-function reasoningText(message: ReturnType<ConversationSessionKernel['getMessage']>): string {
+function reasoningText(message: LogicalMessage): string {
   const block = message.blocks.find(entry => entry.type === 'reasoning')
   return block?.type === 'reasoning' ? block.data.text : ''
 }
