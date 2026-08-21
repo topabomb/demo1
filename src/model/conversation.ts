@@ -1,12 +1,38 @@
+export type ToolCategory = 'generic' | 'search' | 'filesystem' | 'shell' | 'image-generation' | 'tts' | 'asr'
+export type AttachmentKind = 'image' | 'audio' | 'video' | 'file'
+
+export interface AttachmentItem {
+  id: string
+  name: string
+  kind: AttachmentKind
+  mimeType: string
+  sizeBytes?: number
+  src?: string
+  width?: number
+  height?: number
+  durationMs?: number
+  seed?: number
+}
+
+export interface ArtifactProvenance {
+  origin: 'user-upload' | 'tool-output' | 'assistant'
+  toolCallId?: string
+  toolName?: string
+  model?: string
+  prompt?: string
+}
+
 export interface ContentBlockMap {
   text: { text: string }
   markdown: { markdown: string; flavor?: 'gfm' }
-  reasoning: { text: string; tokenCount?: number; durationMs?: number; defaultOpen?: boolean }
+  reasoning: { text: string; tokenCount?: number; durationMs?: number; defaultOpen?: boolean; status?: 'streaming' | 'complete' | 'interrupted' }
   code: { code: string; language?: string; filename?: string; defaultOpen?: boolean }
   image: { src?: string; width: number; height: number; alt?: string; seed?: number }
+  attachments: { items: readonly AttachmentItem[]; title?: string; provenance?: ArtifactProvenance }
+  audio: { title: string; purpose: 'tts' | 'asr-input' | 'recording'; durationMs: number; src?: string; transcript?: string; model?: string; waveform?: readonly number[]; status?: 'processing' | 'ready' | 'error' }
   html: { html: string }
-  'tool-call': { name: string; callId: string; input: unknown; durationMs?: number; status?: 'running' | 'success' | 'error'; defaultOpen?: boolean }
-  'tool-result': { name: string; callId: string; output: unknown; durationMs?: number; status?: 'running' | 'success' | 'error'; defaultOpen?: boolean }
+  'tool-call': { name: string; callId: string; input: unknown; category?: ToolCategory; model?: string; progress?: number; durationMs?: number; status?: 'running' | 'success' | 'error'; defaultOpen?: boolean }
+  'tool-result': { name: string; callId: string; output: unknown; category?: ToolCategory; model?: string; progress?: number; durationMs?: number; status?: 'running' | 'success' | 'error'; defaultOpen?: boolean }
   diff: { file: string; lines: readonly string[]; defaultOpen?: boolean }
 }
 
