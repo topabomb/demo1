@@ -48,6 +48,8 @@ let unsubscribeState: (() => void) | null = null
 
 let pendingComposerAnchor: CommittedViewportAnchor | null = null
 let pendingComposerPinned = false
+/** Last stable semantic coordinate, retained independently from physical list measurements. */
+let lastCommittedAnchor: CommittedViewportAnchor | null = null
 
 const messagesAfter = computed(() => uiState.value.messagesAfter)
 const showLatest = computed(() => props.runtime.logicalCount > 0 && (!uiState.value.atVisualBottom || messagesAfter.value > 0))
@@ -111,7 +113,12 @@ function captureCommittedAnchor(): CommittedViewportAnchor | null {
   const stage = scrollStageRef.value
   if (!stage) return null
   const viewport = stage.getBoundingClientRect()
-  return selectCommittedAnchor(sampleRows(), viewport.top, viewport.bottom, uiState.value.reader)
+  return selectCommittedAnchor(sampleRows(), viewport.top, viewport.bottom, props.runtime.currentLogicalPosition)
+}
+function rememberCommittedAnchor(): void {
+  if (props.runtime.atVisualBottom || props.runtime.followTail) { lastCommittedAnchor = null; return }
+  const anchor = captureCommittedAnchor()
+  if (anchor) lastCommittedAnchor = anchor
 }
 
 function refreshMountedRows(): void {
@@ -131,11 +138,18 @@ function updateReader(offset = listRef.value?.scrollOffset ?? 0): void {
   const list = listRef.value
   if (!list || order.value.length === 0 || props.runtime.logicalCount <= 0) return
   const atBottom = remainingToBottom() < VIEWPORT_POLICY.bottomTolerancePx && props.runtime.range.end === props.runtime.logicalCount
-  if (atBottom) { props.runtime.setReaderPosition(props.runtime.logicalCount - 1, true); return }
+  if (atBottom) {
+    props.runtime.setReaderPosition(props.runtime.logicalCount - 1, true)
+    lastCommittedAnchor = null
+    return
+  }
   const bottomProbe = Math.max(0, Math.min(list.scrollSize - 1, offset + Math.max(1, list.viewportSize - 2)))
   const index = Math.max(0, Math.min(order.value.length - 1, list.findItemIndex(bottomProbe)))
   const node = nodeFor(order.value[index]!)
-  if (node) props.runtime.setReaderPosition(node.messageIndex, false)
+  if (node) {
+    props.runtime.setReaderPosition(node.messageIndex, false)
+    rememberCommittedAnchor()
+  }
 }
 
 async function restoreListAnchor(anchor: CommittedViewportAnchor): Promise<void> {
@@ -156,6 +170,7 @@ async function restoreListAnchor(anchor: CommittedViewportAnchor): Promise<void>
     currentList.scrollBy(delta)
   }
   await settleFrames(1)
+  lastCommittedAnchor = captureCommittedAnchor() ?? anchor
 }
 
 async function pinMeasuredEnd(maxFrames = VIEWPORT_POLICY.restoreAttempts): Promise<void> {
@@ -170,6 +185,7 @@ async function pinMeasuredEnd(maxFrames = VIEWPORT_POLICY.restoreAttempts): Prom
   }
   lastScrollOffset = listRef.value?.scrollOffset ?? 0
   updateReader(lastScrollOffset)
+  lastCommittedAnchor = null
 }
 function markUserIntent(direction: -1 | 0 | 1): void {
   userScrollIntentUntil = performance.now() + VIEWPORT_POLICY.userIntentMs
@@ -197,6 +213,7 @@ function onVirtualScroll(offset: number): void {
 }
 function onVirtualScrollEnd(): void {
   refreshMountedRows()
+  rememberCommittedAnchor()
   if (shifting.value || performance.now() >= userScrollIntentUntil) return
   if (userScrollDirection < 0 && (listRef.value?.scrollOffset ?? Infinity) < VIEWPORT_POLICY.edgeThresholdPx) void shiftBackward()
   else if (userScrollDirection > 0 && remainingToBottom() < VIEWPORT_POLICY.edgeThresholdPx) void shiftForward()
@@ -239,9 +256,9 @@ async function scrollToLogical(target: number, align: 'start' | 'center' | 'end'
     list.scrollToIndex(index, { align }); await settleFrames(2)
     if (!targetIsCommittedVisible(target)) continue
     lastScrollOffset = list.scrollOffset; updateReader(lastScrollOffset); await settleFrames(1)
-    if (targetIsCommittedVisible(target) && Math.abs(props.runtime.currentLogicalPosition - target) < 64) return
+    if (targetIsCommittedVisible(target) && Math.abs(props.runtime.currentLogicalPosition - target) < 64) { rememberCommittedAnchor(); return }
   }
-  lastScrollOffset = listRef.value?.scrollOffset ?? 0; updateReader(lastScrollOffset)
+  lastScrollOffset = listRef.value?.scrollOffset ?? 0; updateReader(lastScrollOffset); rememberCommittedAnchor()
 }
 async function waitForJumpEpoch(previousEpoch: number, previousHandle: VListHandle | null, target: number): Promise<void> {
   for (let attempt = 0; attempt < VIEWPORT_POLICY.jumpAttempts + 2; attempt += 1) {
@@ -269,6 +286,7 @@ async function jumpToLatest(): Promise<void> {
   await scrollToLogical(last, 'end'); await pinMeasuredEnd()
   const physicallyAtBottom = remainingToBottom() < VIEWPORT_POLICY.bottomTolerancePx
   props.runtime.setReaderPosition(last, physicallyAtBottom); props.runtime.setFollowTail(props.stream.running && physicallyAtBottom)
+  if (physicallyAtBottom) lastCommittedAnchor = null
 }
 
 function restartStream(): void { props.stream.start(false) }
@@ -289,6 +307,7 @@ function onComposerInput(): void {
   props.runtime.setDraftText(composerText.value)
   pendingComposerPinned = props.runtime.atVisualBottom && props.runtime.range.end === props.runtime.logicalCount
   pendingComposerAnchor = pendingComposerPinned ? null : captureCommittedAnchor()
+  if (pendingComposerAnchor) lastCommittedAnchor = pendingComposerAnchor
   void nextTick().then(resizeComposer)
 }
 async function sendComposer(): Promise<void> {
@@ -299,6 +318,7 @@ async function sendComposer(): Promise<void> {
   composerText.value = ''; props.runtime.setDraftText('')
   pendingComposerPinned = props.runtime.atVisualBottom && props.runtime.range.end === props.runtime.logicalCount
   pendingComposerAnchor = pendingComposerPinned ? null : captureCommittedAnchor()
+  if (pendingComposerAnchor) lastCommittedAnchor = pendingComposerAnchor
   await nextTick(); resizeComposer()
   if (disposition === 'started') { await settleFrames(2); await jumpToLatest() }
 }
@@ -307,15 +327,17 @@ function scheduleViewportResizeReconcile(): void {
   viewportResizeFrame = requestAnimationFrame(async () => {
     viewportResizeFrame = 0; await nextTick()
     const pin = pendingComposerPinned || (pendingComposerAnchor === null && (props.runtime.atVisualBottom || props.runtime.followTail))
-    const anchor = pendingComposerAnchor; pendingComposerPinned = false; pendingComposerAnchor = null
+    const anchor = pendingComposerAnchor ?? lastCommittedAnchor
+    pendingComposerPinned = false; pendingComposerAnchor = null
     if (pin && props.runtime.range.end === props.runtime.logicalCount) await pinMeasuredEnd()
-    else if (anchor) { await restoreListAnchor(anchor); updateReader() }
-    else updateReader()
+    else if (anchor) { await restoreListAnchor(anchor); updateReader(); rememberCommittedAnchor() }
+    else { updateReader(); rememberCommittedAnchor() }
     refreshMountedRows()
   })
 }
 function captureSnapshot(): ViewportSnapshot {
   const anchor = captureCommittedAnchor()
+  if (anchor) lastCommittedAnchor = anchor
   const snapshot = anchor ? props.runtime.snapshot(anchor.id, anchor.offsetPx) : props.runtime.snapshot()
   props.runtime.rememberSnapshot(snapshot)
   return snapshot
@@ -330,13 +352,14 @@ async function restoreSnapshot(): Promise<void> {
   } else if (snapshot.anchorUnitId && order.value.includes(snapshot.anchorUnitId)) {
     await restoreListAnchor({ id: snapshot.anchorUnitId, offsetPx: snapshot.anchorOffsetPx, viewportTopPx: snapshot.anchorOffsetPx })
   } else await scrollToLogical(snapshot.logicalPosition)
-  await settleFrames(2); lastScrollOffset = listRef.value?.scrollOffset ?? 0; updateReader(lastScrollOffset); refreshMountedRows()
+  await settleFrames(2); lastScrollOffset = listRef.value?.scrollOffset ?? 0; updateReader(lastScrollOffset); rememberCommittedAnchor(); refreshMountedRows()
 }
 function formatAfter(count: number): string { return count.toLocaleString('en-US') }
 function attachViewportObserver(): void {
   viewportObserver?.disconnect(); viewportObserver = new ResizeObserver(scheduleViewportResizeReconcile)
   if (scrollStageRef.value) viewportObserver.observe(scrollStageRef.value)
   if (composerShellRef.value) viewportObserver.observe(composerShellRef.value)
+  rememberCommittedAnchor()
 }
 
 onMounted(() => {
