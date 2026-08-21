@@ -30,6 +30,19 @@ describe('ConversationSessionRuntime', () => {
     runtime.dispose()
   })
 
+  it('keeps a requested jump separate from the committed semantic reader', () => {
+    const { runtime } = runtimeAt(500_000)
+    runtime.jump(100_000)
+    expect(runtime.range.start).toBeLessThanOrEqual(100_000)
+    expect(runtime.range.end).toBeGreaterThan(100_000)
+    expect(runtime.jumpInput).toBe(100_000)
+    expect(runtime.currentLogicalPosition).toBe(500_000)
+
+    runtime.setReaderPosition(100_000, false)
+    expect(runtime.currentLogicalPosition).toBe(100_000)
+    runtime.dispose()
+  })
+
   it('keeps a history reader stable while the kernel grows off-screen', async () => {
     const { kernel, runtime } = runtimeAt(500_000)
     const before = runtime.currentLogicalPosition
