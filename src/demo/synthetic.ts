@@ -1,4 +1,4 @@
-import { block, type ContentBlock, type LogicalMessage, type LogicalRole } from '../model/conversation'
+import { block, type ContentBlock, type LogicalMessage, type LogicalRole } from '../engine/model/conversation'
 import { hash32, intBetween } from './prng'
 
 type SyntheticKind = 'markdown' | 'text' | 'reasoning' | 'tool' | 'code' | 'diff' | 'image' | 'html'
