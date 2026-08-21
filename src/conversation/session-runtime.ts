@@ -157,6 +157,7 @@ export class ConversationSessionRuntime {
 
   get rememberedSnapshot(): ViewportSnapshot { return { ...this.#snapshot, draftText: this.draftText } }
 
+  /** Commits a semantic reader coordinate only after the physical adapter has established it. */
   setReaderPosition(index: number, atVisualBottom: boolean): void {
     this.currentLogicalPosition = clampIndex(index, this.logicalCount)
     this.atVisualBottom = atVisualBottom && this.range.end === this.logicalCount
@@ -169,13 +170,18 @@ export class ConversationSessionRuntime {
     this.#stateNotifier.markDirty()
   }
 
+  /**
+   * Rebase the bounded working set around a requested target. This intentionally
+   * does NOT mutate currentLogicalPosition: a request is not a committed reader
+   * coordinate until a Physical List Adapter confirms the target is laid out and
+   * visible, then calls setReaderPosition().
+   */
   jump(index: number): void {
     if (this.logicalCount <= 0) return
     const target = clampIndex(index, this.logicalCount)
     this.segment.setTotalMessages(this.logicalCount)
     this.segment.jump(target)
     this.#activeUnits = this.#materialize(this.range)
-    this.currentLogicalPosition = target
     this.jumpInput = target
     if (target !== this.logicalCount - 1) this.setFollowTail(false)
     this.atVisualBottom = false
