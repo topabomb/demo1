@@ -7,6 +7,9 @@ function node(id: string, revision = 0): RenderUnit {
     id,
     messageId: id.split(':')[0]!,
     messageIndex: Number(id.match(/(\d+)/)?.[1] ?? 0),
+    turnId: 'session:turn-1',
+    stepId: 'session:turn-1:step-0',
+    blockId: 'md',
     kind: 'markdown',
     revision,
     estimatePx: 180,
@@ -43,6 +46,7 @@ describe('KeyedConversationProjection', () => {
     expect(aPublishes).toBe(1)
     expect(bPublishes).toBe(0)
     expect(projection.getNode(a.id)?.revision).toBe(1)
+    expect(projection.getNode(a.id)).toMatchObject({ turnId: 'session:turn-1', stepId: 'session:turn-1:step-0', blockId: 'md' })
   })
 
   it('microtask-batches repeated patches to the same visible node', async () => {
