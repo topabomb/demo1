@@ -16,7 +16,20 @@ async function jump(page: Page, index: number): Promise<void> {
   await page.getByTestId('jump-input').fill(String(index))
   await page.getByTestId('jump-button').click()
   await expect(page.locator(`[data-message-index="${index}"]`).first()).toBeVisible({ timeout: 15_000 })
-  await expect.poll(async () => Math.abs(numeric(await page.getByTestId('reader-position').textContent()) - index), { timeout: 15_000 }).toBeLessThan(48)
+  await expect.poll(async () => numeric(await page.getByTestId('reader-position').textContent()), { timeout: 15_000 }).toBe(index)
+  await settleNavigationFrames(page)
+}
+
+async function settleNavigationFrames(page: Page, count = 5): Promise<void> {
+  await page.evaluate((frames) => new Promise<void>(resolve => {
+    let remaining = frames
+    const next = () => {
+      remaining -= 1
+      if (remaining <= 0) resolve()
+      else requestAnimationFrame(next)
+    }
+    requestAnimationFrame(next)
+  }), count)
 }
 
 async function visibleAnchor(page: Page): Promise<{ id: string; top: number } | null> {
