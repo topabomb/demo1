@@ -18,9 +18,9 @@ The framework targets:
 - streaming replies whose physical height changes continuously;
 - exact reader / Latest / follow semantics independent of scrollbar approximation;
 - desktop/tablet/mobile reflow without losing semantic position;
-- replaceable backend protocols, renderer UI and virtualizer.
+- replaceable backend protocols, execution adapters, renderer UI and virtualizer.
 
-It is **not** an Agent loop, persistence engine, network protocol, plugin runtime or generic service framework. Production products provide their own backend/runtime adapters.
+It is **not** an Agent loop, provider SDK, persistence engine, network protocol, plugin runtime or generic service framework. Production products provide their own backend/execution adapters.
 
 ## 2. Physical ownership is part of the architecture
 
@@ -37,7 +37,9 @@ src/
 │   ├── runtime/
 │   ├── vue/
 │   │   ├── renderers/
-│   │   └── viewport-navigation-controller.ts
+│   │   ├── viewport-navigation-controller.ts
+│   │   ├── engine.css
+│   │   └── renderers.css
 │   └── workers/
 └── demo/
     ├── components/
@@ -57,7 +59,8 @@ Rules:
 2. `demo/**` is an executable proof and may consume Engine APIs.
 3. Legacy parallel roots such as top-level `src/model`, `src/runtime`, `src/components` or `src/styles` must not reappear.
 4. `src/engine/index.ts` is the framework-neutral public surface; Vue adapter APIs live under `engine/vue` rather than in that barrel.
-5. Synthetic history, fixture packs, playback rates and demo telemetry are not Engine semantics.
+5. Synthetic history, fixture packs, playback rates, relative session age and demo telemetry are not Engine semantics.
+6. Product/model chrome is supplied through the Vue adapter slots; the Engine does not ship fake provider/search/attachment controls.
 
 `tests/architecture-boundaries.test.ts` enforces these rules.
 
@@ -67,8 +70,8 @@ Rules:
 Provider / DB / remote Agent runtime
             │
             ▼
-1. Backend / Runtime Ports
-            │ canonical history + normalized live mutations
+1. Backend / Execution Ports
+            │ canonical history + normalized live mutations/accounting
             ▼
 2. Canonical Conversation Model
             │ LogicalMessage + ContentBlock[]
@@ -92,7 +95,7 @@ Internal dependency rules are deliberately small:
 
 - `core/` contains framework-neutral indexing/notifier primitives;
 - `model/` owns canonical content and pure canonical mutations;
-- `conversation/` owns session contracts/kernel/semantics;
+- `conversation/` owns session facts, lifecycle storage and normalized execution ports;
 - `presentation/` consumes canonical content and emits renderer-ready nodes;
 - `viewport/` consumes IDs/indexes plus geometry, never renderer semantics;
 - `runtime/` composes kernel + bounded presentation + semantic reader memory;
@@ -102,16 +105,16 @@ Internal dependency rules are deliberately small:
 
 | State class | Examples | Lifetime rule |
 |---|---|---|
-| **Durable domain** | canonical history, execution, queue/blockers, Turn outcome, usage/context | Correct with zero mounted viewports. |
+| **Durable domain** | canonical history, execution, queue/blockers, Turn outcome, normalized usage/context | Correct with zero mounted viewports. |
 | **Session interaction memory** | reader/anchor/follow checkpoint, draft, disclosure preferences | Small, session-scoped, survives Recent switching/hot eviction. |
 | **Rebuildable presentation** | ~2K hot segment, projection LRU, keyed RenderUnits | Disposable; reconstruct from canonical state. |
-| **Ephemeral physical** | DOM, virtualizer measurements, ResizeObserver samples, renderer caches | Mounted/render lifetime only. |
+| **Ephemeral physical** | DOM row count, virtualizer measurements, ResizeObserver samples, renderer caches | Mounted/render lifetime only. |
 
 Critical invariant:
 
 > **running SessionKernel ≠ hot ConversationSessionRuntime ≠ mounted viewport**
 
-Background execution may continue while heavyweight presentation state is evicted.
+Background execution may continue while heavyweight presentation state is evicted. Physical telemetry such as mounted DOM rows never writes back into domain/runtime snapshots.
 
 ## 5. Canonical identity: Message → Turn → Step → Block
 
@@ -160,18 +163,30 @@ It must not require changes to SessionKernel, history segmentation or semantic v
 
 Introduce a keyed cross-event assembler only when one real business row truly spans multiple durable records. Such an assembler must have a stable business key, deterministic replay/fold, append/prepend/replay equivalence, no full-window scan on the append path and renderer-ready output. Do not add a generic node/plugin engine before a real scenario requires one.
 
-## 7. SessionKernel semantics and publication
+## 7. SessionKernel: store facts, never invent provider behavior
 
 `ConversationSessionKernel` owns facts that remain valid without UI:
 
 - execution state and last settled Turn outcome;
 - approval/question blockers and queued follow-ups;
 - unread attention;
-- canonical appended Turns/messages;
-- provider-neutral token/cache/context accounting;
+- canonical appended/replaced messages;
+- provider-normalized token/cache/context accounting;
 - Turn/Step counts and failure metadata.
 
-Canonical block mutation helpers live in `model/message-mutations.ts`; they are not Session lifecycle responsibilities.
+It deliberately does **not** decide that every request has a reasoning block, create an answer block, estimate tokens/cache billing, or inject strings such as “Completed” / “Stopped by user”. Those are provider/execution-adapter policy.
+
+The narrow mutation/lifecycle surface is therefore semantic:
+
+```text
+appendCanonicalMessages(...)
+replaceCanonicalMessage(index, message, optionalIncrementalPatch)
+startExecution(currentAssistantIndex?)
+finishExecution(reason, failure?)
+setAccounting(providerNormalizedUsage, context)
+```
+
+Canonical block mutation helpers live in `model/message-mutations.ts`; they mutate structure/content but do not estimate billing semantics.
 
 Business mutation order and UI publication cadence are separate:
 
@@ -187,7 +202,7 @@ A failed Turn is history, not a permanently failed session. `idle + lastTurn=err
 
 ## 8. Execution boundary and Demo playback
 
-The reusable execution port contains product semantics only:
+The reusable execution port remains small:
 
 ```ts
 interface ConversationExecutionController {
@@ -199,9 +214,9 @@ interface ConversationExecutionController {
 }
 ```
 
-The synthetic lab additionally needs rate, pause/resume, ingress counters and publish counters. Those belong exclusively to `demo/stream-controller.ts`. They must not leak into SessionKernel, `SessionUiSnapshot` or the framework-neutral execution port.
+The synthetic lab owns the behavior needed to exercise that port: it creates the demo user/reasoning/answer blocks, estimates demo token/cache numbers, produces synthetic deltas, implements rate/pause/resume and exposes ingress/publish counters. All of that lives in `demo/stream-controller.ts`.
 
-This is important for extraction: a real provider adapter should not have to pretend it is a benchmark playback controller.
+A production adapter can instead map real provider events and real provider usage into the same canonical/session APIs without pretending to be the synthetic benchmark.
 
 ## 9. Workspace and hot-runtime lifetime
 
@@ -215,7 +230,7 @@ many kernels / executions
                      └── one mounted active viewport
 ```
 
-Static seeded-session definitions live in `demo/workspace-fixtures.ts`, not in the runtime owner. Evicting a hot runtime discards rebuildable projection/measurement state only; it must not stop execution, discard blockers/queue/outcomes or reset usage.
+Static seeded-session definitions and display metadata such as relative age live in `demo/workspace-fixtures.ts`, not Engine contracts. Evicting a hot runtime discards rebuildable projection/measurement state only; it must not stop execution, discard blockers/queue/outcomes or reset usage.
 
 ## 10. Projection runtime
 
@@ -269,7 +284,7 @@ messagesAfter = logicalCount - 1 - committedReader
 
 Scrollbar remainder is physical evidence only; it does not define logical position.
 
-The Vue/Virtua adapter now has one cohesive `ViewportNavigationController`. It owns only physical/navigation mechanics:
+The Vue/Virtua adapter has one cohesive `ViewportNavigationController`. It owns only physical/navigation mechanics:
 
 - user-scroll intent window and direction;
 - mounted-row sampling;
@@ -278,7 +293,7 @@ The Vue/Virtua adapter now has one cohesive `ViewportNavigationController`. It o
 - latest-wins navigation revision;
 - jump visibility/measurement convergence.
 
-`ConversationViewport.vue` remains the generic renderer/composer adapter and delegates those mechanics to the controller. The controller does not become application state: semantic reader/follow/snapshot state remains in `ConversationSessionRuntime`.
+`ConversationViewport.vue` remains the generic renderer/composer adapter and delegates those mechanics to the controller. Mounted-row telemetry is emitted to the Demo rather than stored in `ConversationSessionRuntime`. Debug jump input is likewise Demo-local state.
 
 Responsive/composer reflow is a transaction:
 
@@ -291,26 +306,31 @@ capture semantic anchor or tail intent
 
 ResizeObserver reports physical change; it never invents application intent.
 
-## 12. Renderer and CSS correctness
+## 12. Vue product seam and CSS correctness
 
-Virtualizer-owned wrappers are geometry-pure: no block margin/padding that the virtualizer fails to measure. Tail correctness after composer/product reflow reads the actual scroll container (`scrollHeight`, `scrollTop`, `clientHeight`) rather than assuming cached virtualizer viewport geometry is current.
+The reusable viewport owns only real, functional conversation controls: status, stop, pending-interaction resolution, composer/send, Latest and the rendered content. Product chrome is injected through narrow Vue slots:
 
-Renderer requirements:
+```text
+header-context
+header-actions
+viewport-overlay
+composer-tools
+```
 
-- tables/code own internal overflow;
-- images reserve intrinsic aspect ratio before load;
-- sanitized HTML cannot execute active content;
-- disclosures keep local bounded presentation state;
-- no renderer expands page inline size unexpectedly;
-- adjacent mounted rows do not overlap after async measurement/reflow.
+The public Demo uses those seams for the synthetic-playback label and architecture diagnostics. The Engine itself contains no fake model selector, fake search action or fake attachment button.
 
-Style ownership follows source ownership:
+Virtualizer-owned wrappers are geometry-pure: no block margin/padding that the virtualizer fails to measure. Tail correctness after composer/product reflow reads the actual scroll container rather than assuming cached virtualizer geometry is current.
 
-- `src/engine/vue/engine.css` — host-scoped Engine/renderer/virtualizer/composer rules;
-- `src/demo/styles/demo.css` — product lab and diagnostics, including global page reset;
-- `src/demo/styles/architecture.css` — architecture page.
+Style ownership follows responsibility:
 
-Browser CI injects hostile host-global element styles **after** engine styles and verifies geometry/overflow invariants still hold.
+- `src/engine/vue/engine.css` — Engine design tokens, shell, virtualizer and composer geometry;
+- `src/engine/vue/renderers.css` — renderer/content visuals and containment;
+- `src/demo/styles/demo.css` — product lab, session navigation, diagnostics and the only global page reset;
+- `src/demo/styles/architecture.css` — standalone architecture page.
+
+Both Engine stylesheets remain rooted at `[data-conversation-engine].conversation-shell`. Demo may override documented custom properties, including mobile header leading space, without Engine CSS knowing a sidebar exists.
+
+Browser CI injects hostile host-global element styles **after** Engine styles and verifies geometry/overflow invariants still hold.
 
 ## 13. File-size and fragmentation policy
 
@@ -323,12 +343,7 @@ Therefore these remain intentionally separate:
 - projector registry vs projection cache/store;
 - renderer-per-kind modules.
 
-The review split only proven mixed responsibilities:
-
-1. static workspace fixtures from `DemoWorkspaceRuntime`;
-2. canonical block mutations from `ConversationSessionKernel`;
-3. diagnostics/benchmark UI from `AgentWorkspace.vue`;
-4. physical navigation transactions from `ConversationViewport.vue`.
+The CSS split is intentionally only two Engine files because shell/viewport/composer geometry and renderer visuals are different ownership domains. It is not a per-component stylesheet explosion.
 
 Do not create a generic “manager/service/plugin” layer merely to reduce line count.
 
