@@ -18,14 +18,15 @@ export interface ContentBlockMap {
 
 export type ContentBlockType = keyof ContentBlockMap
 
-export type ContentBlock<K extends ContentBlockType = ContentBlockType> = K extends ContentBlockType
-  ? {
-      id: string
-      type: K
-      data: ContentBlockMap[K]
-      revision?: number
-    }
-  : never
+/** Mapped discriminated union preserves the exact `type` ↔ `data` relationship after declaration merging. */
+export type ContentBlock<K extends ContentBlockType = ContentBlockType> = {
+  [P in K]: {
+    id: string
+    type: P
+    data: ContentBlockMap[P]
+    revision?: number
+  }
+}[K]
 
 export interface AppendCanonicalMessage {
   turnId: string
@@ -36,5 +37,5 @@ export interface AppendCanonicalMessage {
 }
 
 export function block<K extends ContentBlockType>(id: string, type: K, data: ContentBlockMap[K], revision = 0): ContentBlock<K> {
-  return { id, type, data, revision }
+  return { id, type, data, revision } as ContentBlock<K>
 }
