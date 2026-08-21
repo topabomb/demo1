@@ -4,6 +4,12 @@ function numeric(text: string | null): number { return Number((text ?? '').repla
 async function open(page: Page) { await page.goto('./'); await expect(page.getByTestId('active-session-id')).toBeVisible() }
 async function switchTo(page: Page, id: string) { await page.getByTestId(`session-${id}`).click(); await expect(page.getByTestId('active-session-id')).toHaveText(id) }
 async function send(page: Page, text: string) { const input = page.getByTestId('composer-input'); await input.fill(text); await input.press('Enter') }
+async function jump(page: Page, index: number) {
+  await page.getByTestId('jump-input').fill(String(index))
+  await page.getByTestId('jump-button').click()
+  await expect(page.locator(`[data-message-index="${index}"]`).first()).toBeVisible({ timeout: 15_000 })
+  await expect.poll(async () => Math.abs(numeric(await page.getByTestId('reader-position').textContent()) - index), { timeout: 15_000 }).toBeLessThan(64)
+}
 
 test('many asynchronous SessionKernels outlive the 3-hot viewport LRU', async ({ page }) => {
   await open(page)
@@ -48,8 +54,14 @@ test('a historical conversation can be resumed, stopped, resumed again, evicted 
 
   await switchTo(page, 'event-normalization')
   await expect(page.getByTestId('logical-count')).toHaveText('95,004')
-  await expect(page.locator('[data-message-index="95002"]')).toContainText('second continuation')
   await expect.poll(async () => numeric(await page.getByTestId('stream-ticks').textContent())).toBeGreaterThan(1)
+
+  // The assistant keeps growing while this session is off-screen. On a slower/public
+  // deployment the prior user row may correctly be outside Virtua's mounted buffer
+  // when we return at the live tail. Persistence is a semantic property: navigate
+  // to the canonical index and verify the appended turn is still addressable.
+  await jump(page, 95_002)
+  await expect(page.locator('[data-message-index="95002"]')).toContainText('second continuation')
 })
 
 test('pending approval is session-owned and survives switching plus viewport eviction', async ({ page }) => {
