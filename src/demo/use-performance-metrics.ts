@@ -4,6 +4,7 @@ interface MemoryPerformance extends Performance {
   memory?: { usedJSHeapSize: number }
 }
 
+/** Demo diagnostics only; performance telemetry is not an engine dependency. */
 export function usePerformanceMetrics() {
   const fps = ref(0)
   const frameP95 = ref(0)

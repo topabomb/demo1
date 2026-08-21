@@ -1,3 +1,4 @@
+import { BatchedNotifier, type Unsubscribe } from '../core/notifier'
 import { block, type AppendCanonicalMessage, type ContentBlock, type LogicalMessage } from '../model/conversation'
 import type {
   ConversationDescriptor,
@@ -10,7 +11,6 @@ import type {
   TurnEndReasonKind,
 } from './contracts'
 import { defaultTurnReason, normalizeTokenUsage } from './session-semantics'
-import { BatchedNotifier, type Unsubscribe } from './notifier'
 
 export type SessionKernelEventKind = 'content' | 'append' | 'status' | 'queue' | 'interaction' | 'foreground' | 'usage'
 export type SessionKernelContentPatch =
@@ -23,17 +23,15 @@ export interface SessionKernelEvent {
 }
 
 /**
- * Lightweight durable session state. It owns canonical appended turns, execution
- * semantics and whole-session projections, but never owns Vue, DOM, RenderUnits or
- * a virtualizer. Production implementations can persist/replace its history port.
+ * Lightweight session truth. It owns canonical appended history, execution semantics,
+ * blockers/queue and provider-neutral usage. It never owns Vue, DOM, RenderUnits,
+ * virtualizer measurements or demo source generation.
  */
 export class ConversationSessionKernel {
   readonly id: string
   readonly title: string
   readonly age: string
   readonly backend: ConversationHistoryAdapter
-  /** Synthetic-constructor compatibility only; canonical messages no longer depend on it. */
-  readonly seedOffset: number
 
   #appended: LogicalMessage[] = []
   #overrides = new Map<number, LogicalMessage>()
@@ -57,16 +55,16 @@ export class ConversationSessionKernel {
   #lastTurnDurationMs = 0
   #lastTtftMs = 0
 
+  /** Reference execution telemetry; real execution adapters may drive the same normalized mutations. */
   streamRate = 20
   streamIngressTicks = 0
   streamRenderTicks = 0
 
-  constructor(descriptor: ConversationDescriptor, backend: ConversationHistoryAdapter, seedOffset = 0) {
+  constructor(descriptor: ConversationDescriptor, backend: ConversationHistoryAdapter) {
     this.id = descriptor.id
     this.title = descriptor.title
     this.age = descriptor.age
     this.backend = backend
-    this.seedOffset = seedOffset
     this.#status = descriptor.status
     this.#pendingInteraction = descriptor.pendingInteraction ?? null
     this.#lastTurnReason = descriptor.lastTurnReason ?? defaultTurnReason(descriptor.status)
@@ -82,16 +80,10 @@ export class ConversationSessionKernel {
       this.#currentAssistantIndex = backend.count - 1
       this.#lastTurnReason = null
       this.#runStartedAt = now()
-      const tail = backend.loadRange(backend.count - 1, 1)[0]
-      if (tail) this.#overrides.set(tail.index, replaceMarkdownContent(
-        tail,
-        '### Background run\n\nThe agent is continuing work while this session may be off-screen. ',
-        true,
-      ))
     }
   }
 
-  /** Coalesced session-summary notification for UI/workspace consumers. */
+  /** Coalesced session-summary notification for workspace/UI consumers. */
   subscribe(listener: () => void): Unsubscribe { return this.#notifier.subscribe(listener) }
   /** Ordered semantic mutation feed for hot incremental consumers. No event is collapsed. */
   subscribeEvents(listener: (event: SessionKernelEvent) => void): Unsubscribe {
@@ -164,7 +156,7 @@ export class ConversationSessionKernel {
     return out
   }
 
-  /** Canonical ingestion seam. Fixtures and real adapters use the same path. */
+  /** Canonical ingestion seam. Demo fixtures and real adapters use the same path. */
   appendCanonicalMessages(entries: readonly AppendCanonicalMessage[]): readonly number[] {
     if (entries.length === 0) return []
     const indexes: number[] = []
@@ -184,25 +176,21 @@ export class ConversationSessionKernel {
         blocks: cloneBlocks(entry.blocks),
         revision: 0,
         live: entry.live,
-        variant: entry.variant,
       })
     }
     this.#turnCount += turns.size
-    // If the producer has Step identity, count distinct Steps. Older/turn-only
-    // adapters retain the previous per-record approximation rather than invent IDs.
     this.#stepCount += steps.size > 0 ? steps.size : entries.length
     this.#touchUnread()
     this.#emit({ kind: 'append', messageIndex: indexes[indexes.length - 1] })
     return indexes
   }
 
+  /** Convenience normalized mutation used by the reference execution adapter. */
   beginTurn(prompt: string): number | null {
     const text = prompt.trim()
     if (!text || this.#pendingInteraction) return null
     const userIndex = this.count
     const turnId = `${this.id}:runtime-turn-${userIndex}`
-    // Current demo execution has exactly one model request per user Turn. The
-    // explicit Step coordinate keeps the contract ready for real multi-step loops.
     const stepId = `${turnId}:step-0`
     this.#appended.push({
       id: `${this.id}:m-${userIndex}`,
@@ -212,7 +200,6 @@ export class ConversationSessionKernel {
       role: 'user',
       blocks: [block('prompt', 'markdown', { markdown: text })],
       revision: 0,
-      variant: 'runtime-user',
     })
     const assistantIndex = this.count
     this.#appended.push({
@@ -227,7 +214,6 @@ export class ConversationSessionKernel {
       ],
       revision: 0,
       live: true,
-      variant: 'runtime-assistant',
     })
     this.#currentAssistantIndex = assistantIndex
     this.#status = 'working'
@@ -274,11 +260,7 @@ export class ConversationSessionKernel {
     this.#recordFirstOutput()
     this.streamRenderTicks += 1
     this.#touchUnread()
-    this.#emit({
-      kind: 'content',
-      messageIndex: index,
-      contentPatch: { kind: 'append-reasoning', blockId: patched.blockId, delta },
-    })
+    this.#emit({ kind: 'content', messageIndex: index, contentPatch: { kind: 'append-reasoning', blockId: patched.blockId, delta } })
   }
 
   appendAssistantDelta(delta: string): void {
@@ -294,11 +276,7 @@ export class ConversationSessionKernel {
     this.#recordFirstOutput()
     this.streamRenderTicks += 1
     this.#touchUnread()
-    this.#emit({
-      kind: 'content',
-      messageIndex: index,
-      contentPatch: { kind: 'append-markdown', blockId: patched.blockId, delta },
-    })
+    this.#emit({ kind: 'content', messageIndex: index, contentPatch: { kind: 'append-markdown', blockId: patched.blockId, delta } })
   }
 
   completeCurrent(): void {
@@ -386,8 +364,6 @@ export class ConversationSessionKernel {
   #emit(event: SessionKernelEvent, markUnread = true): void {
     this.#lastEvent = event
     if (markUnread) this.#touchUnread()
-    // Semantic consumers receive every mutation synchronously and in producer order;
-    // separate BatchedNotifier publication coalesces workspace/UI refreshes.
     for (const listener of this.#eventListeners) listener(event)
     this.#notifier.markDirty()
   }
@@ -398,81 +374,55 @@ function cloneBlocks(blocks: readonly ContentBlock[]): ContentBlock[] {
 }
 
 function appendReasoningContent(message: LogicalMessage, delta: string, durationMs: number): { message: LogicalMessage; blockId: string } | null {
-  const blocks = canonicalBlocks(message)
+  const blocks = cloneBlocks(message.blocks)
   const targetIndex = blocks.findIndex(entry => entry.type === 'reasoning')
   if (targetIndex < 0) return null
   const current = blocks[targetIndex] as ContentBlock<'reasoning'>
   const text = `${current.data.text}${delta}`
-  const nextBlock = block(current.id, 'reasoning', {
-    ...current.data,
-    text,
-    tokenCount: estimateTokens(text),
-    durationMs,
-    status: 'streaming',
-  }, (current.revision ?? 0) + 1)
-  blocks[targetIndex] = nextBlock
-  return {
-    blockId: current.id,
-    message: { ...message, blocks, revision: (message.revision ?? 0) + 1, live: true },
-  }
+  blocks[targetIndex] = block(current.id, 'reasoning', { ...current.data, text, tokenCount: estimateTokens(text), durationMs, status: 'streaming' }, (current.revision ?? 0) + 1)
+  return { blockId: current.id, message: { ...message, blocks, revision: (message.revision ?? 0) + 1, live: true } }
 }
 
 function appendMarkdownContent(message: LogicalMessage, delta: string): { message: LogicalMessage; blockId: string } {
-  const blocks = canonicalBlocks(message)
+  const blocks = cloneBlocks(message.blocks)
   let targetIndex = -1
-  for (let i = blocks.length - 1; i >= 0; i -= 1) if (blocks[i]?.type === 'markdown') { targetIndex = i; break }
+  for (let index = blocks.length - 1; index >= 0; index -= 1) if (blocks[index]?.type === 'markdown') { targetIndex = index; break }
   if (targetIndex < 0) {
     const created = block(message.role === 'user' ? 'prompt' : 'answer', 'markdown', { markdown: delta }, 1)
-    return {
-      blockId: created.id,
-      message: { ...message, blocks: [...blocks, created], content: undefined, revision: (message.revision ?? 0) + 1, live: true },
-    }
+    return { blockId: created.id, message: { ...message, blocks: [...blocks, created], revision: (message.revision ?? 0) + 1, live: true } }
   }
 
   const current = blocks[targetIndex] as ContentBlock<'markdown'>
-  const nextBlock = block(current.id, 'markdown', { ...current.data, markdown: `${current.data.markdown}${delta}` }, (current.revision ?? 0) + 1)
-  blocks[targetIndex] = nextBlock
-  return {
-    blockId: current.id,
-    message: { ...message, blocks, content: undefined, revision: (message.revision ?? 0) + 1, live: true },
-  }
+  blocks[targetIndex] = block(current.id, 'markdown', { ...current.data, markdown: `${current.data.markdown}${delta}` }, (current.revision ?? 0) + 1)
+  return { blockId: current.id, message: { ...message, blocks, revision: (message.revision ?? 0) + 1, live: true } }
 }
 
 function replaceMarkdownContent(message: LogicalMessage, markdown: string, live: boolean): LogicalMessage {
-  const blocks = canonicalBlocks(message)
+  const blocks = cloneBlocks(message.blocks)
   let targetIndex = -1
-  for (let i = blocks.length - 1; i >= 0; i -= 1) if (blocks[i]?.type === 'markdown') { targetIndex = i; break }
+  for (let index = blocks.length - 1; index >= 0; index -= 1) if (blocks[index]?.type === 'markdown') { targetIndex = index; break }
   const id = targetIndex >= 0 ? blocks[targetIndex]!.id : (message.role === 'user' ? 'prompt' : 'answer')
   const previousRevision = targetIndex >= 0 ? blocks[targetIndex]!.revision ?? 0 : 0
   const nextBlock = block(id, 'markdown', { markdown }, previousRevision + 1)
   if (targetIndex >= 0) blocks[targetIndex] = nextBlock
   else blocks.push(nextBlock)
-  return { ...message, blocks, content: undefined, revision: (message.revision ?? 0) + 1, live }
+  return { ...message, blocks, revision: (message.revision ?? 0) + 1, live }
 }
 
 function settleReasoning(message: LogicalMessage, status: 'complete' | 'interrupted'): LogicalMessage {
-  if (!message.blocks?.some(entry => entry.type === 'reasoning')) return message
-  const blocks = canonicalBlocks(message).map(entry => {
-    if (entry.type !== 'reasoning') return entry
-    return block(entry.id, 'reasoning', { ...entry.data, status }, (entry.revision ?? 0) + 1)
-  })
+  if (!message.blocks.some(entry => entry.type === 'reasoning')) return message
+  const blocks = cloneBlocks(message.blocks).map(entry => entry.type === 'reasoning'
+    ? block(entry.id, 'reasoning', { ...entry.data, status }, (entry.revision ?? 0) + 1)
+    : entry)
   return { ...message, blocks, revision: (message.revision ?? 0) + 1 }
 }
 
-function canonicalBlocks(message: LogicalMessage): ContentBlock[] {
-  if (message.blocks?.length) return cloneBlocks(message.blocks)
-  if (message.content !== undefined) return [block(message.role === 'user' ? 'prompt' : 'answer', 'markdown', { markdown: message.content }, message.revision ?? 0)]
-  return []
-}
-
 function markdownText(message: LogicalMessage): string {
-  if (message.blocks?.length) {
-    for (let i = message.blocks.length - 1; i >= 0; i -= 1) {
-      const contentBlock = message.blocks[i]
-      if (contentBlock?.type === 'markdown') return contentBlock.data.markdown
-    }
+  for (let index = message.blocks.length - 1; index >= 0; index -= 1) {
+    const contentBlock = message.blocks[index]
+    if (contentBlock?.type === 'markdown') return contentBlock.data.markdown
   }
-  return message.content ?? ''
+  return ''
 }
 
 function estimateTokens(text: string): number { return Math.max(1, Math.ceil(text.length / 4)) }

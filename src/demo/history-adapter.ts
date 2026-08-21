@@ -1,7 +1,8 @@
-import { SyntheticConversationSource } from '../core/synthetic'
-import type { LogicalMessage } from '../core/types'
-import type { ConversationHistoryAdapter } from './contracts'
+import type { ConversationHistoryAdapter } from '../conversation/contracts'
+import type { LogicalMessage } from '../model/conversation'
+import { SyntheticConversationSource } from './synthetic'
 
+/** Demo-only cold-history adapter. Real products replace this port with DB/network paging. */
 export class SyntheticHistoryAdapter implements ConversationHistoryAdapter {
   readonly #source: SyntheticConversationSource
 

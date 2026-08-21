@@ -1,11 +1,7 @@
 import { createApp } from 'vue'
 import App from './App.vue'
-import './styles.css'
-import './agent-renderers.css'
-import './virtua-layout.css'
-import './renderer-content.css'
+import './styles/demo.css'
+import './styles/engine.css'
 import './architecture.css'
-import './product-ux.css'
-import './responsive-ux.css'
 
 createApp(App).mount('#app')

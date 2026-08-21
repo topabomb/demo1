@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import type { RenderUnit } from '../../core/types'
+import type { RenderUnit } from '../../presentation/render-unit'
 import { useFoldState } from './fold-state'
 import { highlightCode } from './highlight-client'
 

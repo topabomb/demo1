@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, shallowRef, watch } from 'vue'
-import type { ConversationSessionRuntime } from '../conversation/session-runtime'
+import type { ConversationSessionRuntime } from '../runtime/session-runtime'
 import RenderUnitView from './RenderUnitView.vue'
 
 const props = defineProps<{ runtime: ConversationSessionRuntime; nodeId: string }>()

@@ -1,10 +1,10 @@
-import type { ConversationExecutionController, SubmitDisposition } from './contracts'
-import type { ConversationSessionKernel } from './session-kernel'
+import type { ConversationExecutionController, SubmitDisposition } from '../conversation/contracts'
+import type { ConversationSessionKernel } from '../conversation/session-kernel'
 
 const MAX_RUN_PUBLISHES = 1800
 const REASONING_PUBLISHES = 18
 
-/** Session-scoped execution. It never owns or depends on a viewport runtime. */
+/** Demo-only execution driver. It depends on the session API and never on a viewport. */
 export class SyntheticStreamController implements ConversationExecutionController {
   #kernel: ConversationSessionKernel
   #timer: ReturnType<typeof setInterval> | null = null
@@ -12,13 +12,8 @@ export class SyntheticStreamController implements ConversationExecutionControlle
   #pendingDelta = ''
   #runPublishes = 0
 
-  constructor(kernel: ConversationSessionKernel) {
-    this.#kernel = kernel
-  }
-
-  get running(): boolean {
-    return this.#timer !== null && this.#kernel.status === 'working'
-  }
+  constructor(kernel: ConversationSessionKernel) { this.#kernel = kernel }
+  get running(): boolean { return this.#timer !== null && this.#kernel.status === 'working' }
 
   start(reset = true): void {
     if (this.#kernel.status !== 'working' || this.#kernel.currentAssistantIndex === null) return
@@ -27,14 +22,8 @@ export class SyntheticStreamController implements ConversationExecutionControlle
     this.#timer = setInterval(() => this.#ingest(), Math.max(16, Math.round(1000 / this.#kernel.streamRate)))
   }
 
-  stop(_clear = false): void {
-    this.#stopTimer()
-  }
-
-  abort(): void {
-    this.#stopTimer()
-    this.#kernel.abortCurrent()
-  }
+  stop(_clear = false): void { this.#stopTimer() }
+  abort(): void { this.#stopTimer(); this.#kernel.abortCurrent() }
 
   submit(prompt: string): SubmitDisposition {
     if (this.#kernel.pendingInteraction) return 'blocked'
@@ -45,19 +34,13 @@ export class SyntheticStreamController implements ConversationExecutionControlle
     return 'started'
   }
 
-  resolveInteraction(approved: boolean): void {
-    this.#kernel.resolveInteraction(approved)
-  }
-
+  resolveInteraction(approved: boolean): void { this.#kernel.resolveInteraction(approved) }
   setRate(rate: number): void {
     const wasRunning = this.running
     this.#kernel.setStreamRate(rate)
     if (wasRunning) this.start(false)
   }
-
-  dispose(): void {
-    this.#stopTimer()
-  }
+  dispose(): void { this.#stopTimer() }
 
   #stopTimer(): void {
     if (this.#timer) clearInterval(this.#timer)
@@ -73,10 +56,7 @@ export class SyntheticStreamController implements ConversationExecutionControlle
       : syntheticAnswerDelta(this.#kernel.streamIngressTicks)
     if (this.#framePending) return
     this.#framePending = true
-    scheduleFrame(() => {
-      this.#framePending = false
-      this.#publish()
-    })
+    scheduleFrame(() => { this.#framePending = false; this.#publish() })
   }
 
   #publish(): void {

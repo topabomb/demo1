@@ -1,10 +1,6 @@
 export type Unsubscribe = () => void
 
-/**
- * Framework-free microtask notifier inspired by DSH's projection layer: many
- * backend/model mutations in one turn collapse into one publication. It keeps
- * high-frequency stream events out of the UI framework scheduler.
- */
+/** Framework-free microtask publication primitive for bounded engine state. */
 export class BatchedNotifier {
   #listeners = new Set<() => void>()
   #scheduled = false
@@ -28,7 +24,5 @@ export class BatchedNotifier {
     for (const listener of this.#listeners) listener()
   }
 
-  get listenerCount(): number {
-    return this.#listeners.size
-  }
+  get listenerCount(): number { return this.#listeners.size }
 }

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { VList, type VListHandle } from 'virtua/vue'
-import type { ViewportSnapshot } from '../conversation/contracts'
+import type { ConversationExecutionController } from '../conversation/contracts'
 import {
   billedInputTokens,
   cacheHitPercent,
@@ -10,8 +10,8 @@ import {
   formatTokens,
   sessionIndicatorLabel,
 } from '../conversation/session-semantics'
-import type { ConversationSessionRuntime, SessionUiSnapshot, ShiftPlan } from '../conversation/session-runtime'
-import type { SyntheticStreamController } from '../conversation/stream-controller'
+import type { ConversationSessionRuntime, SessionUiSnapshot, ShiftPlan } from '../runtime/session-runtime'
+import type { SessionViewMemory } from '../viewport/state'
 import {
   VIEWPORT_POLICY,
   isMessageCommittedVisible,
@@ -22,7 +22,7 @@ import {
 } from '../viewport/contracts'
 import ConversationNodeSeat from './ConversationNodeSeat.vue'
 
-const props = defineProps<{ runtime: ConversationSessionRuntime; stream: SyntheticStreamController; uiState: SessionUiSnapshot; diagnostics?: boolean }>()
+const props = defineProps<{ runtime: ConversationSessionRuntime; stream: ConversationExecutionController; uiState: SessionUiSnapshot; diagnostics?: boolean }>()
 
 // Virtua adapter tuning: physical renderer hints, never semantic state.
 const VIRTUAL_BUFFER_PX = 900
@@ -147,8 +147,6 @@ function refreshMountedRows(): void {
   })
 }
 function remainingToBottom(): number {
-  // Committed bottom semantics use the actual scroll container. Virtua's cached
-  // viewportSize may briefly lag a composer/responsive grid reflow by one layout.
   const element = scrollStageRef.value?.querySelector<HTMLElement>('.conversation-vlist')
   if (element) return Math.max(0, element.scrollHeight - element.scrollTop - element.clientHeight)
   const list = listRef.value
@@ -206,8 +204,6 @@ async function restoreListAnchor(anchor: CommittedViewportAnchor, revision?: num
   if (!stage || !row) return false
   const drift = Math.abs((row.getBoundingClientRect().top - stage.getBoundingClientRect().top) - anchor.viewportTopPx)
   if (drift >= VIEWPORT_POLICY.anchorTolerancePx) return false
-  // Preserve the semantic coordinate we intentionally restored. Re-selecting an
-  // anchor here can choose a different row after a large reflow and introduce drift.
   lastCommittedAnchor = anchor
   return true
 }
@@ -222,8 +218,6 @@ async function pinMeasuredEnd(maxFrames = VIEWPORT_POLICY.restoreAttempts, revis
     if (!navigationIsCurrent(revision)) return false
     const list = listRef.value
     if (!list) return false
-    // Scroll past the virtual maximum and let the physical scroll container clamp.
-    // This does not depend on Virtua's viewportSize being synchronized yet.
     list.scrollTo(list.scrollSize)
     await settleFrames(1)
     if (!navigationIsCurrent(revision)) return false
@@ -267,9 +261,6 @@ function onVirtualScroll(offset: number): void {
   lastScrollOffset = offset
   const hasIntent = performance.now() < userScrollIntentUntil
   if (hasIntent && userScrollDirection === 0 && inferred !== 0) userScrollDirection = inferred
-  // Only an explicit user navigation may derive semantic reader state from a
-  // physical scroll offset. Programmatic jump/restore/reflow has its own semantic
-  // coordinate and physical callbacks are observations, not write authority.
   if (hasIntent) updateReaderFromUserScroll(offset)
   refreshMountedRows()
   if (!hasIntent || !uiState.value.streamTarget) return
@@ -279,8 +270,6 @@ function onVirtualScroll(offset: number): void {
 function onVirtualScrollEnd(): void {
   refreshMountedRows()
   const hasUserIntent = performance.now() < userScrollIntentUntil
-  // Programmatic/layout-induced scroll-end is physical noise. Only explicit user
-  // navigation is allowed to replace the stable semantic anchor here.
   if (hasUserIntent) rememberCommittedAnchor()
   if (shifting.value || !hasUserIntent) return
   if (userScrollDirection < 0 && (listRef.value?.scrollOffset ?? Infinity) < VIEWPORT_POLICY.edgeThresholdPx) void shiftBackward()
@@ -328,8 +317,6 @@ async function scrollToLogical(target: number, align: 'start' | 'center' | 'end'
     list.scrollToIndex(index, { align })
     await settleFrames(2)
     if (!navigationIsCurrent(revision) || !targetIsCommittedVisible(target)) continue
-    // A programmatic reader coordinate becomes true only after the virtualizer has
-    // kept the requested target committed across stable measurement frames.
     await settleFrames(VIEWPORT_POLICY.stableLayoutFrames)
     if (!navigationIsCurrent(revision) || !targetIsCommittedVisible(target)) continue
     const current = listRef.value
@@ -403,7 +390,6 @@ function setStreamRate(rate: number): void { props.stream.setRate(rate) }
 function abortRun(): void { props.stream.abort() }
 function resolveInteraction(approved: boolean): void { props.stream.resolveInteraction(approved) }
 
-/** Product CSS owns min/max composer height; JS only asks for intrinsic content height. */
 function resizeComposer(): void {
   const input = composerInputRef.value
   if (!input) return
@@ -469,7 +455,7 @@ async function reconcileViewportResize(): Promise<void> {
     if (viewportResizeQueued && !navigationRunning) scheduleViewportResizeReconcile()
   }
 }
-function captureSnapshot(): ViewportSnapshot {
+function captureSnapshot(): SessionViewMemory {
   const anchor = lastCommittedAnchor ?? captureCommittedAnchor()
   if (anchor) lastCommittedAnchor = anchor
   const snapshot = anchor ? props.runtime.snapshot(anchor.id, anchor.offsetPx) : props.runtime.snapshot()

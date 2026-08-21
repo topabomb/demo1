@@ -1,6 +1,4 @@
 import type { LogicalMessage } from '../model/conversation'
-import type { RenderUnit } from '../presentation/render-unit'
-import type { Unsubscribe } from './notifier'
 
 /** Live execution state. Historical Turn outcome is deliberately separate. */
 export type SessionStatus = 'idle' | 'working' | 'waiting' | 'interrupted'
@@ -70,7 +68,7 @@ export interface ConversationHistoryAdapter extends ConversationBackend {}
 
 export type SubmitDisposition = 'started' | 'queued' | 'blocked'
 
-/** Execution port; the synthetic controller is only the demo implementation. */
+/** Execution port. Provider/runtime-specific drivers implement this interface outside the session kernel. */
 export interface ConversationExecutionController {
   readonly running: boolean
   start(reset?: boolean): void
@@ -79,36 +77,8 @@ export interface ConversationExecutionController {
   submit(prompt: string): SubmitDisposition
   resolveInteraction(approved: boolean): void
   setRate(rate: number): void
+  dispose?(): void
 }
-
-/** Rebuildable keyed presentation store. */
-export interface ConversationProjectionStore {
-  readonly order: readonly string[]
-  readonly size: number
-  getNode(id: string): RenderUnit | undefined
-  subscribeOrder(listener: () => void): Unsubscribe
-  subscribeNode(id: string, listener: () => void): Unsubscribe
-}
-
-/** Framework-neutral semantic viewport checkpoint. No draft/product state belongs here. */
-export interface SemanticViewportSnapshot {
-  logicalPosition: number
-  anchorUnitId: string | null
-  anchorOffsetPx: number
-  followTail: boolean
-  atVisualBottom: boolean
-}
-
-/**
- * Small session-local interaction memory persisted across Recent switching/hot-runtime
- * eviction. It is not canonical history and may use a different persistence policy.
- */
-export interface SessionViewMemory extends SemanticViewportSnapshot {
-  draftText: string
-}
-
-/** @deprecated compatibility name; use SemanticViewportSnapshot or SessionViewMemory explicitly. */
-export type ViewportSnapshot = SessionViewMemory
 
 export interface StreamDelta {
   sessionId: string

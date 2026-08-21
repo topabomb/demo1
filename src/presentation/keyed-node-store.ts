@@ -1,13 +1,10 @@
-import type { RenderUnit } from '../presentation/render-unit'
+import { BatchedNotifier, type Unsubscribe } from '../core/notifier'
 import type { ConversationProjectionStore } from './contracts'
-import { BatchedNotifier, type Unsubscribe } from './notifier'
+import type { RenderUnit } from './render-unit'
 
 /**
- * Framework-free conversation projection.
- *
- * `order` changes only when rows enter/leave/move. Streaming or tool lifecycle
- * changes replace one node by stable key and notify only subscribers of that key.
- * This is the same render-economics principle we wanted to borrow from DSH.
+ * Framework-free keyed presentation store. `order` changes only when nodes
+ * enter/leave/move; a stable-node patch notifies only subscribers of that key.
  */
 export class KeyedConversationProjection implements ConversationProjectionStore {
   #order: readonly string[] = Object.freeze([] as string[])
@@ -15,21 +12,10 @@ export class KeyedConversationProjection implements ConversationProjectionStore 
   #orderNotifier = new BatchedNotifier()
   #nodeNotifiers = new Map<string, BatchedNotifier>()
 
-  get order(): readonly string[] {
-    return this.#order
-  }
-
-  get size(): number {
-    return this.#order.length
-  }
-
-  getNode(id: string): RenderUnit | undefined {
-    return this.#nodes.get(id)
-  }
-
-  subscribeOrder(listener: () => void): Unsubscribe {
-    return this.#orderNotifier.subscribe(listener)
-  }
+  get order(): readonly string[] { return this.#order }
+  get size(): number { return this.#order.length }
+  getNode(id: string): RenderUnit | undefined { return this.#nodes.get(id) }
+  subscribeOrder(listener: () => void): Unsubscribe { return this.#orderNotifier.subscribe(listener) }
 
   subscribeNode(id: string, listener: () => void): Unsubscribe {
     let notifier = this.#nodeNotifiers.get(id)
@@ -44,7 +30,6 @@ export class KeyedConversationProjection implements ConversationProjectionStore 
     }
   }
 
-  /** Replace the visible/hot logical order while retaining unchanged node objects. */
   replace(units: readonly RenderUnit[]): void {
     const nextIds = units.map(unit => unit.id)
     const orderChanged = !sameOrder(this.#order, nextIds)
@@ -58,9 +43,7 @@ export class KeyedConversationProjection implements ConversationProjectionStore 
       this.#nodeNotifiers.get(unit.id)?.markDirty()
     }
 
-    for (const id of this.#nodes.keys()) {
-      if (!live.has(id)) this.#nodes.delete(id)
-    }
+    for (const id of this.#nodes.keys()) if (!live.has(id)) this.#nodes.delete(id)
 
     if (orderChanged) {
       this.#order = Object.freeze(nextIds)
@@ -68,7 +51,6 @@ export class KeyedConversationProjection implements ConversationProjectionStore 
     }
   }
 
-  /** Patch one stable node without invalidating the list order. */
   patch(unit: RenderUnit): void {
     if (!this.#nodes.has(unit.id)) return
     this.#nodes.set(unit.id, unit)

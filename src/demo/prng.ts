@@ -8,10 +8,7 @@ export function hash32(input: number): number {
   return x >>> 0
 }
 
-export function unitFloat(seed: number): number {
-  return hash32(seed) / 0xffffffff
-}
-
+export function unitFloat(seed: number): number { return hash32(seed) / 0xffffffff }
 export function intBetween(seed: number, min: number, max: number): number {
   return min + Math.floor(unitFloat(seed) * (max - min + 1))
 }

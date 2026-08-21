@@ -123,9 +123,6 @@ test('semantic viewport survives a different product layout and composer height 
   await switchSession(page, 'event-normalization')
   await jump(page, 50_000)
 
-  // Read one actually visible measured wrapper in a single DOM transaction. A
-  // virtualizer is allowed to recycle an earlier locator between resolution and
-  // evaluation, but any mounted visible wrapper must remain geometry-pure.
   await expect.poll(async () => page.getByTestId('scrollport').evaluate(stage => {
     const viewport = stage.getBoundingClientRect()
     const element = [...stage.querySelectorAll<HTMLElement>('[data-virtual-item="true"]')].find(row => {
@@ -142,11 +139,12 @@ test('semantic viewport survives a different product layout and composer height 
   const stageHeightBefore = await page.getByTestId('scrollport').evaluate(element => element.getBoundingClientRect().height)
 
   await page.evaluate(() => {
-    const root = document.documentElement.style
-    root.setProperty('--session-sidebar-width', '328px')
-    root.setProperty('--conversation-content-width', '720px')
-    root.setProperty('--conversation-row-gap', '12px')
-    root.setProperty('--composer-max-height', '240px')
+    const app = document.querySelector<HTMLElement>('.agent-app')!.style
+    const engine = document.querySelector<HTMLElement>('[data-conversation-engine]')!.style
+    app.setProperty('--session-sidebar-width', '328px')
+    engine.setProperty('--conversation-content-width', '720px')
+    engine.setProperty('--conversation-row-gap', '12px')
+    engine.setProperty('--composer-max-height', '240px')
   })
 
   const composer = page.getByTestId('composer-input')
@@ -156,10 +154,57 @@ test('semantic viewport survives a different product layout and composer height 
 
   const noOverlay = await page.evaluate(() => {
     const stage = document.querySelector<HTMLElement>('[data-testid="scrollport"]')!.getBoundingClientRect()
-    const composer = document.querySelector<HTMLElement>('[data-testid="composer-shell"]')!.getBoundingClientRect()
-    return stage.bottom <= composer.top + 1
+    const composerRect = document.querySelector<HTMLElement>('[data-testid="composer-shell"]')!.getBoundingClientRect()
+    return stage.bottom <= composerRect.top + 1
   })
   expect(noOverlay).toBe(true)
   await expectRowsDisjoint(page)
   await expect.poll(() => anchorDrift(page, before!), { timeout: 12_000 }).toBeLessThan(4)
+})
+
+test('engine styling stays scoped under hostile host element rules', async ({ page }) => {
+  await openLab(page)
+  await switchSession(page, 'event-normalization')
+  await jump(page, 50_000)
+
+  const baselineHeader = await page.locator('.conversation-header').evaluate(element => element.getBoundingClientRect().height)
+  const baselineComposer = await page.getByTestId('composer-input').evaluate(element => element.getBoundingClientRect().height)
+
+  const hostProbe = await page.evaluate(() => {
+    const probe = document.createElement('button')
+    probe.id = 'host-style-probe'
+    probe.textContent = 'host'
+    document.body.appendChild(probe)
+    const style = document.createElement('style')
+    style.id = 'hostile-host-style'
+    style.textContent = `
+      button, input, textarea, select { padding: 31px; border-width: 9px; font-size: 28px; line-height: 3; box-sizing: content-box; }
+      img { width: 2000px; max-width: none; }
+      table { width: 1800px; max-width: none; }
+    `
+    document.head.appendChild(style)
+    return probe.getBoundingClientRect().height
+  })
+  expect(hostProbe).toBeGreaterThan(100)
+  await settleNavigationFrames(page)
+
+  await expect(page.locator('[data-conversation-engine]')).toHaveAttribute('data-conversation-engine', 'vue')
+  await expect.poll(async () => page.locator('.conversation-header').evaluate(element => element.getBoundingClientRect().height)).toBeLessThanOrEqual(baselineHeader + 2)
+  await expect.poll(async () => page.getByTestId('composer-input').evaluate(element => element.getBoundingClientRect().height)).toBeLessThanOrEqual(baselineComposer + 4)
+  await expectRowsDisjoint(page)
+
+  const geometry = await page.evaluate(() => {
+    const engine = document.querySelector<HTMLElement>('[data-conversation-engine]')!
+    const stage = document.querySelector<HTMLElement>('[data-testid="scrollport"]')!
+    const composerRect = document.querySelector<HTMLElement>('[data-testid="composer-shell"]')!.getBoundingClientRect()
+    const stageRect = stage.getBoundingClientRect()
+    return {
+      pageOverflow: Math.max(0, document.documentElement.scrollWidth - document.documentElement.clientWidth),
+      engineOverflow: Math.max(0, engine.scrollWidth - engine.clientWidth),
+      overlay: stageRect.bottom - composerRect.top,
+    }
+  })
+  expect(geometry.pageOverflow).toBeLessThanOrEqual(1)
+  expect(geometry.engineOverflow).toBeLessThanOrEqual(1)
+  expect(geometry.overlay).toBeLessThanOrEqual(1)
 })

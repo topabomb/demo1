@@ -1,12 +1,12 @@
 import { PageHeightIndex, DEFAULT_PAGE_SIZE } from '../core/page-index'
-import { SegmentManager } from '../core/segment-manager'
-import type { SegmentRange } from '../core/types'
+import { SegmentManager, type SegmentRange } from '../core/segment-manager'
+import { BatchedNotifier, type Unsubscribe } from '../core/notifier'
 import { ProjectionEngine } from '../presentation/projection-engine'
+import { KeyedConversationProjection } from '../presentation/keyed-node-store'
 import type { RenderUnit } from '../presentation/render-unit'
-import type { PendingInteraction, SessionStatus, ViewportSnapshot } from './contracts'
-import { KeyedConversationProjection } from './keyed-node-store'
-import { BatchedNotifier, type Unsubscribe } from './notifier'
-import type { ConversationSessionKernel, SessionKernelEvent } from './session-kernel'
+import type { PendingInteraction, SessionStatus } from '../conversation/contracts'
+import type { ConversationSessionKernel, SessionKernelEvent } from '../conversation/session-kernel'
+import type { SessionViewMemory } from '../viewport/state'
 
 export const WINDOW_MESSAGES = 2048
 export const SHIFT_MESSAGES = 512
@@ -45,8 +45,11 @@ export interface SessionUiSnapshot {
 }
 
 /**
- * Disposable hot presentation runtime. Execution/history remain in SessionKernel;
- * this object owns only bounded segment projection, keyed nodes and reader snapshot.
+ * Disposable composition runtime for one hot conversation view.
+ *
+ * Domain/execution truth remains in SessionKernel. This layer composes a bounded
+ * history segment, Presentation projection/cache and semantic reader memory. It
+ * intentionally knows those lower layers; none of them know this runtime back.
  */
 export class ConversationSessionRuntime {
   readonly projection = new KeyedConversationProjection()
@@ -57,7 +60,7 @@ export class ConversationSessionRuntime {
 
   #stateNotifier = new BatchedNotifier()
   #activeUnits: RenderUnit[] = []
-  #snapshot: ViewportSnapshot
+  #snapshot: SessionViewMemory
   #kernelUnsubscribe: Unsubscribe
   #knownLogicalCount: number
 
@@ -70,7 +73,7 @@ export class ConversationSessionRuntime {
   atVisualBottom: boolean
   draftText: string
 
-  constructor(kernel: ConversationSessionKernel, snapshot: ViewportSnapshot) {
+  constructor(kernel: ConversationSessionKernel, snapshot: SessionViewMemory) {
     this.kernel = kernel
     this.#knownLogicalCount = kernel.count
     this.pageHeights = new PageHeightIndex(kernel.count)
@@ -85,8 +88,6 @@ export class ConversationSessionRuntime {
     this.#activeUnits = this.#materialize(this.segment.range)
     this.#refreshPageEstimates()
     this.projection.replace(this.#activeUnits)
-    // Incremental presentation must receive every semantic kernel mutation in
-    // producer order. Workspace/UI summaries remain independently coalesced.
     this.#kernelUnsubscribe = kernel.subscribeEvents(event => this.#syncKernel(event))
   }
 
@@ -139,7 +140,7 @@ export class ConversationSessionRuntime {
     this.#stateNotifier.markDirty()
   }
 
-  snapshot(anchorUnitId = this.#snapshot.anchorUnitId, anchorOffsetPx = this.#snapshot.anchorOffsetPx): ViewportSnapshot {
+  snapshot(anchorUnitId = this.#snapshot.anchorUnitId, anchorOffsetPx = this.#snapshot.anchorOffsetPx): SessionViewMemory {
     return {
       logicalPosition: clampIndex(this.currentLogicalPosition, this.logicalCount),
       anchorUnitId,
@@ -150,14 +151,14 @@ export class ConversationSessionRuntime {
     }
   }
 
-  rememberSnapshot(snapshot: ViewportSnapshot): void {
+  rememberSnapshot(snapshot: SessionViewMemory): void {
     this.#snapshot = { ...snapshot, logicalPosition: clampIndex(snapshot.logicalPosition, this.logicalCount) }
     this.draftText = snapshot.draftText
   }
 
-  get rememberedSnapshot(): ViewportSnapshot { return { ...this.#snapshot, draftText: this.draftText } }
+  get rememberedSnapshot(): SessionViewMemory { return { ...this.#snapshot, draftText: this.draftText } }
 
-  /** Commits a semantic reader coordinate only after the physical adapter has established it. */
+  /** Commit reader only after the physical list has established the target. */
   setReaderPosition(index: number, atVisualBottom: boolean): void {
     this.currentLogicalPosition = clampIndex(index, this.logicalCount)
     this.atVisualBottom = atVisualBottom && this.range.end === this.logicalCount
@@ -170,12 +171,7 @@ export class ConversationSessionRuntime {
     this.#stateNotifier.markDirty()
   }
 
-  /**
-   * Rebase the bounded working set around a requested target. This intentionally
-   * does NOT mutate currentLogicalPosition: a request is not a committed reader
-   * coordinate until a Physical List Adapter confirms the target is laid out and
-   * visible, then calls setReaderPosition().
-   */
+  /** Rebase the bounded window without pretending the requested reader has committed. */
   jump(index: number): void {
     if (this.logicalCount <= 0) return
     const target = clampIndex(index, this.logicalCount)
