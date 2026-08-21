@@ -117,6 +117,8 @@
   font-size: 10px;
 }
 
+.reasoning-live { display:inline-block;margin-left:5px;padding:1px 5px;border-radius:999px;background:#2c2241;color:#c9b7ff;font-size:7px;font-style:normal;text-transform:uppercase;letter-spacing:.06em;vertical-align:1px; }
+
 .disclosure-copy small,
 .tool-title small {
   color: #607080;
@@ -179,6 +181,10 @@
 .status.running { background: #16283a; color: #79c0ff; }
 .status.success { background: #173022; color: #7ee787; }
 .status.error { background: #3a2022; color: #ff9b94; }
+.tool-progress { height:3px;background:#141e28;overflow:hidden; }
+.tool-progress i { display:block;height:100%;border-radius:999px;background:#58a6ff;transition:width .12s linear; }
+.tool-success .tool-progress i { background:#3fb950; }
+.tool-error .tool-progress i { background:#f85149; }
 
 .tool-detail {
   border-top: 1px solid #1f2934;
