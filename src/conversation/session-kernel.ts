@@ -13,7 +13,9 @@ import { defaultTurnReason, normalizeTokenUsage } from './session-semantics'
 import { BatchedNotifier, type Unsubscribe } from './notifier'
 
 export type SessionKernelEventKind = 'content' | 'append' | 'status' | 'queue' | 'interaction' | 'foreground' | 'usage'
-export interface SessionKernelContentPatch { kind: 'append-markdown'; blockId: string; delta: string }
+export type SessionKernelContentPatch =
+  | { kind: 'append-markdown'; blockId: string; delta: string }
+  | { kind: 'append-reasoning'; blockId: string; delta: string }
 export interface SessionKernelEvent {
   kind: SessionKernelEventKind
   messageIndex?: number
@@ -219,7 +221,10 @@ export class ConversationSessionKernel {
       turnId,
       stepId,
       role: 'assistant',
-      blocks: [block('answer', 'markdown', { markdown: '' })],
+      blocks: [
+        block('reasoning', 'reasoning', { text: '', tokenCount: 0, durationMs: 0, defaultOpen: false, status: 'streaming' }),
+        block('answer', 'markdown', { markdown: '' }),
+      ],
       revision: 0,
       live: true,
       variant: 'runtime-assistant',
@@ -255,6 +260,27 @@ export class ConversationSessionKernel {
     return next
   }
 
+  appendCurrentReasoningDelta(delta: string): void {
+    const index = this.#currentAssistantIndex
+    if (index === null || !delta) return
+    const current = this.getMessage(index)
+    const patched = appendReasoningContent(current, delta, Math.max(0, now() - this.#runStartedAt))
+    if (!patched) return
+    this.#writeMessage(index, patched.message)
+
+    const reasoning = estimateTokens(delta)
+    this.#usage.reasoningTokens += reasoning
+    this.#context.projectedTokens = Math.min(this.#context.contextWindow, this.#context.projectedTokens + reasoning)
+    this.#recordFirstOutput()
+    this.streamRenderTicks += 1
+    this.#touchUnread()
+    this.#emit({
+      kind: 'content',
+      messageIndex: index,
+      contentPatch: { kind: 'append-reasoning', blockId: patched.blockId, delta },
+    })
+  }
+
   appendAssistantDelta(delta: string): void {
     const index = this.#currentAssistantIndex
     if (index === null || !delta) return
@@ -264,9 +290,8 @@ export class ConversationSessionKernel {
 
     const output = estimateTokens(delta)
     this.#usage.outputTokens += output
-    if (this.streamIngressTicks % 5 === 0) this.#usage.reasoningTokens += Math.max(1, Math.round(output * 0.18))
     this.#context.projectedTokens = Math.min(this.#context.contextWindow, this.#context.projectedTokens + output)
-    if (this.#firstOutputAt === 0) { this.#firstOutputAt = now(); this.#lastTtftMs = Math.max(0, this.#firstOutputAt - this.#runStartedAt) }
+    this.#recordFirstOutput()
     this.streamRenderTicks += 1
     this.#touchUnread()
     this.#emit({
@@ -279,7 +304,7 @@ export class ConversationSessionKernel {
   completeCurrent(): void {
     const index = this.#currentAssistantIndex
     if (index !== null) {
-      const current = this.getMessage(index)
+      const current = settleReasoning(this.getMessage(index), 'complete')
       const text = markdownText(current).trim()
       const next = text ? { ...current, revision: (current.revision ?? 0) + 1, live: false } : replaceMarkdownContent(current, 'Completed.', false)
       this.#writeMessage(index, next)
@@ -291,7 +316,7 @@ export class ConversationSessionKernel {
   abortCurrent(): void {
     const index = this.#currentAssistantIndex
     if (index !== null) {
-      const current = this.getMessage(index)
+      const current = settleReasoning(this.getMessage(index), 'interrupted')
       const patched = appendMarkdownContent(current, '\n\n_Stopped by user._')
       this.#writeMessage(index, { ...patched.message, live: false })
     }
@@ -304,7 +329,7 @@ export class ConversationSessionKernel {
   failCurrent(failure: LlmFailure): void {
     const index = this.#currentAssistantIndex
     if (index !== null) {
-      const current = this.getMessage(index)
+      const current = settleReasoning(this.getMessage(index), 'interrupted')
       this.#writeMessage(index, { ...current, revision: (current.revision ?? 0) + 1, live: false })
     }
     this.#finishRun('error', failure)
@@ -327,6 +352,12 @@ export class ConversationSessionKernel {
   #writeMessage(index: number, message: LogicalMessage): void {
     if (index < this.backend.count) this.#overrides.set(index, message)
     else this.#appended[index - this.backend.count] = message
+  }
+
+  #recordFirstOutput(): void {
+    if (this.#firstOutputAt !== 0) return
+    this.#firstOutputAt = now()
+    this.#lastTtftMs = Math.max(0, this.#firstOutputAt - this.#runStartedAt)
   }
 
   #accountPrompt(text: string): void {
@@ -366,6 +397,26 @@ function cloneBlocks(blocks: readonly ContentBlock[]): ContentBlock[] {
   return blocks.map(contentBlock => ({ ...contentBlock, data: { ...contentBlock.data } })) as ContentBlock[]
 }
 
+function appendReasoningContent(message: LogicalMessage, delta: string, durationMs: number): { message: LogicalMessage; blockId: string } | null {
+  const blocks = canonicalBlocks(message)
+  const targetIndex = blocks.findIndex(entry => entry.type === 'reasoning')
+  if (targetIndex < 0) return null
+  const current = blocks[targetIndex] as ContentBlock<'reasoning'>
+  const text = `${current.data.text}${delta}`
+  const nextBlock = block(current.id, 'reasoning', {
+    ...current.data,
+    text,
+    tokenCount: estimateTokens(text),
+    durationMs,
+    status: 'streaming',
+  }, (current.revision ?? 0) + 1)
+  blocks[targetIndex] = nextBlock
+  return {
+    blockId: current.id,
+    message: { ...message, blocks, revision: (message.revision ?? 0) + 1, live: true },
+  }
+}
+
 function appendMarkdownContent(message: LogicalMessage, delta: string): { message: LogicalMessage; blockId: string } {
   const blocks = canonicalBlocks(message)
   let targetIndex = -1
@@ -397,6 +448,15 @@ function replaceMarkdownContent(message: LogicalMessage, markdown: string, live:
   if (targetIndex >= 0) blocks[targetIndex] = nextBlock
   else blocks.push(nextBlock)
   return { ...message, blocks, content: undefined, revision: (message.revision ?? 0) + 1, live }
+}
+
+function settleReasoning(message: LogicalMessage, status: 'complete' | 'interrupted'): LogicalMessage {
+  if (!message.blocks?.some(entry => entry.type === 'reasoning')) return message
+  const blocks = canonicalBlocks(message).map(entry => {
+    if (entry.type !== 'reasoning') return entry
+    return block(entry.id, 'reasoning', { ...entry.data, status }, (entry.revision ?? 0) + 1)
+  })
+  return { ...message, blocks, revision: (message.revision ?? 0) + 1 }
 }
 
 function canonicalBlocks(message: LogicalMessage): ContentBlock[] {
