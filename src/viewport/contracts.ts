@@ -16,9 +16,7 @@ export const VIEWPORT_POLICY = Object.freeze({
   edgeThresholdPx: 900,
   anchorTolerancePx: 0.75,
   userIntentMs: 650,
-  // Responsive reflow can take several virtualizer measurement frames on slower/public builds.
-  // Keep retries bounded, but do not assume six animation frames is enough to remount an anchor.
-  restoreAttempts: 24,
+  restoreAttempts: 8,
   jumpAttempts: 10,
 })
 

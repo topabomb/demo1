@@ -42,6 +42,8 @@ let userScrollDirection: -1 | 0 | 1 = 0
 let lastScrollOffset = 0
 let metricsFrame = 0
 let viewportResizeFrame = 0
+let viewportResizeRunning = false
+let viewportResizeQueued = false
 let viewportObserver: ResizeObserver | null = null
 let unsubscribeOrder: (() => void) | null = null
 let unsubscribeState: (() => void) | null = null
@@ -329,17 +331,32 @@ async function sendComposer(): Promise<void> {
   if (disposition === 'started') { await settleFrames(2); await jumpToLatest() }
 }
 function scheduleViewportResizeReconcile(): void {
-  if (viewportResizeFrame) cancelAnimationFrame(viewportResizeFrame)
-  viewportResizeFrame = requestAnimationFrame(async () => {
-    viewportResizeFrame = 0; await nextTick()
-    const pin = pendingComposerPinned || (pendingComposerAnchor === null && (props.runtime.atVisualBottom || props.runtime.followTail))
-    const anchor = pendingComposerAnchor ?? lastCommittedAnchor
-    pendingComposerPinned = false; pendingComposerAnchor = null
-    if (pin && props.runtime.range.end === props.runtime.logicalCount) await pinMeasuredEnd()
-    else if (anchor) { await restoreListAnchor(anchor); updateReader() }
-    else { updateReader(); rememberCommittedAnchor() }
-    refreshMountedRows()
+  viewportResizeQueued = true
+  if (viewportResizeFrame || viewportResizeRunning) return
+  viewportResizeFrame = requestAnimationFrame(() => {
+    viewportResizeFrame = 0
+    void reconcileViewportResize()
   })
+}
+async function reconcileViewportResize(): Promise<void> {
+  if (viewportResizeRunning) return
+  viewportResizeRunning = true
+  try {
+    while (viewportResizeQueued) {
+      viewportResizeQueued = false
+      await settleFrames(2)
+      const pin = pendingComposerPinned || (pendingComposerAnchor === null && (props.runtime.atVisualBottom || props.runtime.followTail))
+      const anchor = pendingComposerAnchor ?? lastCommittedAnchor
+      pendingComposerPinned = false; pendingComposerAnchor = null
+      if (pin && props.runtime.range.end === props.runtime.logicalCount) await pinMeasuredEnd()
+      else if (anchor) { await restoreListAnchor(anchor); updateReader() }
+      else { updateReader(); rememberCommittedAnchor() }
+      refreshMountedRows()
+    }
+  } finally {
+    viewportResizeRunning = false
+    if (viewportResizeQueued) scheduleViewportResizeReconcile()
+  }
 }
 function captureSnapshot(): ViewportSnapshot {
   const anchor = lastCommittedAnchor ?? captureCommittedAnchor()
