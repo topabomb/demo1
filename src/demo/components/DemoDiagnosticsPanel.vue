@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { ConversationSessionRuntime, SessionUiSnapshot } from '../../engine/runtime/session-runtime'
 import {
   billedInputTokens,
@@ -17,6 +17,7 @@ const props = defineProps<{
   runtime: ConversationSessionRuntime
   uiState: SessionUiSnapshot
   stream: SyntheticStreamController
+  mountedRows: number
   hotSessionIds: string
   hotSessionCount: number
   runningSessionCount: number
@@ -39,6 +40,7 @@ const emit = defineEmits<{
   injectAgent: []
 }>()
 
+const jumpTarget = ref(props.uiState.reader)
 const activeUsage = computed(() => { void props.uiState.eventRevision; return props.runtime.kernel.usage })
 const activeCacheHit = computed(() => cacheHitPercent(activeUsage.value))
 const activeContext = computed(() => contextOccupancyPercent(props.runtime.kernel.context))
@@ -49,12 +51,14 @@ const streamRate = computed(() => { void props.uiState.eventRevision; return pro
 const streamIngressTicks = computed(() => { void props.uiState.eventRevision; return props.stream.ingressTicks })
 const streamPublishTicks = computed(() => { void props.uiState.eventRevision; return props.stream.publishTicks })
 
-function jump(): void { emit('jump', props.runtime.jumpInput) }
+watch(() => props.runtime.id, () => { jumpTarget.value = props.uiState.reader })
+
+function jump(): void { emit('jump', jumpTarget.value) }
 function randomJump(): void {
   if (props.runtime.logicalCount <= 0) return
   const next = (Math.imul(props.uiState.reader + 17, 1103515245) + 12345) >>> 0
-  props.runtime.jumpInput = next % props.runtime.logicalCount
-  emit('jump', props.runtime.jumpInput)
+  jumpTarget.value = next % props.runtime.logicalCount
+  emit('jump', jumpTarget.value)
 }
 function onRateChange(event: Event): void { props.stream.setRate(Number((event.target as HTMLSelectElement).value)) }
 function resumeStream(): void { props.stream.start(false) }
@@ -63,10 +67,10 @@ function pauseStream(): void { props.stream.pause() }
 
 <template>
   <aside class="diagnostics-panel">
-    <div class="diagnostics-head"><div><span class="eyebrow">Architecture proof</span><strong>Session diagnostics</strong></div><button class="icon-button" @click="emit('close')">×</button></div>
+    <div class="diagnostics-head"><div><span class="eyebrow">Architecture proof</span><strong>Session diagnostics</strong></div><button class="icon-button" type="button" aria-label="Close diagnostics" @click="emit('close')">×</button></div>
     <div class="session-scope-card" data-testid="active-session-card"><span>active scope</span><strong data-testid="active-session-id">{{ runtime.id }}</strong><small>{{ runtime.title }}</small></div>
 
-    <div class="control-group"><label for="jump">Jump to global message</label><div class="inline-control"><input id="jump" v-model.number="runtime.jumpInput" data-testid="jump-input" type="number" min="0" :max="Math.max(0, runtime.logicalCount - 1)" /><button data-testid="jump-button" :disabled="runtime.logicalCount === 0" @click="jump">Jump</button></div><button class="secondary wide" :disabled="runtime.logicalCount === 0" @click="randomJump">Deterministic random jump</button></div>
+    <div class="control-group"><label for="jump">Jump to global message</label><div class="inline-control"><input id="jump" v-model.number="jumpTarget" data-testid="jump-input" type="number" min="0" :max="Math.max(0, runtime.logicalCount - 1)" /><button data-testid="jump-button" :disabled="runtime.logicalCount === 0" @click="jump">Jump</button></div><button class="secondary wide" :disabled="runtime.logicalCount === 0" @click="randomJump">Deterministic random jump</button></div>
     <div class="control-group"><label>History window</label><div class="inline-control"><button class="secondary" data-testid="prepend-button" @click="emit('shiftBackward')">← prepend 512</button><button class="secondary" @click="emit('shiftForward')">append 512 →</button></div></div>
 
     <div class="control-group">
@@ -90,7 +94,7 @@ function pauseStream(): void { props.stream.pause() }
       <div><span>hot sessions</span><strong data-testid="hot-sessions">{{ hotSessionCount }}</strong></div>
       <div><span>hot messages</span><strong>{{ (uiState.rangeEnd - uiState.rangeStart).toLocaleString() }}</strong></div>
       <div><span>render units</span><strong data-testid="active-units">{{ uiState.projectionSize.toLocaleString() }}</strong></div>
-      <div><span>DOM rows</span><strong data-testid="mounted-rows">{{ uiState.mountedRows }}</strong></div>
+      <div><span>DOM rows</span><strong data-testid="mounted-rows">{{ mountedRows }}</strong></div>
       <div><span>projection cache</span><strong data-testid="projection-cache">{{ uiState.projectionCacheSize }}</strong></div>
       <div><span>projection hits</span><strong data-testid="projection-cache-hits">{{ uiState.projectionCacheHits }}</strong></div>
       <div><span>full projects</span><strong data-testid="projection-full-projects">{{ uiState.projectionFullProjects }}</strong></div>
