@@ -136,6 +136,10 @@ function refreshMountedRows(): void {
   })
 }
 function remainingToBottom(): number {
+  // Committed bottom semantics use the actual scroll container. Virtua's cached
+  // viewportSize may briefly lag a composer/responsive grid reflow by one layout.
+  const element = scrollStageRef.value?.querySelector<HTMLElement>('.conversation-vlist')
+  if (element) return Math.max(0, element.scrollHeight - element.scrollTop - element.clientHeight)
   const list = listRef.value
   if (!list) return Number.POSITIVE_INFINITY
   return remainingToBottomForPort(list)
@@ -197,16 +201,20 @@ async function pinMeasuredEnd(maxFrames = VIEWPORT_POLICY.restoreAttempts): Prom
     await settleFrames(1)
     const list = listRef.value
     if (!list) return
-    list.scrollTo(Math.max(0, list.scrollSize - list.viewportSize))
+    // Scroll past the virtual maximum and let the physical scroll container clamp.
+    // This does not depend on Virtua's viewportSize being synchronized yet.
+    list.scrollTo(list.scrollSize)
     await settleFrames(1)
     const current = listRef.value
     if (!current) return
+    const physical = scrollStageRef.value?.querySelector<HTMLElement>('.conversation-vlist')
+    const currentViewportSize = physical?.clientHeight ?? current.viewportSize
     const geometryStable = Math.abs(current.scrollSize - previousScrollSize) < 0.5
-      && Math.abs(current.viewportSize - previousViewportSize) < 0.5
+      && Math.abs(currentViewportSize - previousViewportSize) < 0.5
     const pinned = remainingToBottom() < 1
     stableFrames = pinned && geometryStable ? stableFrames + 1 : 0
     previousScrollSize = current.scrollSize
-    previousViewportSize = current.viewportSize
+    previousViewportSize = currentViewportSize
     if (stableFrames >= VIEWPORT_POLICY.stableLayoutFrames) break
   }
   lastScrollOffset = listRef.value?.scrollOffset ?? 0
@@ -288,7 +296,9 @@ async function scrollToLogical(target: number, align: 'start' | 'center' | 'end'
     lastScrollOffset = list.scrollOffset
     if (semanticTailNavigation) updateReader(lastScrollOffset)
     else props.runtime.setReaderPosition(target, false)
-    await settleFrames(1)
+    // Programmatic navigation is not committed while the virtualizer is still
+    // converging. The responsive transaction must inherit a stable anchor.
+    await settleFrames(VIEWPORT_POLICY.stableLayoutFrames)
     if (!targetIsCommittedVisible(target)) continue
     if (semanticTailNavigation) rememberCommittedAnchor()
     else {
