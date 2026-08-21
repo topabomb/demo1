@@ -80,6 +80,31 @@ describe('engine architecture boundaries', () => {
     expect(source).not.toMatch(/(?:demo|\.\/vue\/)/)
   })
 
+  it('keeps synthetic playback controls and counters out of engine contracts/state', () => {
+    const contracts = readFileSync(join(engineRoot, 'conversation/contracts.ts'), 'utf8')
+    const kernel = readFileSync(join(engineRoot, 'conversation/session-kernel.ts'), 'utf8')
+    const runtime = readFileSync(join(engineRoot, 'runtime/session-runtime.ts'), 'utf8')
+    const engineSource = `${contracts}\n${kernel}\n${runtime}`
+    expect(engineSource).not.toMatch(/\b(?:streamRate|streamIngressTicks|streamRenderTicks|setStreamRate|incrementIngress)\b/)
+    expect(contracts).not.toMatch(/\b(?:start|stop|setRate|pause)\s*\(/)
+
+    const demoStream = readFileSync(join(demoRoot, 'stream-controller.ts'), 'utf8')
+    expect(demoStream).toMatch(/\brate\s*=\s*20/)
+    expect(demoStream).toMatch(/\bingressTicks\s*=\s*0/)
+    expect(demoStream).toMatch(/\bpublishTicks\s*=\s*0/)
+  })
+
+  it('keeps diagnostics and physical navigation out of their former oversized shells', () => {
+    const workspace = readFileSync(join(demoRoot, 'components/AgentWorkspace.vue'), 'utf8')
+    expect(workspace).toContain("./DemoDiagnosticsPanel.vue")
+    expect(workspace).not.toContain('data-testid="metrics"')
+
+    const viewport = readFileSync(join(engineRoot, 'vue/ConversationViewport.vue'), 'utf8')
+    expect(viewport).toContain("./viewport-navigation-controller")
+    expect(viewport).not.toContain('function restoreListAnchor')
+    expect(viewport).not.toContain('function pinMeasuredEnd')
+  })
+
   it('loads demo and engine styles from their owning trees only', () => {
     const main = readFileSync(join(demoRoot, 'main.ts'), 'utf8')
     expect(main).toContain("./styles/demo.css")
