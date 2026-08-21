@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { RenderUnit } from '../../core/types'
+import type { RenderUnit } from '../../presentation/render-unit'
 import { renderMarkdownCached } from './markdown-cache'
 
 const props = defineProps<{ unit: RenderUnit }>()
