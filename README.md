@@ -5,6 +5,7 @@ Executable reference template for production-style Agent workspaces with **very 
 - Live lab: **https://topabomb.github.io/demo1/**
 - Architecture page: **https://topabomb.github.io/demo1/#architecture**
 - Canonical design: [`docs/agent-workspace-reference-architecture.md`](docs/agent-workspace-reference-architecture.md)
+- Executable scenario contracts: [`docs/agent-workspace-scenario-contracts.md`](docs/agent-workspace-scenario-contracts.md)
 - DeepSeek Harness design lessons: [`docs/deepseek-harness-design-lessons.md`](docs/deepseek-harness-design-lessons.md)
 - Template review / extraction guide: [`docs/template-review.md`](docs/template-review.md)
 - Verification contract: [`docs/verification.md`](docs/verification.md)
@@ -48,14 +49,21 @@ The reusable contract is `model/ + conversation kernel/ports + presentation/ + v
 
 - `1,000,000+` addressable logical messages without one-million-item Vue state;
 - multiple background-running/blocked/failed/completed-resumable sessions with `<=3` hot presentation runtimes;
-- canonical reasoning, Markdown, tool call/result, code, diff, image and sanitized HTML;
-- runtime injection of mixed Turns and a Markdown compatibility gallery through the same SessionKernel path as normal content;
-- bounded keyed projection and an append-only Markdown streaming fast path;
+- live LLM reasoning followed by live Markdown in the same stable assistant Message/Turn/Step;
+- reasoning disclosure while streaming: collapsed/open layouts may have very different heights without redefining semantic state;
+- Markdown tail-only incremental projection while reasoning and other sibling Blocks keep identity;
+- single and multiple user uploads: images, documents and audio grouped as stable attachment artifacts;
+- image-generation tool call/result with stable `callId`, prompt/model/progress plus 1..N generated images linked by provenance;
+- TTS and ASR tool execution separated from reusable audio/transcript artifact rendering;
+- generic search/filesystem tools, code, diff, image, sanitized HTML and Markdown compatibility fixtures;
+- runtime injection through the same canonical SessionKernel path as real adapter content—no DOM-side fixtures;
 - exact `Latest` / messages-after semantics, user escape from tail follow and far-history jumps;
-- variable-height composer, disclosure, image/load and responsive reflow without row overlap;
+- variable-height composer, disclosure, media grids and responsive reflow without row overlap;
 - desktop/tablet/phone with Recent moved to a drawer rather than removed;
-- input/output/cache/context and projection-cache diagnostics;
+- bounded DOM/projection caches under repeated heterogeneous scenario packs;
 - identical Chromium scenarios against local production build and deployed GitHub Pages.
+
+See [`docs/agent-workspace-scenario-contracts.md`](docs/agent-workspace-scenario-contracts.md) for the scenario → canonical semantics → renderer responsibility → browser-invariant matrix.
 
 ## Extension contract
 
@@ -70,6 +78,18 @@ Adding `citation`, `terminal-session`, `file-tree`, `chart`, `artifact` or `suba
 It should **not** require edits to SessionKernel, history segmentation or semantic viewport policy.
 
 A different case is a visual row whose state spans **multiple durable records** (for example a long-running review/job or deliverable lifecycle). That is the point to introduce a stable-ID ConversationNode assembler with replay/prepend/append laws; do not force ordinary single-message `ContentBlock` rendering through that abstraction.
+
+## Tool vs artifact boundary
+
+A tool call describes **execution**; an attachment/audio/image/code artifact describes **displayable input/output**. For example image generation is represented as:
+
+```text
+tool-call(generate_image, callId, model, prompt, progress)
+→ tool-result(same callId, structured result)
+→ attachments(generated image ids, model/prompt/tool provenance)
+```
+
+TTS/ASR use the same rule. This prevents ToolCard from becoming a provider-specific universal component and lets media renderers serve user uploads, tool outputs and future providers equally.
 
 ## Design influence: DeepSeek Harness
 
