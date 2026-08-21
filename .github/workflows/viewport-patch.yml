@@ -1,0 +1,92 @@
+name: Apply viewport reconcile patch
+
+on:
+  push:
+    branches: [feat/million-message-lab]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Serialize viewport resize reconciliation
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          viewport = Path('src/components/ConversationViewport.vue')
+          text = viewport.read_text()
+          declaration = "let viewportResizeFrame = 0\nlet viewportObserver: ResizeObserver | null = null"
+          replacement = "let viewportResizeFrame = 0\nlet viewportResizeRunning = false\nlet viewportResizeQueued = false\nlet viewportObserver: ResizeObserver | null = null"
+          if declaration not in text:
+              raise SystemExit('viewport resize declaration anchor not found')
+          text = text.replace(declaration, replacement, 1)
+
+          old = '''function scheduleViewportResizeReconcile(): void {
+            if (viewportResizeFrame) cancelAnimationFrame(viewportResizeFrame)
+            viewportResizeFrame = requestAnimationFrame(async () => {
+              viewportResizeFrame = 0; await nextTick()
+              const pin = pendingComposerPinned || (pendingComposerAnchor === null && (props.runtime.atVisualBottom || props.runtime.followTail))
+              const anchor = pendingComposerAnchor ?? lastCommittedAnchor
+              pendingComposerPinned = false; pendingComposerAnchor = null
+              if (pin && props.runtime.range.end === props.runtime.logicalCount) await pinMeasuredEnd()
+              else if (anchor) { await restoreListAnchor(anchor); updateReader() }
+              else { updateReader(); rememberCommittedAnchor() }
+              refreshMountedRows()
+            })
+          }'''
+          new = '''function scheduleViewportResizeReconcile(): void {
+            viewportResizeQueued = true
+            if (viewportResizeFrame || viewportResizeRunning) return
+            viewportResizeFrame = requestAnimationFrame(() => {
+              viewportResizeFrame = 0
+              void reconcileViewportResize()
+            })
+          }
+          async function reconcileViewportResize(): Promise<void> {
+            if (viewportResizeRunning) return
+            viewportResizeRunning = true
+            try {
+              while (viewportResizeQueued) {
+                viewportResizeQueued = false
+                await settleFrames(2)
+                const pin = pendingComposerPinned || (pendingComposerAnchor === null && (props.runtime.atVisualBottom || props.runtime.followTail))
+                const anchor = pendingComposerAnchor ?? lastCommittedAnchor
+                pendingComposerPinned = false; pendingComposerAnchor = null
+                if (pin && props.runtime.range.end === props.runtime.logicalCount) await pinMeasuredEnd()
+                else if (anchor) { await restoreListAnchor(anchor); updateReader() }
+                else { updateReader(); rememberCommittedAnchor() }
+                refreshMountedRows()
+              }
+            } finally {
+              viewportResizeRunning = false
+              if (viewportResizeQueued) scheduleViewportResizeReconcile()
+            }
+          }'''
+          if old not in text:
+              raise SystemExit('viewport reconcile function anchor not found')
+          viewport.write_text(text.replace(old, new, 1))
+
+          policy = Path('src/viewport/contracts.ts')
+          policy_text = policy.read_text()
+          old_policy = '''  // Responsive reflow can take several virtualizer measurement frames on slower/public builds.
+            // Keep retries bounded, but do not assume six animation frames is enough to remount an anchor.
+            restoreAttempts: 24,'''
+          if old_policy not in policy_text:
+              raise SystemExit('viewport restore policy anchor not found')
+          policy.write_text(policy_text.replace(old_policy, '  restoreAttempts: 8,', 1))
+          PY
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/components/ConversationViewport.vue src/viewport/contracts.ts
+          git commit -m "fix: serialize viewport resize reconciliation"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
