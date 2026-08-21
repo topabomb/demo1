@@ -13,22 +13,18 @@ async function switchSession(page: Page, id: string): Promise<void> {
 async function jump(page: Page, index: number): Promise<void> {
   await page.getByTestId('jump-input').fill(String(index))
   await page.getByTestId('jump-button').click()
-  await expect.poll(async () => page.locator(`[data-message-index="${index}"]`).count(), { timeout: 15_000 }).toBeGreaterThan(0)
+  await expect(page.locator(`[data-message-index="${index}"]`).first()).toBeVisible({ timeout: 15_000 })
+  await expect.poll(async () => Math.abs(Number((await page.getByTestId('reader-position').textContent() ?? '').replace(/[^0-9-]/g, '')) - index), { timeout: 15_000 }).toBeLessThan(64)
 }
 
 async function maxMountedRowOverlap(page: Page): Promise<number> {
   return page.getByTestId('scrollport').evaluate((viewport) => {
-    const rows = [...viewport.querySelectorAll<HTMLElement>('[data-render-unit]')]
+    const rows = [...viewport.querySelectorAll<HTMLElement>('[data-virtual-item="true"]')]
       .map(row => ({ id: row.dataset.renderUnit ?? '', rect: row.getBoundingClientRect() }))
       .filter(entry => entry.rect.height > 0)
       .sort((a, b) => a.rect.top - b.rect.top)
-
     let overlap = 0
-    for (let i = 1; i < rows.length; i += 1) {
-      const previous = rows[i - 1]!
-      const current = rows[i]!
-      overlap = Math.max(overlap, previous.rect.bottom - current.rect.top)
-    }
+    for (let i = 1; i < rows.length; i += 1) overlap = Math.max(overlap, rows[i - 1]!.rect.bottom - rows[i]!.rect.top)
     return overlap
   })
 }
@@ -37,15 +33,36 @@ async function expectRowsDisjoint(page: Page): Promise<void> {
   await expect.poll(() => maxMountedRowOverlap(page), { timeout: 12_000 }).toBeLessThanOrEqual(1)
 }
 
-test('architecture proof is visible and links to the same interactive reference implementation', async ({ page }) => {
+async function committedAnchor(page: Page): Promise<{ id: string; top: number } | null> {
+  return page.getByTestId('scrollport').evaluate((stage) => {
+    const readerText = document.querySelector('[data-testid="reader-position"]')?.textContent ?? ''
+    const reader = Number(readerText.replace(/[^0-9-]/g, ''))
+    const viewport = stage.getBoundingClientRect()
+    const row = [...stage.querySelectorAll<HTMLElement>('[data-virtual-item="true"]')]
+      .map(element => ({ element, index: Number(element.dataset.messageIndex), rect: element.getBoundingClientRect() }))
+      .filter(entry => entry.index <= reader + 1 && entry.rect.bottom > viewport.top && entry.rect.top < viewport.bottom)
+      .sort((a, b) => a.rect.top - b.rect.top)[0]
+    return row ? { id: row.element.dataset.renderUnit ?? '', top: row.rect.top - viewport.top } : null
+  })
+}
+
+async function anchorDrift(page: Page, anchor: { id: string; top: number }): Promise<number> {
+  return page.getByTestId('scrollport').evaluate((stage, expected) => {
+    const row = [...stage.querySelectorAll<HTMLElement>('[data-render-unit]')].find(element => element.dataset.renderUnit === expected.id)
+    if (!row) return Number.POSITIVE_INFINITY
+    return Math.abs((row.getBoundingClientRect().top - stage.getBoundingClientRect().top) - expected.top)
+  }, anchor)
+}
+
+test('architecture proof exposes portable boundaries, not a framework-specific message list', async ({ page }) => {
   await openLab(page)
   await page.getByTestId('architecture-link').click()
   await expect(page.getByTestId('architecture-page')).toBeVisible()
-  await expect(page.getByRole('heading', { name: /four lifecycles/i })).toBeVisible()
-  await expect(page.getByText('Backend Adapter', { exact: true })).toBeVisible()
-  await expect(page.getByText('Conversation Engine', { exact: true })).toBeVisible()
-  await expect(page.getByText('Projection Store', { exact: true })).toBeVisible()
-  await expect(page.getByText('Viewport Controller', { exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /six boundaries/i })).toBeVisible()
+  for (const name of ['Backend Adapter', 'Session Kernel', 'Hot Projection Runtime', 'Semantic Viewport Policy', 'Virtualizer / Framework Adapter', 'Product UI / CSS']) {
+    await expect(page.getByText(name, { exact: true })).toBeVisible()
+  }
+  await expect(page.getByText(/input · output · cache read\/write/i)).toBeVisible()
   await page.getByTestId('launch-lab').click()
   await expect(page.getByTestId('active-session-id')).toBeVisible()
 })
@@ -82,4 +99,42 @@ test('dynamic heterogeneous rows never overlap after disclosure, async measureme
   await expectRowsDisjoint(page)
   await switchSession(page, 'dsh-transport')
   await expectRowsDisjoint(page)
+})
+
+test('semantic viewport survives a different product layout and composer height policy', async ({ page }) => {
+  await openLab(page)
+  await switchSession(page, 'event-normalization')
+  await jump(page, 50_000)
+
+  const wrapperGeometry = await page.locator('[data-virtual-item="true"]').first().evaluate(element => {
+    const style = getComputedStyle(element)
+    return { paddingTop: style.paddingTop, paddingBottom: style.paddingBottom, marginTop: style.marginTop, marginBottom: style.marginBottom }
+  })
+  expect(wrapperGeometry).toEqual({ paddingTop: '0px', paddingBottom: '0px', marginTop: '0px', marginBottom: '0px' })
+
+  const before = await committedAnchor(page)
+  expect(before).not.toBeNull()
+  const stageHeightBefore = await page.getByTestId('scrollport').evaluate(element => element.getBoundingClientRect().height)
+
+  await page.evaluate(() => {
+    const root = document.documentElement.style
+    root.setProperty('--session-sidebar-width', '328px')
+    root.setProperty('--conversation-content-width', '720px')
+    root.setProperty('--conversation-row-gap', '12px')
+    root.setProperty('--composer-max-height', '240px')
+  })
+
+  const composer = page.getByTestId('composer-input')
+  await composer.fill(Array.from({ length: 18 }, (_, i) => `portable layout line ${i} ${'content '.repeat(18)}`).join('\n'))
+  await expect.poll(async () => composer.evaluate(element => element.getBoundingClientRect().height)).toBeGreaterThan(180)
+  await expect.poll(async () => page.getByTestId('scrollport').evaluate(element => element.getBoundingClientRect().height)).toBeLessThan(stageHeightBefore)
+
+  const noOverlay = await page.evaluate(() => {
+    const stage = document.querySelector<HTMLElement>('[data-testid="scrollport"]')!.getBoundingClientRect()
+    const composer = document.querySelector<HTMLElement>('[data-testid="composer-shell"]')!.getBoundingClientRect()
+    return stage.bottom <= composer.top + 1
+  })
+  expect(noOverlay).toBe(true)
+  await expectRowsDisjoint(page)
+  await expect.poll(() => anchorDrift(page, before!), { timeout: 12_000 }).toBeLessThan(4)
 })
