@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { usePerformanceMetrics } from '../core/perf'
 import type { ConversationDescriptor, ViewportSnapshot } from '../conversation/contracts'
 import {
@@ -76,6 +76,21 @@ function newSession(): void {
   mobileSessionsOpen.value = false
 }
 
+async function openAgentScenarios(): Promise<void> {
+  const target = 'dsh-transport'
+  if (activeSession.value.id !== target) {
+    const snapshot = viewportRef.value?.captureSnapshot()
+    workspace.activate(target, snapshot)
+    await nextTick()
+  }
+  if (activeSession.value.kernel.status === 'working' || activeSession.value.kernel.pendingInteraction) return
+  activeSession.value.kernel.appendCanonicalMessages(createAgentScenarioPack(target, fixtureOrdinal.value++))
+  await Promise.resolve()
+  await nextTick()
+  await viewportRef.value?.jumpToLatest()
+  mobileSessionsOpen.value = false
+}
+
 function jump(): void { void viewportRef.value?.jumpToMessage(activeSession.value.jumpInput) }
 function randomJump(): void {
   const runtime = activeSession.value
@@ -135,6 +150,7 @@ async function injectAgentScenarios(): Promise<void> {
       <div class="sidebar-head"><div class="product-name">Agent Workspace Lab</div><div class="sidebar-head-actions"><a class="architecture-link" href="#architecture" data-testid="architecture-link" title="Architecture reference">⌘</a><button class="mobile-session-close" aria-label="Close sessions" @click="mobileSessionsOpen = false">×</button></div></div>
       <div class="workspace-context"><span class="workspace-dot" /><span>reference-workspace</span><small>backend-neutral</small></div>
       <button class="new-session" data-testid="new-session" @click="newSession">＋ New session</button>
+      <button class="new-session" data-testid="scenario-launch" @click="openAgentScenarios">✦ Agent scenarios</button>
       <label class="session-search" for="session-filter">⌕
         <input id="session-filter" v-model="sessionQuery" data-testid="session-search" placeholder="Search sessions" />
         <kbd>⌘K</kbd>
