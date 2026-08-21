@@ -55,12 +55,14 @@ export function createDefaultContentProjectors(): ContentProjectorRegistry {
       }, chunk.hash))
     })
     .register('reasoning', ({ message, block: contentBlock }) => {
-      const data = contentBlock.data as { text: string; tokenCount?: number; durationMs?: number; defaultOpen?: boolean }
-      return [makeRenderUnit(message, contentBlock, 'thinking', 'thinking', 72, {
+      const data = contentBlock.data as { text: string; tokenCount?: number; durationMs?: number; defaultOpen?: boolean; status?: string }
+      const openEstimate = data.defaultOpen ? Math.min(720, 110 + data.text.length * 0.14) : 72
+      return [makeRenderUnit(message, contentBlock, 'thinking', 'thinking', openEstimate, {
         text: data.text,
         tokenCount: data.tokenCount ?? Math.round(data.text.length / 3.8),
         durationMs: data.durationMs ?? 0,
         defaultOpen: data.defaultOpen ?? false,
+        status: data.status ?? (message.live ? 'streaming' : 'complete'),
       })]
     })
     .register('code', ({ message, block: contentBlock }) => {
@@ -76,6 +78,20 @@ export function createDefaultContentProjectors(): ContentProjectorRegistry {
     .register('image', ({ message, block: contentBlock }) => {
       const data = contentBlock.data as { src?: string; width: number; height: number; alt?: string; seed?: number }
       return [makeRenderUnit(message, contentBlock, 'image', 'image', 110 + Math.min(620, (data.height / Math.max(1, data.width)) * 820), data)]
+    })
+    .register('attachments', ({ message, block: contentBlock }) => {
+      const data = contentBlock.data as { items?: readonly Record<string, unknown>[]; title?: string; provenance?: Record<string, unknown> }
+      const items = data.items ?? []
+      const images = items.filter(item => item.kind === 'image').length
+      const nonImages = items.length - images
+      const rows = images === 0 ? 0 : Math.ceil(images / Math.min(2, images))
+      const estimate = 96 + Math.min(560, rows * 220) + Math.min(260, nonImages * 58)
+      return [makeRenderUnit(message, contentBlock, 'attachments', 'attachments', estimate, { ...data, items })]
+    })
+    .register('audio', ({ message, block: contentBlock }) => {
+      const data = contentBlock.data as { transcript?: string; durationMs?: number }
+      const estimate = 140 + Math.min(260, String(data.transcript ?? '').length * 0.08)
+      return [makeRenderUnit(message, contentBlock, 'audio', 'audio', estimate, contentBlock.data as Record<string, unknown>)]
     })
     .register('html', ({ message, block: contentBlock }) => {
       const data = contentBlock.data as { html: string }
@@ -142,7 +158,7 @@ export function legacyBlocksForMessage(message: LogicalMessage): ContentBlock[] 
       const prefix = i === 0 ? 'I need to inspect the current state before changing anything.' : 'Then I should validate the next dependency and preserve the existing invariant.'
       return `${prefix} ${sentence(seed + i * 31, 24 + intensity * 4)}`
     }).join('\n\n')
-    return [block('reasoning', 'reasoning', { text, tokenCount: Math.round(text.length / 3.8), durationMs: intBetween(seed + 43, 900, 28_000), defaultOpen: false })]
+    return [block('reasoning', 'reasoning', { text, tokenCount: Math.round(text.length / 3.8), durationMs: intBetween(seed + 43, 900, 28_000), defaultOpen: false, status: 'complete' })]
   }
 
   if (kind === 'code') {
