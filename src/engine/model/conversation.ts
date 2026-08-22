@@ -1,13 +1,55 @@
 export type BuiltinToolCategory = 'generic' | 'search' | 'filesystem' | 'shell' | 'image-generation' | 'tts' | 'asr'
-/** Tool categories are routing/presentation hints, not a closed list of capabilities. */
+/** Tool categories describe capability families, not visual treatment. */
 export type ToolCategory = BuiltinToolCategory | (string & {})
 export type AttachmentKind = 'image' | 'audio' | 'video' | 'file'
+
+export type ResourceKind = 'file' | 'url' | 'artifact'
+export interface ResourceRange {
+  startLine: number
+  startColumn?: number
+  endLine?: number
+  endColumn?: number
+}
+
+/** Stable semantic resource identity. Opening/routing the resource belongs to the host. */
+export interface ResourceRef {
+  id: string
+  kind: ResourceKind
+  uri: string
+  label?: string
+  range?: ResourceRange
+}
+
+/** Renderer-neutral hint for how a tool activity is best understood. It never controls layout or policy. */
+export type ToolPresentationIntent =
+  | { kind: 'generic' }
+  | { kind: 'terminal'; command?: string; cwd?: ResourceRef }
+  | { kind: 'changes'; resources?: readonly ResourceRef[] }
+  | { kind: 'resources'; resources: readonly ResourceRef[] }
+
+export type PlanItemStatus = 'pending' | 'in-progress' | 'completed' | 'blocked' | 'cancelled'
+export interface PlanItem {
+  id: string
+  text: string
+  status: PlanItemStatus
+}
+
+export type AgentRunStatus = 'queued' | 'running' | 'waiting' | 'completed' | 'failed' | 'interrupted'
+export interface AgentRunRef {
+  runId: string
+  title: string
+  agent?: string
+  status: AgentRunStatus
+  childSessionId?: string
+  summary?: string
+}
 
 export interface AttachmentItem {
   id: string
   name: string
   kind: AttachmentKind
   mimeType: string
+  resource?: ResourceRef
   sizeBytes?: number
   src?: string
   width?: number
@@ -28,15 +70,18 @@ export interface ContentBlockMap {
   text: { text: string }
   markdown: { markdown: string; flavor?: 'gfm' }
   reasoning: { text: string; tokenCount?: number; durationMs?: number; defaultOpen?: boolean; status?: 'streaming' | 'complete' | 'interrupted' }
-  code: { code: string; language?: string; filename?: string; defaultOpen?: boolean }
+  plan: { title?: string; items: readonly PlanItem[] }
+  code: { code: string; language?: string; filename?: string; resource?: ResourceRef; defaultOpen?: boolean }
   /** Stress/reference image primitive. User/tool media normally uses `attachments`. */
   image: { src?: string; width: number; height: number; alt?: string; seed?: number }
   attachments: { items: readonly AttachmentItem[]; title?: string; provenance?: ArtifactProvenance }
   audio: { title: string; purpose: 'tts' | 'asr-input' | 'recording'; durationMs: number; src?: string; transcript?: string; model?: string; waveform?: readonly number[]; status?: 'processing' | 'ready' | 'error' }
   html: { html: string }
-  'tool-call': { name: string; callId: string; input: unknown; category?: ToolCategory; model?: string; progress?: number; durationMs?: number; status?: 'running' | 'success' | 'error'; defaultOpen?: boolean }
-  'tool-result': { name: string; callId: string; output: unknown; category?: ToolCategory; model?: string; progress?: number; durationMs?: number; status?: 'running' | 'success' | 'error'; defaultOpen?: boolean }
-  diff: { file: string; lines: readonly string[]; defaultOpen?: boolean }
+  'tool-call': { name: string; callId: string; input: unknown; category?: ToolCategory; presentation?: ToolPresentationIntent; resources?: readonly ResourceRef[]; model?: string; progress?: number; durationMs?: number; status?: 'running' | 'success' | 'error'; defaultOpen?: boolean }
+  'tool-result': { name: string; callId: string; output: unknown; category?: ToolCategory; presentation?: ToolPresentationIntent; resources?: readonly ResourceRef[]; model?: string; progress?: number; durationMs?: number; status?: 'running' | 'success' | 'error'; defaultOpen?: boolean }
+  terminal: { callId?: string; command?: string; cwd?: ResourceRef; output: string; status: 'running' | 'success' | 'error' | 'interrupted'; exitCode?: number; durationMs?: number; defaultOpen?: boolean }
+  'agent-run': AgentRunRef
+  diff: { resource: ResourceRef; lines: readonly string[]; defaultOpen?: boolean }
 }
 
 export type ContentBlockType = keyof ContentBlockMap
