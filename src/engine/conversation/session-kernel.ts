@@ -265,7 +265,7 @@ export class ConversationSessionKernel {
   finishExecution(reason: TurnEndReasonKind, failure: LlmFailure | null = null): void {
     if (this.#pendingInteraction) throw new Error(`cannot finish execution while interaction ${this.#pendingInteraction.id} is pending`)
     const index = this.#currentAssistantIndex
-    this.#status = reason === 'aborted' || reason === 'interrupted' ? 'interrupted' : 'idle'
+    this.#status = 'idle'
     this.#lastTurnReason = reason
     this.#lastFailure = failure ? { ...failure } : null
     this.#currentAssistantIndex = null
