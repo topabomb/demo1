@@ -1,12 +1,19 @@
 import { describe, expect, it } from 'vitest'
 import { block, type LogicalMessage } from '../src/engine/model/conversation'
 import { SyntheticHistoryAdapter } from '../src/demo/history-adapter'
-import { applyLiveScenarioMilestone, liveAnswerDelta } from '../src/demo/live-run-script'
+import {
+  addFinalEvidence,
+  agentMarkdownDelta,
+  createLiveAssistantStep,
+  createLiveToolResult,
+  liveToolForStep,
+  setLiveToolCall,
+} from '../src/demo/live-run-script'
 import { createScenarioTail } from '../src/demo/session-scenarios'
 
-function liveMessage(): LogicalMessage {
+function liveMessage(step = 1): LogicalMessage {
   return {
-    id: 'demo:m-9', index: 9, turnId: 'demo:turn', stepId: 'demo:turn:step-0', role: 'assistant', live: true,
+    id: 'demo:m-9', index: 9, turnId: 'demo:turn', stepId: `demo:turn:step-${step}`, role: 'assistant', live: true,
     blocks: [
       block('reasoning', 'reasoning', { text: 'inspect', status: 'streaming', defaultOpen: false }),
       block('answer', 'markdown', { markdown: '' }),
@@ -24,11 +31,12 @@ describe('public Demo scenarios', () => {
     expect([...kinds]).toEqual(expect.arrayContaining(['tool-call', 'tool-result', 'diff', 'code', 'markdown']))
   })
 
-  it('keeps the million-message scenario live at the real global tail', () => {
-    const tail = createScenarioTail('million', 1_000_000, 'release-investigation')
+  it('keeps the seeded Agent-loop assistant live at the real global tail', () => {
+    const tail = createScenarioTail('agent-loop', 84_000, 'release-investigation')
     const live = tail.at(-1)!
-    expect(live.index).toBe(999_999)
+    expect(live.index).toBe(83_999)
     expect(live.live).toBe(true)
+    expect(live.stepId).toMatch(/:step-1$/)
     expect(live.blocks.map(contentBlock => contentBlock.type)).toEqual(['reasoning', 'markdown'])
   })
 
@@ -42,24 +50,38 @@ describe('public Demo scenarios', () => {
     expect(recent).toBe(tail.at(-1))
   })
 
-  it('adds heterogeneous live blocks through canonical message mutations', () => {
-    let current = liveMessage()
-    for (const milestone of [19, 28, 36, 44, 56, 68]) current = applyLiveScenarioMilestone(current, milestone) ?? current
-    const kinds = current.blocks.map(contentBlock => contentBlock.type)
-    expect(kinds).toEqual(['reasoning', 'tool-call', 'tool-result', 'diff', 'code', 'attachments', 'markdown'])
-    const toolCall = current.blocks.find(contentBlock => contentBlock.type === 'tool-call')
-    const toolResult = current.blocks.find(contentBlock => contentBlock.type === 'tool-result')
-    if (toolCall?.type === 'tool-call' && toolResult?.type === 'tool-result') {
-      expect(toolCall.data.callId).toBe('live-release-read')
-      expect(toolResult.data.callId).toBe(toolCall.data.callId)
-    }
+  it('models three provider-neutral tool phases as separate call/result records in one Turn', () => {
+    const specs = [1, 2, 3].map(step => liveToolForStep(step)!)
+    expect(specs.map(spec => spec.category)).toEqual(['filesystem', 'search', 'shell'])
+    expect(new Set(specs.map(spec => spec.callId)).size).toBe(3)
+
+    let assistant = liveMessage(1)
+    assistant = setLiveToolCall(assistant, specs[0]!, 'running', 25)
+    assistant = setLiveToolCall(assistant, specs[0]!, 'success', 100)
+    const result = createLiveToolResult(assistant, specs[0]!)
+    const next = createLiveAssistantStep(assistant.turnId, 2)
+    const call = assistant.blocks.find(contentBlock => contentBlock.type === 'tool-call')
+    expect(call?.type === 'tool-call' ? call.data.callId : null).toBe(specs[0]!.callId)
+    expect(result).toMatchObject({ turnId: assistant.turnId, stepId: assistant.stepId, role: 'tool' })
+    expect(result.blocks[0]?.type === 'tool-result' ? result.blocks[0].data.callId : null).toBe(specs[0]!.callId)
+    expect(next).toMatchObject({ turnId: assistant.turnId, stepId: `${assistant.turnId}:step-2`, role: 'assistant', live: true })
   })
 
-  it('streams rich Markdown structures instead of paragraph-only output', () => {
-    const source = Array.from({ length: 9 }, (_, index) => liveAnswerDelta(index)).join('')
-    expect(source).toContain('| Check | Result |')
+  it('streams complex GFM across model steps and adds final evidence as canonical blocks', () => {
+    const source = [1, 2, 3, 4]
+      .flatMap(step => Array.from({ length: 10 }, (_, index) => agentMarkdownDelta(step, index)))
+      .join('')
+    expect(source).toContain('| Surface | Owner | Invariant |')
     expect(source).toContain('```ts')
+    expect(source).toContain('```text')
     expect(source).toContain('- [x]')
-    expect(source).toContain('> The renderer may change physical height')
+    expect(source).toContain('> A virtual row may remount')
+    expect(source).toContain('1. `turnId` groups')
+
+    let final = liveMessage(4)
+    final = addFinalEvidence(final, 'diff')
+    final = addFinalEvidence(final, 'code')
+    final = addFinalEvidence(final, 'artifacts')
+    expect(final.blocks.map(contentBlock => contentBlock.type)).toEqual(['reasoning', 'diff', 'code', 'attachments', 'markdown'])
   })
 })
