@@ -119,6 +119,8 @@ describe('engine architecture boundaries', () => {
     expect(workspace).not.toContain('data-testid="scenario-launch"')
     expect(workspace).not.toContain('Synthetic playback')
     expect(workspace).not.toContain('canonical blocks · bounded projection')
+    expect(workspace).not.toContain('Demo conversations')
+    expect(workspace).toContain('<div class="session-section-label">Recent</div>')
     expect(workspace).toContain('data-testid="diagnostics-open"')
     expect(workspace).toContain('navigator.webdriver')
     expect(workspace).not.toContain('data-testid="metrics"')
@@ -128,11 +130,22 @@ describe('engine architecture boundaries', () => {
     expect(workspace).toContain('#header-actions')
     expect(workspace).not.toContain('data-conversation-engine=')
     expect(viewport).toContain('data-conversation-engine="vue"')
+    expect(viewport).not.toContain('conversation / {{ runtime.id }}')
     expect(viewport).toContain("./viewport-navigation-controller")
     expect(viewport).not.toContain('function restoreListAnchor')
     expect(viewport).not.toContain('function pinMeasuredEnd')
     expect(viewport).toContain("emit('viewportMetrics'")
     expect(viewport).not.toMatch(/Synthetic Agent|Reasoning · balanced|Search conversation|title="Attach"|>Agent ▾<|>Model ▾</)
+  })
+
+  it('uses one GFM parser contract for chunk boundaries and HTML rendering', () => {
+    const chunks = readFileSync(join(engineRoot, 'presentation/markdown-chunks.ts'), 'utf8')
+    const renderer = readFileSync(join(engineRoot, 'vue/renderers/markdown-cache.ts'), 'utf8')
+    expect(chunks).toContain("import { marked } from 'marked'")
+    expect(chunks).toContain('marked.lexer(source, MARKDOWN_OPTIONS)')
+    expect(chunks).not.toContain('cleanBoundary')
+    expect(renderer).toContain("MARKDOWN_OPTIONS")
+    expect(renderer).toContain("from '../../presentation/markdown-chunks'")
   })
 
   it('keeps realistic public scenario tails as canonical Demo history, not renderer shortcuts', () => {
@@ -171,6 +184,7 @@ describe('engine architecture boundaries', () => {
     expect(main).toContain("./styles/architecture.css")
     expect(demoCss).not.toMatch(/\.session-search|\.scenario-button|\.workspace-context|\.demo-context-(?:chip|copy)|\.sidebar-version|\.session-empty/)
     expect(shellCss).toContain("@import './renderers.css'")
+    expect(shellCss).not.toContain('.conversation-title span')
   })
 
   it('keeps both engine css responsibilities host-scoped', () => {
