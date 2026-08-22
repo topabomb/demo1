@@ -3,7 +3,7 @@ export type BuiltinToolCategory = 'generic' | 'search' | 'filesystem' | 'shell' 
 export type ToolCategory = BuiltinToolCategory | (string & {})
 export type AttachmentKind = 'image' | 'audio' | 'video' | 'file'
 
-/** ResourceRef.kind is exactly: kind: 'file' | 'url' | 'artifact'. The alias is shared by public contracts. */
+/** ResourceRef.kind is exactly: file, url or artifact. The alias is shared by public contracts. */
 export type ResourceKind = 'file' | 'url' | 'artifact'
 export interface ResourceRange {
   startLine: number
@@ -35,13 +35,23 @@ export interface PlanItem {
   status: PlanItemStatus
 }
 
+/**
+ * Parent-facing execution relationship for delegated child work.
+ * foreground means the producer reports that parent flow waited for this run;
+ * background means parent flow may continue while the child remains active.
+ * This is observation, never scheduling policy.
+ */
+export type AgentRunMode = 'foreground' | 'background'
 export type AgentRunStatus = 'queued' | 'running' | 'waiting' | 'completed' | 'failed' | 'interrupted'
 export interface AgentRunRef {
   runId: string
   title: string
   agent?: string
+  mode: AgentRunMode
   status: AgentRunStatus
+  /** Optional stable child conversation/session address. Navigation remains host-owned. */
   childSessionId?: string
+  /** Final or producer-reported concise result. Child trace remains in the child session. */
   summary?: string
 }
 
@@ -81,7 +91,8 @@ export interface ContentBlockMap {
   'tool-call': { name: string; callId: string; input: unknown; category?: ToolCategory; presentation?: ToolPresentationIntent; resources?: readonly ResourceRef[]; model?: string; progress?: number; durationMs?: number; status?: 'running' | 'success' | 'error'; defaultOpen?: boolean }
   'tool-result': { name: string; callId: string; output: unknown; category?: ToolCategory; presentation?: ToolPresentationIntent; resources?: readonly ResourceRef[]; model?: string; progress?: number; durationMs?: number; status?: 'running' | 'success' | 'error'; defaultOpen?: boolean }
   terminal: { callId?: string; command?: string; cwd?: ResourceRef; output: string; status: 'running' | 'success' | 'error' | 'interrupted'; exitCode?: number; durationMs?: number; defaultOpen?: boolean }
-  'agent-run': AgentRunRef
+  /** One parent-visible delegation batch. One run covers sync; many runs cover parallel/background children. */
+  delegation: { title?: string; runs: readonly AgentRunRef[] }
   diff: { resource: ResourceRef; lines: readonly string[]; defaultOpen?: boolean }
 }
 
