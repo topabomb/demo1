@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { usePerformanceMetrics } from '../use-performance-metrics'
 import type { SessionViewMemory } from '../../engine/viewport/state'
 import {
@@ -21,6 +21,22 @@ interface ViewportHandle {
   shiftBackward(): Promise<void>
   shiftForward(): Promise<void>
 }
+
+type DemoNavigationTarget =
+  | 'restart-agent'
+  | 'agent-plan'
+  | 'agent-delegation'
+  | 'agent-terminal'
+  | 'agent-final'
+  | 'office-briefing'
+  | 'office-followup'
+
+const AGENT_DEMO_MESSAGE = {
+  'agent-plan': 83_999,
+  'agent-delegation': 84_005,
+  'agent-terminal': 84_007,
+  'agent-final': 84_008,
+} as const
 
 const { workspace, activeSession, activeUiState, workspaceRevision } = useWorkspaceRuntime()
 const viewportRef = ref<ViewportHandle | null>(null)
@@ -66,6 +82,28 @@ function indicatorDetail(descriptor: DemoSessionDescriptor): string {
   if (state === 'failed') return descriptor.lastFailure?.code ?? 'Failed'
   if (descriptor.queuedPrompts) return `${descriptor.queuedPrompts} queued`
   return `${descriptor.logicalCount.toLocaleString()} messages`
+}
+
+async function navigateDemo(target: DemoNavigationTarget): Promise<void> {
+  if (target === 'restart-agent') {
+    // Full reload is intentionally Demo-only: it recreates the synthetic producer and
+    // all seeded sessions without pretending the Engine owns replay/reset policy.
+    window.location.reload()
+    return
+  }
+
+  if (target === 'office-briefing' || target === 'office-followup') {
+    switchSession(target === 'office-briefing' ? 'office-briefing' : 'office-followup')
+    await nextTick()
+    await viewportRef.value?.jumpToLatest()
+    return
+  }
+
+  switchSession('agent-loop')
+  await nextTick()
+  const messageIndex = AGENT_DEMO_MESSAGE[target]
+  if (activeSession.value.logicalCount > messageIndex) await viewportRef.value?.jumpToMessage(messageIndex)
+  else await viewportRef.value?.jumpToLatest()
 }
 
 // Verification fixtures stay in Demo ownership. They exercise the normal canonical
@@ -184,6 +222,7 @@ async function injectAgentScenarios(): Promise<void> {
       @inject-mixed="injectMixed"
       @inject-markdown="injectMarkdownGallery"
       @inject-agent="injectAgentScenarios"
+      @demo-navigate="navigateDemo"
     />
   </section>
 </template>
