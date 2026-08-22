@@ -32,7 +32,7 @@ const mobileSessionsOpen = ref(false)
 const fixtureOrdinal = ref(1)
 const { fps, frameP95, longTasks, heapMb } = usePerformanceMetrics()
 
-const activeStream = computed(() => workspace.executionFor(activeSession.value.id))
+const activeExecution = computed(() => workspace.executionFor(activeSession.value.id))
 const sessionDescriptors = computed(() => { void workspaceRevision.value; return workspace.descriptors })
 const hotSessionCount = computed(() => { void workspaceRevision.value; return workspace.hotSessionCount })
 const runningSessionCount = computed(() => { void workspaceRevision.value; return workspace.runningSessionCount })
@@ -146,7 +146,7 @@ async function injectAgentScenarios(): Promise<void> {
       :key="activeSession.id"
       ref="viewportRef"
       :runtime="activeSession"
-      :stream="activeStream"
+      :execution="activeExecution"
       :ui-state="activeUiState"
       @viewport-metrics="mountedRows = $event.mountedRows"
     >
@@ -157,7 +157,7 @@ async function injectAgentScenarios(): Promise<void> {
         <div v-show="diagnosticsOpen" class="conversation-meta-strip">
           <span>Loaded <strong data-testid="segment-range">{{ uiState.rangeStart.toLocaleString() }} – {{ Math.max(uiState.rangeStart, uiState.rangeEnd - 1).toLocaleString() }}</strong></span>
           <span>Reader <strong data-testid="reader-position">#{{ uiState.reader.toLocaleString() }}</strong></span>
-          <span data-testid="mounted-label">{{ visibleRows }} DOM rows</span><span v-if="uiState.streamTarget" data-testid="follow-state">{{ followLabel }}</span>
+          <span data-testid="mounted-label">{{ visibleRows }} DOM rows</span><span v-if="uiState.activeMessageId" data-testid="follow-state">{{ followLabel }}</span>
         </div>
       </template>
     </ConversationViewport>
@@ -166,7 +166,7 @@ async function injectAgentScenarios(): Promise<void> {
       v-show="diagnosticsOpen"
       :runtime="activeSession"
       :ui-state="activeUiState"
-      :stream="activeStream"
+      :stream="activeExecution"
       :mounted-rows="mountedRows"
       :hot-session-count="hotSessionCount"
       :running-session-count="runningSessionCount"
