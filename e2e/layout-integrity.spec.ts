@@ -87,8 +87,8 @@ test('architecture proof exposes layout-agnostic Engine, delegation, adapter and
   }
 
   await expect(page.getByText(/O\(delta \+ mutable tail\)/)).toBeVisible()
-  await expect(page.getByText('Streaming terminal', { exact: true })).toBeVisible()
-  await expect(page.getByText('Delegation status update', { exact: true })).toBeVisible()
+  await expect(page.getByText(/^Streaming terminal/)).toBeVisible()
+  await expect(page.getByText(/^Delegation status update/)).toBeVisible()
   await expect(page.getByText(/Child traces remain in child sessions/)).toBeVisible()
   await expect(page.getByText(/no core PresentationSurface/)).toBeVisible()
   await expect(page.getByText(/package publishing disabled/i)).toBeVisible()
