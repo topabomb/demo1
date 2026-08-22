@@ -8,7 +8,7 @@ import {
 import type { ConversationDescriptor, TokenUsage } from '../src/engine/conversation/contracts'
 
 function descriptor(overrides: Partial<ConversationDescriptor>): ConversationDescriptor {
-  return { id: 's', title: 'Session', age: 'now', status: 'idle', logicalCount: 10, ...overrides }
+  return { id: 's', title: 'Session', status: 'idle', logicalCount: 10, ...overrides }
 }
 
 describe('session semantics', () => {
