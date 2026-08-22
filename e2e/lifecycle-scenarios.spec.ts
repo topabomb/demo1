@@ -65,3 +65,19 @@ test('clarification blocker can be answered and the same session can continue ex
   await expect(page.locator('.run-status')).toContainText('Working')
   await expect.poll(async () => Number((await page.getByTestId('logical-count').textContent())?.replace(/,/g, '') ?? '0')).toBeGreaterThan(before)
 })
+
+test('Diagnostics lifecycle shortcuts navigate only to existing Demo sessions', async ({ page }) => {
+  await open(page)
+
+  await page.getByTestId('demo-lifecycle-fallback').click()
+  await expect(page.getByTestId('active-session-id')).toHaveText('resilience-fallback')
+  await expect(page.getByText('Launch-risk brief', { exact: true })).toBeVisible()
+
+  await page.getByTestId('demo-lifecycle-steer').click()
+  await expect(page.getByTestId('active-session-id')).toHaveText('steered-migration')
+  await expect(page.getByText('Read-only impact report', { exact: true })).toBeVisible()
+
+  await page.getByTestId('demo-lifecycle-clarify').click()
+  await expect(page.getByTestId('active-session-id')).toHaveText('android-protocol')
+  await expect(page.getByTestId('pending-interaction')).toHaveAttribute('data-kind', 'question')
+})
