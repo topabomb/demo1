@@ -1,51 +1,52 @@
+import { marked } from 'marked'
+
 export interface MarkdownChunk {
   text: string
   index: number
   hash: number
 }
 
+/** Shared parser contract for Markdown chunking and rendering. */
+export const MARKDOWN_OPTIONS = { gfm: true, breaks: false }
+
 /**
- * Split long Markdown at conservative block boundaries while never cutting an
- * open fenced code block. Existing prefix chunks remain byte-identical as a
- * stream appends to the tail.
+ * Split long Markdown only between top-level GFM blocks. The lexer is the same
+ * grammar used by the renderer, so lists, tables, blockquotes, fences and other
+ * container blocks remain atomic even when they contain internal blank lines.
  *
- * A single newline is deliberately not considered a safe boundary: tight GFM
- * tables, lists and other multi-line blocks depend on adjacent lines staying in
- * the same parse context. Oversized atomic blocks are preferable to changing
- * Markdown semantics merely to hit the target chunk size.
+ * Whitespace tokens stay attached to the preceding chunk. Oversized atomic
+ * blocks are intentionally left intact rather than changing Markdown semantics
+ * merely to hit the target size.
  */
 export function splitMarkdown(source: string, targetChars = 6000): MarkdownChunk[] {
-  if (!source) return [{ text: '', index: 0, hash: hashText('') }]
-  const lines = source.split(/(?<=\n)/)
+  if (!source) return [chunk('', 0)]
+
+  const tokens = marked.lexer(source, MARKDOWN_OPTIONS)
+  if (tokens.map(token => token.raw).join('') !== source) return [chunk(source, 0)]
+
   const chunks: string[] = []
   let buffer = ''
-  let fence: string | null = null
 
-  for (const line of lines) {
-    const trimmed = line.trimStart()
-    const marker = trimmed.match(/^(```+|~~~+)/)?.[1] ?? null
+  for (const token of tokens) {
+    const raw = token.raw
+    if (token.type === 'space') {
+      buffer += raw
+      continue
+    }
 
-    // Decide whether to flush using the state *before* this line. In particular,
-    // a closing-fence line belongs to the currently open chunk and must never be
-    // separated from its opener. Require an actual blank line so tight tables or
-    // lists are not split between structurally related lines.
-    const wouldOverflow = buffer.length > 0 && buffer.length + line.length > targetChars
-    const cleanBoundary = !fence && /(?:\r?\n)[\t ]*(?:\r?\n)$/.test(buffer)
-    if (wouldOverflow && cleanBoundary) {
+    if (buffer && buffer.length + raw.length > targetChars) {
       chunks.push(buffer)
       buffer = ''
     }
-
-    if (marker) {
-      const markerChar = marker[0]!
-      if (!fence) fence = markerChar
-      else if (markerChar === fence) fence = null
-    }
-    buffer += line
+    buffer += raw
   }
-  if (buffer || chunks.length === 0) chunks.push(buffer)
 
-  return chunks.map((text, index) => ({ text, index, hash: hashText(text) }))
+  if (buffer || chunks.length === 0) chunks.push(buffer)
+  return chunks.map((text, index) => chunk(text, index))
+}
+
+function chunk(text: string, index: number): MarkdownChunk {
+  return { text, index, hash: hashText(text) }
 }
 
 export function hashText(value: string): number {
