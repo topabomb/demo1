@@ -3,7 +3,8 @@ import type { AppendCanonicalMessage, LogicalMessage } from '../model/conversati
 import { cloneBlocks } from '../model/message-mutations'
 import type {
   ConversationDescriptor,
-  ConversationHistoryAdapter,
+  ConversationHistorySource,
+  InteractionResolution,
   LlmFailure,
   PendingInteraction,
   SessionContextStats,
@@ -27,13 +28,14 @@ export interface SessionKernelEvent {
  * Canonical session truth.
  *
  * This kernel stores normalized messages and lifecycle/accounting facts but never
- * invents provider output, default assistant blocks, token estimates or product copy.
- * Execution adapters own those decisions and publish them through these semantic APIs.
+ * invents provider output, execution targets, default assistant blocks, token estimates
+ * or product copy. Execution adapters own those decisions and publish them through
+ * these semantic APIs.
  */
 export class ConversationSessionKernel {
   readonly id: string
   readonly title: string
-  readonly backend: ConversationHistoryAdapter
+  readonly history: ConversationHistorySource
 
   #appended: LogicalMessage[] = []
   #overrides = new Map<number, LogicalMessage>()
@@ -57,10 +59,10 @@ export class ConversationSessionKernel {
   #lastTurnDurationMs = 0
   #lastTtftMs = 0
 
-  constructor(descriptor: ConversationDescriptor, backend: ConversationHistoryAdapter) {
+  constructor(descriptor: ConversationDescriptor, history: ConversationHistorySource) {
     this.id = descriptor.id
     this.title = descriptor.title
-    this.backend = backend
+    this.history = history
     this.#status = descriptor.status
     this.#pendingInteraction = descriptor.pendingInteraction ?? null
     this.#lastTurnReason = descriptor.lastTurnReason ?? defaultTurnReason(descriptor.status)
@@ -72,10 +74,13 @@ export class ConversationSessionKernel {
     this.#turnCount = Math.max(0, Math.floor(descriptor.turnCount ?? 0))
     this.#stepCount = Math.max(this.#turnCount, Math.floor(descriptor.stepCount ?? this.#turnCount))
 
-    if (descriptor.status === 'working' && backend.count > 0) {
-      this.#currentAssistantIndex = backend.count - 1
+    if (descriptor.status === 'working') {
       this.#lastTurnReason = null
       this.#runStartedAt = now()
+      if (descriptor.activeAssistantIndex !== undefined && descriptor.activeAssistantIndex !== null) {
+        this.#assertAssistantMessage(descriptor.activeAssistantIndex)
+        this.#currentAssistantIndex = descriptor.activeAssistantIndex
+      }
     }
   }
 
@@ -90,7 +95,7 @@ export class ConversationSessionKernel {
   get pendingInteraction(): PendingInteraction | null { return this.#pendingInteraction }
   get queuedPrompts(): number { return this.#queuedPrompts.length }
   get currentAssistantIndex(): number | null { return this.#currentAssistantIndex }
-  get count(): number { return this.backend.count + this.#appended.length }
+  get count(): number { return this.history.count + this.#appended.length }
   get unread(): boolean { return this.#unread }
   get foreground(): boolean { return this.#foreground }
   get lastTurnReason(): TurnEndReasonKind | null { return this.#lastTurnReason }
@@ -117,6 +122,7 @@ export class ConversationSessionKernel {
       context: this.context,
       turnCount: this.#turnCount,
       stepCount: this.#stepCount,
+      activeAssistantIndex: this.#currentAssistantIndex,
     }
   }
 
@@ -131,12 +137,12 @@ export class ConversationSessionKernel {
     if (!Number.isInteger(index) || index < 0 || index >= this.count) throw new RangeError(`message index ${index} outside 0..${this.count - 1}`)
     const override = this.#overrides.get(index)
     if (override) return override
-    if (index < this.backend.count) {
-      const found = this.backend.loadRange(index, 1)[0]
-      if (!found) throw new RangeError(`backend message ${index} missing`)
+    if (index < this.history.count) {
+      const found = this.history.loadRange(index, 1)[0]
+      if (!found) throw new RangeError(`history message ${index} missing`)
       return found
     }
-    const message = this.#appended[index - this.backend.count]
+    const message = this.#appended[index - this.history.count]
     if (!message) throw new RangeError(`appended message ${index} missing`)
     return message
   }
@@ -275,11 +281,18 @@ export class ConversationSessionKernel {
     this.#emit({ kind: 'queue' })
   }
 
-  resolveInteraction(approved: boolean): void {
-    if (!this.#pendingInteraction) return
+  /** Clear a session blocker after validating the response kind; continuation policy stays in the execution adapter. */
+  resolveInteraction(resolution: InteractionResolution): void {
+    const pending = this.#pendingInteraction
+    if (!pending) return
+    if (pending.kind !== resolution.kind) throw new Error(`interaction ${pending.id} expects ${pending.kind} resolution`)
+
+    const rejected = resolution.kind === 'approval'
+      ? !resolution.approved
+      : resolution.answer === null
     this.#pendingInteraction = null
-    this.#status = approved ? 'idle' : 'interrupted'
-    this.#lastTurnReason = approved ? 'completed' : 'aborted'
+    this.#status = rejected ? 'interrupted' : 'idle'
+    this.#lastTurnReason = rejected ? 'aborted' : null
     this.#lastFailure = null
     this.#emit({ kind: 'interaction' })
   }
@@ -290,8 +303,8 @@ export class ConversationSessionKernel {
   }
 
   #writeMessage(index: number, message: LogicalMessage): void {
-    if (index < this.backend.count) this.#overrides.set(index, message)
-    else this.#appended[index - this.backend.count] = message
+    if (index < this.history.count) this.#overrides.set(index, message)
+    else this.#appended[index - this.history.count] = message
   }
 
   #recordFirstOutput(): void {
