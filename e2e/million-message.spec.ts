@@ -285,20 +285,26 @@ test('a non-million Recent session renders realistic thinking/tool/code/diff/ima
   await expect(tool.locator('.tool-pane')).toContainText(/path|rows|query/)
 
   await jump(page, 120_010)
-  let code = page.locator('[data-message-index="120010"]').first().getByTestId('code-block')
+  const codeRow = page.locator('[data-message-index="120010"]').filter({ has: page.getByTestId('code-block') }).first()
+  const codeUnitId = await codeRow.getAttribute('data-render-unit')
+  expect(codeUnitId).toBeTruthy()
+  let code = codeRow.getByTestId('code-block')
   await expect(code.locator('.shiki')).toBeVisible({ timeout: 15_000 })
   const expandCode = code.getByRole('button', { name: 'expand' })
   if (await expandCode.count()) {
     await expandCode.click()
-    code = page.locator('[data-message-index="120010"]').first().getByTestId('code-block')
+    code = page.locator(`[data-render-unit="${codeUnitId}"]`).getByTestId('code-block')
     await expect(code.getByRole('button', { name: 'collapse' })).toBeVisible()
   }
 
   await jump(page, 120_018)
-  let diff = page.locator('[data-message-index="120018"]').first().getByTestId('diff-block')
+  const diffRow = page.locator('[data-message-index="120018"]').filter({ has: page.getByTestId('diff-block') }).first()
+  const diffUnitId = await diffRow.getAttribute('data-render-unit')
+  expect(diffUnitId).toBeTruthy()
+  let diff = diffRow.getByTestId('diff-block')
   await expect(diff.locator('.diff-ellipsis')).toBeVisible()
   await diff.getByRole('button', { name: 'expand' }).click()
-  diff = page.locator('[data-message-index="120018"]').first().getByTestId('diff-block')
+  diff = page.locator(`[data-render-unit="${diffUnitId}"]`).getByTestId('diff-block')
   await expect(diff.getByRole('button', { name: 'collapse' })).toBeVisible()
 
   await jump(page, 120_022)
