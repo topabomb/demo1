@@ -51,7 +51,7 @@ export const RECENT_SESSIONS: readonly DemoSessionSeed[] = [
   },
   {
     id: 'tool-rendering', title: 'Production config migration', age: '1h', status: 'waiting', logicalCount: 420_000,
-    seedOffset: 211, scenario: 'config-approval', pendingInteraction: approval, lastTurnReason: 'blocked',
+    seedOffset: 211, scenario: 'config-approval', pendingInteraction: approval,
     usage: usage(91_000, 13_100, 452_000, 18_000, 2_800), context: { projectedTokens: 91_700, contextWindow: 128_000 }, turnCount: 18_900, stepCount: 39_200,
   },
   {
@@ -71,7 +71,7 @@ export const RECENT_SESSIONS: readonly DemoSessionSeed[] = [
   },
   {
     id: 'android-protocol', title: 'Android protocol rollout', age: '2d', status: 'waiting', logicalCount: 24_000,
-    seedOffset: 601, scenario: 'android-rollout', pendingInteraction: question, lastTurnReason: 'blocked',
+    seedOffset: 601, scenario: 'android-rollout', pendingInteraction: question,
     usage: usage(18_000, 2_800, 64_000, 3_900, 600), context: { projectedTokens: 31_600, contextWindow: 128_000 }, turnCount: 1_100, stepCount: 2_300,
   },
   {
