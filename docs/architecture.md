@@ -146,6 +146,8 @@ Important properties:
 - settled Markdown prefix units remain stable when the live tail gains another chunk;
 - presentation state is rebuildable from canonical history.
 
+Markdown chunking is semantic rather than line-heuristic: the splitter uses the same `marked` GFM lexer contract as HTML rendering and may split only between top-level parser blocks. Lists, tables, blockquotes and fences remain atomic even with internal blank lines; an oversized atomic block is preferable to changing rendered meaning.
+
 A million-message conversation is therefore a history-addressing problem, not a million-component rendering problem.
 
 ## 6. Four state lifetimes
@@ -192,7 +194,7 @@ This boundary makes the virtualizer replaceable without redefining conversation 
 
 ## 8. Vue adapter, renderer registry and CSS boundary
 
-`ConversationViewport.vue` is the reference UI adapter, not product state. Product-specific header chrome enters through narrow slots.
+`ConversationViewport.vue` is the reference UI adapter, not product state. Its built-in header owns the conversation title and execution status; product chrome enters through narrow slots. Internal session identifiers and observability metadata are not hard-coded into the Engine header and belong in the Demo's diagnostics surface or another host adapter.
 
 Renderer policy has two explicit seams:
 
