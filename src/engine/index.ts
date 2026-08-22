@@ -4,6 +4,7 @@
  */
 export {
   block,
+  type AgentRunMode,
   type AgentRunRef,
   type AgentRunStatus,
   type AppendCanonicalMessage,
