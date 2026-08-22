@@ -23,10 +23,12 @@ Automated tests must protect these boundaries:
 - `src/engine/index.ts` remains framework-neutral and excludes Vue/Demo implementation;
 - SessionKernel owns canonical/session facts, not synthetic/provider policy;
 - provider-specific content generation, token estimates, playback rate and telemetry remain adapter/Demo concerns;
+- realistic Demo scenarios still enter through canonical `LogicalMessage + ContentBlock[]`, never renderer-only shortcuts;
 - presentation is bounded and rebuildable from canonical history;
 - semantic reader/Latest/anchor state is separate from DOM/virtualizer measurements;
 - tool/result/artifact correlation uses stable producer IDs;
 - product-only controls enter the Vue adapter through narrow slots rather than hard-coded fake actions;
+- Session diagnostics remains Demo-owned observability rather than Engine/product state;
 - `engine.css` owns shell/viewport/composer geometry, `renderers.css` owns content visuals, and both are host-scoped;
 - Demo alone may style the host page globally.
 
@@ -35,15 +37,16 @@ Automated tests must protect these boundaries:
 The local and deployed suites exercise the same product behavior:
 
 - 1,000,000+ addressable messages with bounded hot state and DOM;
-- reasoning + Markdown streaming with dynamic height;
-- image/file/audio attachments, tool calls/results, image generation, TTS/ASR, code, diff, HTML and Markdown forms;
+- a live heterogeneous Agent turn where reasoning and rich Markdown stream while tool call/result, diff, code and media artifacts join the same canonical message;
+- realistic preset task tails for code/transport work, approval/question blockers, multimodal handoff and failure recovery;
+- image/file/audio attachments, tool calls/results, image generation, TTS/ASR, code, diff, HTML and broad Markdown forms;
 - stable `callId`/artifact provenance;
 - queue, approval/question blockers, failure/resume and background execution;
 - far jump, prepend, exact Latest/follow behavior and session eviction/restore;
 - desktop/mobile reflow and variable-height composer;
 - renderer containment, sanitized HTML and no page-level horizontal overflow;
 - hostile host CSS without breaking Engine geometry;
-- clean Vue product seam with no fake search/model/attachment controls.
+- a scenario-focused public workspace with one-click high-value Session diagnostics and no fake search/model/attachment controls.
 
 ## Deterministic bounds
 

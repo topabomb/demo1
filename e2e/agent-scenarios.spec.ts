@@ -47,21 +47,29 @@ test('preset conversations land on realistic canonical content without public fi
   await expect(page.locator('[data-message-index="179995"]').getByTestId('tool-block')).toBeVisible()
 })
 
-test('default live scenario becomes a heterogeneous Agent turn while output is still streaming', async ({ page }) => {
+test('default live scenario becomes a heterogeneous Agent turn while rich Markdown is still streaming', async ({ page }) => {
   await openApp(page)
   await expect(page.getByTestId('active-session-id')).toHaveText('million')
   await page.locator('.control-group select').selectOption('60')
   await expect.poll(async () => numeric(await page.getByTestId('stream-ticks').textContent()), { timeout: 15_000 }).toBeGreaterThan(70)
 
   const live = page.locator('[data-message-index="999999"]')
+  const markdown = live.getByTestId('markdown-block')
+  const artifacts = live.getByTestId('attachments-block')
   await expect(live.getByTestId('thinking-block')).toBeVisible()
-  await expect(live.getByTestId('markdown-block').last()).toBeVisible()
+  await expect(markdown.last()).toBeVisible()
   await expect(live.getByTestId('tool-block')).toHaveCount(2)
   await expect(live.getByTestId('diff-block')).toBeVisible()
   await expect(live.getByTestId('code-block')).toBeVisible()
-  await expect(live.getByTestId('attachments-block')).toBeVisible()
-  await expect(live).toContainText('Release regression investigation')
-  await expect(live).toContainText('Verification artifacts')
+  await expect(artifacts).toBeVisible()
+
+  await expect(markdown.first()).toContainText('Release regression investigation')
+  await expect(markdown.locator('table')).toBeVisible()
+  await expect(markdown.locator('pre code')).toBeVisible()
+  await expect(markdown.locator('input[type="checkbox"]')).toHaveCount(4)
+  await expect(markdown.locator('blockquote')).toBeVisible()
+  await expect(artifacts).toContainText('Verification artifacts')
+
   expect(numeric(await page.getByTestId('mounted-rows').textContent())).toBeLessThan(180)
   await assertNoRowOverlap(page)
 })
@@ -131,7 +139,7 @@ test('public multimodal handoff composes uploads, ASR tool correlation and audio
   await assertNoRowOverlap(page)
 })
 
-test('diagnostics-only gallery still covers image generation, TTS and ASR renderer variants', async ({ page }) => {
+test('Session diagnostics renderer suite still covers image generation, TTS and ASR variants', async ({ page }) => {
   await openApp(page)
   await switchSession(page, 'dsh-transport')
   await page.getByTestId('inject-agent-scenarios').click()
