@@ -152,9 +152,13 @@
 
   & .pending-interaction { margin:0 auto 8px; display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:11px; padding:11px 12px; border:1px solid #5b4a22; border-radius:10px; background:#1b180f; }
   & .pending-icon { display:grid; place-items:center; width:28px; height:28px; border-radius:8px; background:#3a3016; color:var(--ce-warning); font-weight:900; }
+  & .pending-copy { min-width:0; }
   & .pending-interaction strong { color:#ead99a; font-size:11px; }
   & .pending-interaction p { margin:3px 0 0; color:#a1987d; font-size:9px; line-height:1.5; }
   & .pending-actions { display:flex; gap:6px; }
+  & .pending-question-response { min-width:240px; display:grid; gap:6px; }
+  & .pending-question-response input { width:100%; min-width:0; background:#121820; }
+  & .pending-question-response .pending-actions { justify-content:flex-end; }
   & .queue-banner { margin:0 auto 8px; padding:7px 10px; border:1px solid #29485f; border-radius:8px; background:#101e2a; color:#88bce9; font-size:9px; }
   & .turn-outcome-banner { margin:0 auto 8px; display:flex; gap:8px; align-items:baseline; padding:8px 10px; border:1px solid #583338; border-radius:8px; background:#211518; font-size:9px; }
   & .turn-outcome-banner.failure strong { color:#ff9b94; }
@@ -174,7 +178,9 @@
     & .composer-hint { display:none; }
     & .session-stats-line { gap:5px; font-size:8px; }
     & .pending-interaction { grid-template-columns:auto minmax(0,1fr); }
-    & .pending-actions { grid-column:1/-1; justify-content:flex-end; }
+    & .pending-interaction > .pending-actions,
+    & .pending-question-response { grid-column:1/-1; min-width:0; }
+    & .pending-interaction > .pending-actions { justify-content:flex-end; }
     & .jump-latest { bottom:11px; }
   }
 
