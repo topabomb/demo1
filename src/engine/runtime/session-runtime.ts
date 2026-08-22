@@ -238,7 +238,9 @@ export class ConversationSessionRuntime {
         ? this.projectionEngine.appendMarkdownDelta(message, event.contentPatch.blockId, event.contentPatch.delta)
         : event.contentPatch?.kind === 'append-reasoning'
           ? this.projectionEngine.appendReasoningDelta(message, event.contentPatch.blockId, event.contentPatch.delta)
-          : this.projectionEngine.projectMessage(message)
+          : event.contentPatch?.kind === 'append-terminal'
+            ? this.projectionEngine.appendTerminalDelta(message, event.contentPatch.blockId, event.contentPatch.delta)
+            : this.projectionEngine.projectMessage(message)
       const existing = this.#activeUnits.filter(unit => unit.messageIndex === messageIndex)
       const sameIds = existing.length === units.length && existing.every((unit, index) => unit.id === units[index]?.id)
       if (sameIds) {
