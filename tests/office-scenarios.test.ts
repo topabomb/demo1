@@ -33,7 +33,7 @@ describe('office Agent Demo scenarios', () => {
     ])
   })
 
-  it('stops a meeting follow-up on an explicit session-owned approval boundary', () => {
+  it('correlates a proposed meeting action to approval without claiming it executed', () => {
     const tail = createScenarioTail('office-followup', 36_000, 'meeting-followup')
     expect(tail).toHaveLength(7)
     const blocks = tail.flatMap(message => message.blocks)
@@ -43,9 +43,19 @@ describe('office Agent Demo scenarios', () => {
 
     const action = blocks.find(block => block.type === 'tool-call' && block.data.name === 'send_meeting_followup')
     expect(action?.type === 'tool-call' ? action.data.category : null).toBe('productivity')
-    expect(action?.type === 'tool-call' ? action.data.status : null).toBe('running')
+    expect(action?.type === 'tool-call' ? action.data.callId : null).toBe('meeting-followup-approval')
+    expect(action?.type === 'tool-call' ? action.data.status : undefined).toBeUndefined()
+    expect(action?.type === 'tool-call' ? action.data.durationMs : undefined).toBeUndefined()
 
     const seed = RECENT_SESSIONS.find(session => session.id === 'office-followup')
-    expect(seed).toMatchObject({ status: 'waiting', pendingInteraction: { kind: 'approval', toolName: 'send_meeting_followup' } })
+    expect(seed).toMatchObject({
+      status: 'waiting',
+      pendingInteraction: {
+        id: 'approval-meeting-followup',
+        kind: 'approval',
+        toolName: 'send_meeting_followup',
+        callId: 'meeting-followup-approval',
+      },
+    })
   })
 })
