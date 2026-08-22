@@ -17,11 +17,13 @@ describe('session active work plan', () => {
       id: 'plan-state', title: 'Plan state', status: 'idle', logicalCount: 0, activePlan: plan,
     }, new SyntheticHistoryAdapter('plan-state', 0, 1))
 
-    expect(kernel.activePlan).toEqual(plan)
-    expect(kernel.summary.activePlan).toEqual(plan)
     const first = kernel.activePlan!
-    ;(first.items as Array<{ status: string }>)[0]!.status = 'blocked'
-    expect(kernel.activePlan?.items[0]?.status).toBe('completed')
+    const second = kernel.activePlan!
+    expect(first).toEqual(plan)
+    expect(kernel.summary.activePlan).toEqual(plan)
+    expect(first).not.toBe(second)
+    expect(first.items).not.toBe(second.items)
+    expect(first.items[0]).not.toBe(second.items[0])
   })
 
   it('never infers current plan from historical plan messages', () => {
