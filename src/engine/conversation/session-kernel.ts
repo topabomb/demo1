@@ -281,18 +281,19 @@ export class ConversationSessionKernel {
     this.#emit({ kind: 'queue' })
   }
 
-  /** Clear a session blocker after validating the response kind; continuation policy stays in the execution adapter. */
+  /**
+   * Validate and clear a session blocker only. The execution adapter that received
+   * the resolution owns whether approval/denial/answer/skip resumes work, changes
+   * strategy or terminates the Turn.
+   */
   resolveInteraction(resolution: InteractionResolution): void {
     const pending = this.#pendingInteraction
     if (!pending) return
     if (pending.kind !== resolution.kind) throw new Error(`interaction ${pending.id} expects ${pending.kind} resolution`)
 
-    const rejected = resolution.kind === 'approval'
-      ? !resolution.approved
-      : resolution.answer === null
     this.#pendingInteraction = null
-    this.#status = rejected ? 'interrupted' : 'idle'
-    this.#lastTurnReason = rejected ? 'aborted' : null
+    this.#status = 'idle'
+    this.#lastTurnReason = null
     this.#lastFailure = null
     this.#emit({ kind: 'interaction' })
   }
