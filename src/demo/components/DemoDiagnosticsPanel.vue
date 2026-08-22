@@ -9,6 +9,15 @@ import {
 } from '../../engine/conversation/session-semantics'
 import type { SyntheticStreamController } from '../stream-controller'
 
+type DemoNavigationTarget =
+  | 'restart-agent'
+  | 'agent-plan'
+  | 'agent-delegation'
+  | 'agent-terminal'
+  | 'agent-final'
+  | 'office-briefing'
+  | 'office-followup'
+
 const props = defineProps<{
   runtime: ConversationSessionRuntime
   uiState: SessionUiSnapshot
@@ -33,6 +42,7 @@ const emit = defineEmits<{
   injectMixed: [turns: number]
   injectMarkdown: []
   injectAgent: []
+  demoNavigate: [target: DemoNavigationTarget]
 }>()
 
 const jumpTarget = ref(props.uiState.reader)
@@ -89,6 +99,20 @@ function pauseStream(): void { props.stream.pause() }
     </div>
     <div class="session-scope-card" data-testid="active-session-card">
       <span>active session</span><strong data-testid="active-session-id">{{ runtime.id }}</strong><small>{{ runtime.title }}</small>
+    </div>
+
+    <div class="control-group">
+      <label>Demo scenarios</label>
+      <div class="fixture-grid">
+        <button data-testid="demo-restart-agent" @click="emit('demoNavigate', 'restart-agent')">Restart agent loop</button>
+        <button class="secondary" data-testid="demo-agent-plan" @click="emit('demoNavigate', 'agent-plan')">Plan</button>
+        <button class="secondary" data-testid="demo-agent-delegation" @click="emit('demoNavigate', 'agent-delegation')">Delegation</button>
+        <button class="secondary" data-testid="demo-agent-terminal" @click="emit('demoNavigate', 'agent-terminal')">Terminal</button>
+        <button class="secondary" data-testid="demo-agent-final" @click="emit('demoNavigate', 'agent-final')">Final</button>
+        <button data-testid="demo-office-briefing" @click="emit('demoNavigate', 'office-briefing')">Executive briefing</button>
+        <button data-testid="demo-office-followup" @click="emit('demoNavigate', 'office-followup')">Meeting approval</button>
+      </div>
+      <small class="control-note">Demo-only shortcuts make the canonical evidence easy to inspect. They switch/jump sessions but do not add navigation, workflow or connector policy to the Engine.</small>
     </div>
 
     <div class="control-group">
@@ -178,7 +202,7 @@ function pauseStream(): void { props.stream.pause() }
 
     <div class="architecture-note">
       <strong>What this panel proves</strong>
-      <span>Engine state stays decoupled from Demo playback controls: large logical history remains separate from hot projection and mounted DOM, while canonical Turn/Step/tool identity, background SessionKernels, queue/blockers and exact reader state remain observable.</span>
+      <span>Engine state stays decoupled from Demo playback controls: large logical history remains separate from hot projection and mounted DOM, while canonical Turn/Step/tool identity, delegated child runs, background SessionKernels, queue/blockers and exact reader state remain observable.</span>
     </div>
   </aside>
 </template>
