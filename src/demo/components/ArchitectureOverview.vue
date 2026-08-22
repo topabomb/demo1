@@ -25,7 +25,7 @@ const agentLoop = [
   ['Turn', 'One user-level interaction lifecycle. Several assistant/tool history records may share the same turnId.'],
   ['Step', 'Producer-owned model/tool-loop coordinate. Engine preserves stepId but does not decide when another Step occurs.'],
   ['Tool call/result', 'Separate canonical records linked by callId. DOM adjacency is never business identity.'],
-  ['Blocker response', 'Approval carries approved:boolean; question carries answer:string|null. Kernel clears the blocker; the execution adapter owns continuation and the resulting Turn outcome.'],
+  ['Blocker lifecycle', 'requestInteraction is the only working → waiting transition; waiting always has one pending interaction. resolveInteraction clears it to outcome-neutral idle; the execution adapter owns continuation and the final Turn outcome.'],
   ['Restore', 'A working session may provide activeAssistantIndex explicitly. Engine never assumes the last history record is the active execution target.'],
 ]
 
