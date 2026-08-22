@@ -113,7 +113,7 @@ describe('ConversationSessionKernel', () => {
     expect(explicit.summary.activeAssistantIndex).toBe(0)
   })
 
-  it('keeps approval and question resolutions typed instead of reducing both to a boolean', () => {
+  it('keeps interaction payloads typed while leaving every post-resolution outcome to the execution adapter', () => {
     const questionKernel = new ConversationSessionKernel({
       id: 'question', title: 'Question', status: 'waiting', logicalCount: 0,
       pendingInteraction: { id: 'q1', kind: 'question', title: 'Choose behavior', detail: 'Which fallback?' },
@@ -124,13 +124,21 @@ describe('ConversationSessionKernel', () => {
     expect(questionKernel.status).toBe('idle')
     expect(questionKernel.lastTurnReason).toBeNull()
 
+    const skippedQuestion = new ConversationSessionKernel({
+      id: 'skip-question', title: 'Skip question', status: 'waiting', logicalCount: 0,
+      pendingInteraction: { id: 'q2', kind: 'question', title: 'Optional detail', detail: 'Provide extra context?' },
+    }, new SyntheticHistoryAdapter('skip-question', 0, 1))
+    skippedQuestion.resolveInteraction({ kind: 'question', answer: null })
+    expect(skippedQuestion.status).toBe('idle')
+    expect(skippedQuestion.lastTurnReason).toBeNull()
+
     const approvalKernel = new ConversationSessionKernel({
       id: 'approval', title: 'Approval', status: 'waiting', logicalCount: 0,
       pendingInteraction: { id: 'a1', kind: 'approval', title: 'Edit config', detail: 'Apply patch?', toolName: 'edit_file' },
     }, new SyntheticHistoryAdapter('approval', 0, 1))
     approvalKernel.resolveInteraction({ kind: 'approval', approved: false })
-    expect(approvalKernel.status).toBe('interrupted')
-    expect(approvalKernel.lastTurnReason).toBe('aborted')
+    expect(approvalKernel.status).toBe('idle')
+    expect(approvalKernel.lastTurnReason).toBeNull()
   })
 
   it('owns a monotonic message revision for every canonical replacement', () => {
