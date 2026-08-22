@@ -40,6 +40,7 @@ export {
   type SubmitDisposition,
   type TokenUsage,
   type TurnEndReasonKind,
+  type WorkPlan,
 } from './conversation/contracts'
 export {
   ConversationSessionKernel,
