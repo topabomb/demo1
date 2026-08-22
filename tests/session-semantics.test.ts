@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   billedInputTokens,
   cacheHitPercent,
-  deriveSessionIndicator,
   contextOccupancyPercent,
+  defaultTurnReason,
+  deriveSessionIndicator,
 } from '../src/engine/conversation/session-semantics'
 import type { ConversationDescriptor, TokenUsage } from '../src/engine/conversation/contracts'
 
@@ -19,6 +20,14 @@ describe('session semantics', () => {
     expect(deriveSessionIndicator(descriptor({ status: 'waiting', lastTurnReason: 'blocked' }))).toBe('blocked')
     expect(deriveSessionIndicator(descriptor({ status: 'interrupted', lastTurnReason: 'aborted' }))).toBe('interrupted')
     expect(deriveSessionIndicator(descriptor({ status: 'idle', lastTurnReason: 'max-tokens' }))).toBe('max-tokens')
+    expect(deriveSessionIndicator(descriptor({ status: 'idle', lastTurnReason: null }))).toBe('idle')
+  })
+
+  it('never invents a completed Turn merely because execution is idle', () => {
+    expect(defaultTurnReason('idle')).toBeNull()
+    expect(defaultTurnReason('working')).toBeNull()
+    expect(defaultTurnReason('waiting')).toBe('blocked')
+    expect(defaultTurnReason('interrupted')).toBe('interrupted')
   })
 
   it('uses disjoint DSH-style prompt buckets for cache accounting', () => {
