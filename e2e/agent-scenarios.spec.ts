@@ -23,8 +23,8 @@ async function streamTicks(page: Page): Promise<number> {
   return numeric(await page.getByTestId('stream-ticks').textContent())
 }
 
-async function waitForStreamTicks(page: Page, target: number): Promise<void> {
-  await expect.poll(() => streamTicks(page), { timeout: 15_000 }).toBeGreaterThan(target)
+async function logicalCount(page: Page): Promise<number> {
+  return numeric(await page.getByTestId('logical-count').textContent())
 }
 
 async function assertNoRowOverlap(page: Page): Promise<void> {
@@ -55,49 +55,68 @@ test('preset conversations land on realistic canonical content without public fi
   await expect(page.locator('[data-message-index="179995"]').getByTestId('tool-block')).toBeVisible()
 })
 
-test('default live scenario becomes a heterogeneous Agent turn while rich Markdown is still streaming', async ({ page }) => {
+test('default Demo runs one Turn through multiple model/tool Steps with rich streaming Markdown', async ({ page }) => {
   await openApp(page)
-  await expect(page.getByTestId('active-session-id')).toHaveText('million')
+  await expect(page.getByTestId('active-session-id')).toHaveText('agent-loop')
+  await expect(page.getByTestId('playback-mode')).toHaveText('agent-loop')
+  await expect(page.getByTestId('logical-count')).toHaveText('84,000')
 
-  // Freeze the automatically-started Demo run before it can move older RenderUnits
-  // outside the physical viewport. Then verify the scenario as each semantic shape
-  // is introduced; one logical message may span several independently virtualized
-  // RenderUnits, so later checks navigate back to that message before inspecting
-  // earlier tool/diff/code units.
   await page.getByRole('button', { name: 'Pause' }).click()
-  const live = page.locator('[data-message-index="999999"]')
-  await expect(live.getByTestId('thinking-block')).toBeVisible()
-
-  const start = await streamTicks(page)
   await page.getByLabel('Stream rate').selectOption('60')
   await page.getByTestId('stream-start').click()
 
-  await waitForStreamTicks(page, Math.max(start + 8, 30))
-  const markdown = live.getByTestId('markdown-block')
-  await expect(markdown.last()).toBeVisible()
-  await expect(markdown.first()).toContainText('Release regression investigation')
-  await expect(markdown.locator('table')).toBeVisible()
-  await expect(markdown.locator('pre code')).toBeVisible()
-  await expect(markdown.locator('input[type="checkbox"]')).toHaveCount(4)
-  await expect(markdown.locator('blockquote')).toBeVisible()
+  // Step 1: filesystem call/result, then the next assistant Step is appended.
+  await expect.poll(() => logicalCount(page), { timeout: 15_000 }).toBeGreaterThanOrEqual(84_002)
+  await page.getByRole('button', { name: 'Pause' }).click()
+  await jump(page, 83_999)
+  const fsCall = page.locator('[data-message-index="83999"]').getByTestId('tool-block')
+  await expect(fsCall).toHaveAttribute('data-category', 'filesystem')
+  await expect(fsCall).toHaveAttribute('data-call-id', 'loop-read-renderer')
+  await jump(page, 84_000)
+  const fsResult = page.locator('[data-message-index="84000"]').getByTestId('tool-block')
+  await expect(fsResult).toHaveAttribute('data-category', 'filesystem')
+  await expect(fsResult).toHaveAttribute('data-call-id', 'loop-read-renderer')
 
-  await waitForStreamTicks(page, 38)
-  await jump(page, 999_999)
-  await expect(live.getByTestId('tool-block')).toHaveCount(2)
+  // Step 2: search call/result is a new canonical pair in the same Turn.
+  await page.getByTestId('stream-start').click()
+  await expect.poll(() => logicalCount(page), { timeout: 15_000 }).toBeGreaterThanOrEqual(84_004)
+  await page.getByRole('button', { name: 'Pause' }).click()
+  await jump(page, 84_001)
+  const searchCall = page.locator('[data-message-index="84001"]').getByTestId('tool-block')
+  await expect(searchCall).toHaveAttribute('data-category', 'search')
+  await expect(searchCall).toHaveAttribute('data-call-id', 'loop-search-boundaries')
+  await jump(page, 84_002)
+  await expect(page.locator('[data-message-index="84002"]').getByTestId('tool-block')).toHaveAttribute('data-call-id', 'loop-search-boundaries')
 
-  await waitForStreamTicks(page, 48)
-  await jump(page, 999_999)
-  await expect(live.getByTestId('diff-block')).toBeVisible()
+  // Step 3: shell verification returns, then Step 4 becomes the live synthesis.
+  await page.getByTestId('stream-start').click()
+  await expect.poll(() => logicalCount(page), { timeout: 15_000 }).toBeGreaterThanOrEqual(84_006)
+  await page.getByRole('button', { name: 'Pause' }).click()
+  await jump(page, 84_003)
+  const shellCall = page.locator('[data-message-index="84003"]').getByTestId('tool-block')
+  await expect(shellCall).toHaveAttribute('data-category', 'shell')
+  await expect(shellCall).toHaveAttribute('data-call-id', 'loop-run-tests')
+  await jump(page, 84_004)
+  await expect(page.locator('[data-message-index="84004"]').getByTestId('tool-block')).toHaveAttribute('data-call-id', 'loop-run-tests')
 
-  await waitForStreamTicks(page, 60)
-  await jump(page, 999_999)
-  await expect(live.getByTestId('code-block')).toBeVisible()
+  await expect(page.getByTestId('active-turn-id')).toContainText('agent-loop:release-investigation')
+  await expect(page.getByTestId('active-step-id')).toContainText(':step-4')
+  await expect(page.getByTestId('active-tool-calls')).toHaveText('3')
+  await expect(page.getByTestId('active-tool-categories')).toContainText('filesystem')
+  await expect(page.getByTestId('active-tool-categories')).toContainText('search')
+  await expect(page.getByTestId('active-tool-categories')).toContainText('shell')
 
-  await waitForStreamTicks(page, 72)
-  await jump(page, 999_999)
-  const artifacts = live.getByTestId('attachments-block')
-  await expect(artifacts).toBeVisible()
-  await expect(artifacts).toContainText('Verification artifacts')
+  // Keep Step 4 live long enough to render complex GFM rather than paragraph-only output.
+  const beforeSynthesis = await streamTicks(page)
+  await page.getByTestId('stream-start').click()
+  await expect.poll(() => streamTicks(page), { timeout: 15_000 }).toBeGreaterThan(beforeSynthesis + 12)
+  await page.getByRole('button', { name: 'Pause' }).click()
+  await jump(page, 84_005)
+  const finalMarkdown = page.locator('[data-message-index="84005"]').getByTestId('markdown-block')
+  await expect(finalMarkdown.first()).toContainText('Final synthesis')
+  await expect(finalMarkdown.locator('table')).toBeVisible()
+  await expect(finalMarkdown.locator('input[type="checkbox"]')).toHaveCount(5)
+  await expect(finalMarkdown.locator('blockquote')).toBeVisible()
 
   expect(numeric(await page.getByTestId('mounted-rows').textContent())).toBeLessThan(180)
   await assertNoRowOverlap(page)
