@@ -152,13 +152,26 @@ export class ConversationSessionKernel {
   appendCanonicalMessages(entries: readonly AppendCanonicalMessage[]): readonly number[] {
     if (entries.length === 0) return []
     const indexes: number[] = []
-    const turns = new Set<string>()
-    const steps = new Set<string>()
+    const previous = this.count > 0 ? this.getMessage(this.count - 1) : null
+    let previousTurnId = previous?.turnId ?? null
+    let previousStepId = previous?.stepId ?? null
+
     for (const entry of entries) {
       const index = this.count
       indexes.push(index)
-      turns.add(entry.turnId)
-      if (entry.stepId) steps.add(entry.stepId)
+
+      // Canonical history is append-ordered. Count Turn/Step transitions, not
+      // append calls: one Agent Turn may append several assistant/tool records
+      // over time while keeping the same turnId/stepId.
+      if (entry.turnId !== previousTurnId) this.#turnCount += 1
+      if (entry.stepId) {
+        if (entry.stepId !== previousStepId) this.#stepCount += 1
+      } else {
+        // Producers without stable step coordinates retain the conservative
+        // historical behavior of one step per appended message.
+        this.#stepCount += 1
+      }
+
       this.#appended.push({
         id: `${this.id}:m-${index}`,
         index,
@@ -169,9 +182,9 @@ export class ConversationSessionKernel {
         revision: 0,
         live: entry.live,
       })
+      previousTurnId = entry.turnId
+      previousStepId = entry.stepId ?? null
     }
-    this.#turnCount += turns.size
-    this.#stepCount += steps.size > 0 ? steps.size : entries.length
     this.#emit({ kind: 'append', messageIndex: indexes[indexes.length - 1] })
     return indexes
   }
@@ -199,7 +212,7 @@ export class ConversationSessionKernel {
   /** Begin provider/runtime execution after the adapter has appended any new canonical records. */
   startExecution(currentAssistantIndex: number | null = null): boolean {
     if (this.#pendingInteraction) return false
-    if (currentAssistantIndex !== null) this.getMessage(currentAssistantIndex)
+    if (currentAssistantIndex !== null) this.#assertAssistantMessage(currentAssistantIndex)
     this.#currentAssistantIndex = currentAssistantIndex
     this.#status = 'working'
     this.#lastTurnReason = null
@@ -208,6 +221,15 @@ export class ConversationSessionKernel {
     this.#firstOutputAt = 0
     this.#emit({ kind: 'status', messageIndex: currentAssistantIndex ?? undefined })
     return true
+  }
+
+  /** Move an already-running execution to the next assistant record without resetting Turn timing. */
+  continueExecutionAt(currentAssistantIndex: number): void {
+    if (this.#status !== 'working') throw new Error('cannot continue an execution that is not working')
+    this.#assertAssistantMessage(currentAssistantIndex)
+    if (this.#currentAssistantIndex === currentAssistantIndex) return
+    this.#currentAssistantIndex = currentAssistantIndex
+    this.#emit({ kind: 'status', messageIndex: currentAssistantIndex })
   }
 
   /** Finish execution without inventing any content. */
@@ -260,6 +282,11 @@ export class ConversationSessionKernel {
     this.#lastTurnReason = approved ? 'completed' : 'aborted'
     this.#lastFailure = null
     this.#emit({ kind: 'interaction' })
+  }
+
+  #assertAssistantMessage(index: number): void {
+    const message = this.getMessage(index)
+    if (message.role !== 'assistant') throw new Error(`execution target ${index} must be an assistant message`)
   }
 
   #writeMessage(index: number, message: LogicalMessage): void {
