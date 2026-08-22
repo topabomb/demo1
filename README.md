@@ -64,7 +64,7 @@ assistant tool call          turn A / step 1
 tool result                  turn A / step 1
 assistant stream             turn A / step 2
 assistant tool call          turn A / step 2
- tool result                 turn A / step 2
+tool result                  turn A / step 2
 assistant final synthesis    turn A / step 3+
 ```
 
@@ -92,7 +92,7 @@ shell verification call/result
 final synthesis + diff + code + artifacts
 ```
 
-The Markdown stream deliberately contains GFM tables, task lists, nested lists, blockquotes, fenced code and repeated growing sections. Tool categories and stable `callId`s are visible in the generic tool renderer. Tool results are separate canonical `role: tool` history records rather than renderer-only decorations.
+The Markdown stream deliberately contains GFM tables, task lists, nested lists, blockquotes, fenced code and repeated growing sections. Tool categories and stable `callId`s are visible in the generic tool renderer. Each live tool call is an independently addressable canonical assistant record and each result is a separate canonical `role: tool` record, so timeline replay and virtualization never depend on DOM adjacency.
 
 Other Recent conversations demonstrate transport/code refactoring, approval and user-question blockers, multimodal upload/ASR/audio handoff, responsive image/HTML/table artifacts, and resumable provider failure/long-context history.
 
