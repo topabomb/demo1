@@ -26,7 +26,9 @@ Automated tests must protect these boundaries:
 - multi-session routing, Recent metadata and hot-runtime LRU remain host/Demo composition rather than a hidden `WorkspaceKernel`;
 - `ConversationHistorySource` stays an honest synchronous hot-read contract; async DB/network fetch/prefetch/cache fill remains outside Engine;
 - a restored `working` session never infers its active assistant from history order; the host/provider supplies `activeAssistantIndex` explicitly when known;
-- approval and question blockers keep distinct typed resolutions; a question carries a real answer string or explicit skip;
+- `SessionStatus` and `lastTurnReason` remain independent: `idle` alone never implies a completed Turn;
+- approval and question blockers keep distinct typed resolutions; a question carries a user answer string or explicit no-answer/skip payload;
+- resolving any blocker only validates/clears interaction state and never invents `completed`, `aborted` or other Turn outcomes; execution adapters must report outcomes explicitly;
 - queue payloads are runtime SessionKernel state and are not described as implicitly durable persistence;
 - realistic Demo scenarios enter through canonical `LogicalMessage + ContentBlock[]`, never renderer-only shortcuts;
 - presentation is bounded and rebuildable from canonical history;
@@ -43,7 +45,9 @@ The local and deployed suites exercise the same product behavior:
 - a realistic multi-Step Agent Turn with separate canonical assistant tool-call and `role: tool` result records;
 - filesystem/search/shell tool categories correlated by stable `callId`;
 - continuously growing GFM tables, task lists, nested lists, blockquotes and fenced code;
-- actual typed user-question response plus independent approval behavior;
+- a user-entered question answer plus independent approval behavior;
+- blocker resolution returning to an outcome-neutral idle state until execution policy explicitly continues or finishes the Turn;
+- a fresh empty session remaining `Idle` without an invented completed outcome;
 - realistic preset task tails for code/transport work, multimodal handoff and failure recovery;
 - image/file/audio attachments, image generation, TTS/ASR, code, diff, HTML and broad Markdown forms;
 - queue, failure/resume and background execution while viewports/hot runtimes are switched or evicted;
@@ -77,7 +81,7 @@ Architecture tests should fail if the neutral public entry starts exporting impl
 
 Vue API checks should fail if `ConversationNodeSeat` or process-global registry mutation helpers become public without an explicit architecture decision.
 
-The repository currently verifies source-level reuse; it does not claim npm package distribution. A future package release requires its own library build/export-map and consumer smoke tests.
+The repository currently verifies source-level reuse; its package manifest disables npm publication. It does not claim package distribution. A future package release requires its own library build/export-map and consumer smoke tests.
 
 ## Workflow policy
 
