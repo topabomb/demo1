@@ -9,7 +9,6 @@ describe('office Agent Demo scenarios', () => {
     expect(tail.at(-1)?.index).toBe(61_999)
 
     const blocks = tail.flatMap(message => message.blocks)
-    expect(new Set(blocks.map(block => block.type))).toEqual(expect.objectContaining ? expect.any(Set) : new Set())
     expect(blocks.map(block => block.type)).toEqual(expect.arrayContaining(['plan', 'tool-call', 'tool-result', 'delegation', 'markdown', 'attachments']))
 
     const plan = blocks.find(block => block.type === 'plan')
