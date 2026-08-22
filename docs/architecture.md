@@ -118,6 +118,19 @@ The Engine preserves these coordinates. It does not decide when another model St
 
 It does **not** imply durable persistence. A host that requires restart-safe queue/blocker/execution recovery must persist and restore those facts explicitly through its own storage/runtime adapter.
 
+### Live status is not historical outcome
+
+`SessionStatus` answers whether execution is currently `working`, `waiting`, `interrupted` or `idle`. `lastTurnReason` answers how the latest explicitly settled Turn ended. They are separate facts.
+
+In particular:
+
+- `idle` means no execution is currently running;
+- `idle` does **not** imply `completed`;
+- a fresh session therefore has `status: 'idle'` and `lastTurnReason: null`;
+- `completed`, `error`, `max-tokens`, `aborted` and other outcomes are written only when an execution adapter explicitly calls `finishExecution(...)`.
+
+This prevents product badges and recovery logic from inferring history from a live-state enum.
+
 ### No inferred execution target
 
 A restored descriptor may provide:
@@ -140,9 +153,9 @@ type InteractionResolution =
   | { kind: 'question'; answer: string | null }
 ```
 
-A question is therefore not reduced to a fake “approved” boolean. `answer: null` means explicit skip/cancel in the reference contract; an actual answer carries user data to the execution adapter.
+A question is therefore not reduced to a fake “approved” boolean. `answer: null` is an explicit no-answer/skip payload; it does not itself mean that the Turn was aborted.
 
-`SessionKernel.resolveInteraction()` validates that the resolution kind matches the pending blocker and clears session blocker state. What the provider/Agent does with that resolution remains execution-adapter policy.
+`SessionKernel.resolveInteraction()` validates that the resolution kind matches the pending blocker and clears blocker state. It does **not** translate approval, denial, answer or skip into a Turn outcome. The execution adapter receives the semantic response and decides whether to resume work, change strategy or explicitly finish the Turn. Neither `approved: false` nor `answer: null` changes `lastTurnReason` by itself.
 
 ## 5. History source and async IO boundary
 
@@ -270,7 +283,7 @@ The separate `Million-message streaming stress` conversation has one job: prove 
 Other Demo sessions cover:
 
 - approval blockers;
-- actual typed question answers;
+- question blockers with user-entered answers;
 - failure/resume;
 - background execution while viewports are evicted;
 - multimodal attachments and ASR/audio;
@@ -288,7 +301,9 @@ Diagnostics may inspect Engine state, but its synthetic controls do not become E
 
 ## 11. Distribution status
 
-This repository currently has `"private": true` and a Vite application build used for the executable Demo/Pages site. The Engine is **source-level reusable and extraction-ready**, but the repository does not claim to publish an npm package today.
+The package manifest currently has `"private": true`; the repository builds a Vite Demo/Pages application. This flag disables package publication—it does **not** describe the visibility of the public GitHub repository.
+
+The Engine is **source-level reusable and extraction-ready**, but the repository does not claim to publish an npm package today.
 
 If package distribution becomes a requirement, add a dedicated library build/export map, package-level CSS entry points and consumer smoke tests as a separate release concern. Do not distort Engine responsibilities merely to simulate package maturity that does not yet exist.
 
@@ -299,7 +314,9 @@ A release must prove architecture and behavior together:
 - Engine never imports Demo;
 - neutral public API does not leak Demo/Vue/tuning details;
 - working-session restore never guesses active history position;
+- idle status never invents a completed Turn outcome;
 - approval and question resolutions remain typed;
+- resolving a blocker never invents completion/abort policy;
 - async IO responsibility stays outside `ConversationHistorySource`;
 - multi-step Demo data enters through canonical Message/Block paths;
 - 1M history keeps hot state and mounted DOM bounded;
