@@ -109,6 +109,21 @@ describe('public Demo scenarios', () => {
     expect(terminal?.type === 'terminal' ? terminal.data.exitCode : null).toBe(0)
   })
 
+  it('settles an aborted shell stream as interrupted instead of a successful terminal', () => {
+    const spec = liveToolForStep(3)!
+    const callEntry = createLiveToolCall(liveMessage(3), spec)
+    const callMessage: LogicalMessage = { id: 'demo:m-30', index: 30, turnId: callEntry.turnId, stepId: callEntry.stepId, role: 'assistant', live: true, blocks: callEntry.blocks }
+    const resultEntry = createLiveToolResult(callMessage, spec, true)
+    const result: LogicalMessage = { id: 'demo:m-31', index: 31, turnId: resultEntry.turnId, stepId: resultEntry.stepId, role: 'tool', live: true, blocks: resultEntry.blocks }
+    const aborted = settleLiveTerminal(result, { ...spec, output: { ...spec.output, exitCode: 130 } })
+    const terminal = aborted.blocks.find(contentBlock => contentBlock.type === 'terminal')
+    const toolResult = aborted.blocks.find(contentBlock => contentBlock.type === 'tool-result')
+    expect(terminal?.type === 'terminal' ? terminal.data.status : null).toBe('interrupted')
+    expect(terminal?.type === 'terminal' ? terminal.data.exitCode : null).toBe(130)
+    expect(toolResult?.type === 'tool-result' ? toolResult.data.status : null).toBe('error')
+    expect(aborted.live).toBe(false)
+  })
+
   it('streams complex GFM and adds resource-aware final evidence as canonical blocks', () => {
     const source = [1, 2, 3, 4].flatMap(step => Array.from({ length: 10 }, (_, index) => agentMarkdownDelta(step, index))).join('')
     expect(source).toContain('| Semantic layer | Owns | Must not own |')
