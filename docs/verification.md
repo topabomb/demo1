@@ -26,9 +26,11 @@ Automated tests must protect these boundaries:
 - multi-session routing, Recent metadata and hot-runtime LRU remain host/Demo composition rather than a hidden `WorkspaceKernel`;
 - `ConversationHistorySource` stays an honest synchronous hot-read contract; async DB/network fetch/prefetch/cache fill remains outside Engine;
 - a restored `working` session never infers its active assistant from history order; the host/provider supplies `activeAssistantIndex` explicitly when known;
-- `SessionStatus` and `lastTurnReason` remain independent: `idle` alone never implies a completed Turn;
+- `SessionStatus` and `lastTurnReason` remain independent: live state alone never invents a settled Turn outcome;
+- `status: 'waiting'` and `pendingInteraction` are one invariant state and must be present together;
+- `requestInteraction(...)` is the explicit `working → waiting` transition; `resolveInteraction(...)` clears only that blocker and returns to outcome-neutral `idle`;
 - approval and question blockers keep distinct typed resolutions; a question carries a user answer string or explicit no-answer/skip payload;
-- resolving any blocker only validates/clears interaction state and never invents `completed`, `aborted` or other Turn outcomes; execution adapters must report outcomes explicitly;
+- interaction request/resolution never invents `completed`, `aborted` or other Turn outcomes; execution adapters must report outcomes through `finishExecution(...)` explicitly;
 - queue payloads are runtime SessionKernel state and are not described as implicitly durable persistence;
 - realistic Demo scenarios enter through canonical `LogicalMessage + ContentBlock[]`, never renderer-only shortcuts;
 - presentation is bounded and rebuildable from canonical history;
@@ -47,7 +49,7 @@ The local and deployed suites exercise the same product behavior:
 - continuously growing GFM tables, task lists, nested lists, blockquotes and fenced code;
 - a user-entered question answer plus independent approval behavior;
 - blocker resolution returning to an outcome-neutral idle state until execution policy explicitly continues or finishes the Turn;
-- a fresh empty session remaining `Idle` without an invented completed outcome;
+- a fresh empty session remaining `Idle` with `lastTurnReason = none`, not an invented completed/active outcome;
 - realistic preset task tails for code/transport work, multimodal handoff and failure recovery;
 - image/file/audio attachments, image generation, TTS/ASR, code, diff, HTML and broad Markdown forms;
 - queue, failure/resume and background execution while viewports/hot runtimes are switched or evicted;
