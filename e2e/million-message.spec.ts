@@ -7,6 +7,7 @@ function numeric(text: string | null): number {
 async function openApp(page: Page): Promise<void> {
   await page.goto('./')
   await expect(page.getByTestId('active-session-id')).toBeVisible()
+  if ((await page.getByTestId('active-session-id').textContent()) !== 'million') await switchSession(page, 'million')
 }
 
 async function physicalRemainingToBottom(page: Page): Promise<number> {
@@ -43,11 +44,6 @@ async function jump(page: Page, index: number): Promise<void> {
     return numeric(startText) <= index && numeric(endText) >= index
   }).toBe(true)
 
-  // Virtua may temporarily mount the target as a measurement probe before the
-  // asynchronous programmatic scroll has actually committed. Navigation is only
-  // complete when the target is physically visible and the semantic reader has
-  // converged exactly on the requested coordinate; DOM presence alone is not a
-  // completion signal.
   await expect(page.locator(`[data-message-index="${index}"]`).first()).toBeVisible({ timeout: 15_000 })
   await expect.poll(async () => numeric(await page.getByTestId('reader-position').textContent()), { timeout: 15_000 }).toBe(index)
   await settleNavigationFrames(page)
@@ -99,7 +95,7 @@ test('1M history stays bounded while streaming, reader escape and reverse prepen
   expect(active).toBeGreaterThan(2048)
   expect(active).toBeLessThan(10_000)
 
-  await page.locator('.control-group select').selectOption('60')
+  await page.getByLabel('Stream rate').selectOption('60')
   await page.getByTestId('stream-start').click()
   await expect.poll(async () => numeric(await page.getByTestId('live-chunks').textContent()), { timeout: 15_000 }).toBeGreaterThan(1)
   await expect.poll(async () => numeric(await page.getByTestId('stream-ticks').textContent())).toBeGreaterThan(30)
@@ -133,13 +129,11 @@ test('async Agent execution survives history browsing and Recent switching, incl
   await openApp(page)
   await expect(page.getByTestId('active-session-id')).toHaveText('million')
 
-  await page.locator('.control-group select').selectOption('60')
+  await page.getByLabel('Stream rate').selectOption('60')
   await page.getByTestId('stream-start').click()
   await expect.poll(async () => numeric(await page.getByTestId('live-chunks').textContent()), { timeout: 15_000 }).toBeGreaterThan(1)
   const beforeHistory = numeric(await page.getByTestId('stream-ticks').textContent())
 
-  // View navigation is independent from Agent execution: browsing history must not
-  // stop or reset the run.
   await jump(page, 500_000)
   await expect(page.getByTestId('jump-latest')).toBeVisible()
   await expect(page.getByTestId('follow-state')).toHaveText('tail paused')
@@ -147,7 +141,6 @@ test('async Agent execution survives history browsing and Recent switching, incl
   const afterHistory = numeric(await page.getByTestId('stream-ticks').textContent())
   const historyReader = numeric(await page.getByTestId('reader-position').textContent())
 
-  // Unmount the viewport entirely. The session-scoped stream continues off-screen.
   await switchSession(page, 'dsh-transport')
   await page.waitForTimeout(700)
   await switchSession(page, 'million')
@@ -156,8 +149,6 @@ test('async Agent execution survives history browsing and Recent switching, incl
   await expect(page.getByTestId('jump-latest')).toBeVisible()
   expect(await exactLatestCount(page)).toBeGreaterThan(400_000)
 
-  // Returning to Latest must re-compose every live chunk accumulated while the
-  // viewport was absent; navigation itself must not restart/reset the run.
   const ticksBeforeLatest = numeric(await page.getByTestId('stream-ticks').textContent())
   const chunksBeforeLatest = numeric(await page.getByTestId('live-chunks').textContent())
   await page.getByTestId('jump-latest').click()
@@ -173,8 +164,6 @@ test('Latest is an exact logical-tail control across session switches, not a scr
   await openApp(page)
   await switchSession(page, 'dsh-transport')
 
-  // A completed session starts at its true global tail. A tiny physical scrollbar
-  // remainder must never produce a ghost `Latest 1`.
   await expect(page.getByTestId('jump-latest')).toHaveCount(0)
   await expect(page.getByTestId('reader-position')).toHaveText('#179,999')
   expect(await exactLatestCount(page)).toBe(0)
@@ -209,7 +198,6 @@ test('variable-height composer owns layout space, preserves history anchor and r
   const anchor = await visibleAnchor(page)
   expect(anchor).not.toBeNull()
   const input = page.getByTestId('composer-input')
-  const shell = page.getByTestId('composer-shell')
   const stage = page.getByTestId('scrollport')
   const initialInputHeight = await input.evaluate(element => element.getBoundingClientRect().height)
   const initialViewportHeight = await stage.evaluate(element => element.getBoundingClientRect().height)
@@ -238,7 +226,6 @@ test('variable-height composer owns layout space, preserves history anchor and r
   await expect.poll(async () => input.evaluate(element => element.getBoundingClientRect().height)).toBeLessThan(initialInputHeight + 15)
   await expect.poll(() => anchorDrift(page, anchor!), { timeout: 12_000 }).toBeLessThan(4)
 
-  // Draft and its resulting composer height are session-scoped semantic state.
   await input.fill(longDraft)
   await switchSession(page, 'event-normalization')
   await expect(page.getByTestId('composer-input')).toHaveValue('')
@@ -246,8 +233,6 @@ test('variable-height composer owns layout space, preserves history anchor and r
   await expect(page.getByTestId('composer-input')).toHaveValue(longDraft)
   await expect.poll(async () => page.getByTestId('composer-input').evaluate(element => element.getBoundingClientRect().height)).toBeGreaterThan(initialInputHeight + 50)
 
-  // At the global tail, changing composer height must resize the viewport and
-  // remain pinned rather than covering/staking the final cards.
   await page.getByTestId('jump-latest').click()
   await expect(page.getByTestId('jump-latest')).toHaveCount(0)
   await input.fill('short')
