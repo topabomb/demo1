@@ -42,6 +42,30 @@ const activeContext = computed(() => contextOccupancyPercent(props.runtime.kerne
 const streamRate = computed(() => { void props.uiState.eventRevision; return props.stream.rate })
 const streamIngressTicks = computed(() => { void props.uiState.eventRevision; return props.stream.ingressTicks })
 const streamPublishTicks = computed(() => { void props.uiState.eventRevision; return props.stream.publishTicks })
+const activeExecutionMessage = computed(() => {
+  void props.uiState.eventRevision
+  const index = props.runtime.kernel.currentAssistantIndex
+  return index === null ? null : props.runtime.kernel.getMessage(index)
+})
+const activeTurnId = computed(() => activeExecutionMessage.value?.turnId ?? '—')
+const activeStepId = computed(() => activeExecutionMessage.value?.stepId ?? '—')
+const activeToolCategories = computed(() => {
+  void props.uiState.eventRevision
+  const turnId = activeExecutionMessage.value?.turnId
+  if (!turnId) return []
+  const categories = props.runtime.activeUnits
+    .filter(unit => unit.turnId === turnId && unit.kind === 'tool')
+    .map(unit => String(unit.payload.category ?? 'generic'))
+  return [...new Set(categories)]
+})
+const activeToolCalls = computed(() => {
+  void props.uiState.eventRevision
+  const turnId = activeExecutionMessage.value?.turnId
+  if (!turnId) return 0
+  return new Set(props.runtime.activeUnits
+    .filter(unit => unit.turnId === turnId && unit.kind === 'tool')
+    .map(unit => String(unit.payload.callId ?? unit.id))).size
+})
 
 watch(() => props.runtime.id, () => { jumpTarget.value = props.uiState.reader })
 
@@ -88,6 +112,18 @@ function pauseStream(): void { props.stream.pause() }
         <button class="secondary" data-testid="inject-agent-scenarios" :disabled="!canInjectFixtures" @click="emit('injectAgent')">Media + tools suite</button>
       </div>
       <small class="control-note">Adds canonical test conversations through SessionKernel; no DOM-only fixtures or renderer bypasses.</small>
+    </div>
+
+    <div class="control-group">
+      <label>Active Agent loop</label>
+      <div class="metrics">
+        <div><span>playback</span><strong data-testid="playback-mode">{{ stream.mode }}</strong></div>
+        <div><span>Turn</span><strong data-testid="active-turn-id">{{ activeTurnId }}</strong></div>
+        <div><span>Step</span><strong data-testid="active-step-id">{{ activeStepId }}</strong></div>
+        <div><span>tool calls</span><strong data-testid="active-tool-calls">{{ activeToolCalls }}</strong></div>
+        <div class="metric-wide"><span>tool categories</span><strong data-testid="active-tool-categories">{{ activeToolCategories.length ? activeToolCategories.join(' · ') : '—' }}</strong></div>
+      </div>
+      <small class="control-note">Turn/Step/call IDs come from canonical producer data. The Demo chooses the scripted loop; the Engine only preserves and projects those identities.</small>
     </div>
 
     <div class="control-group">
@@ -142,7 +178,7 @@ function pauseStream(): void { props.stream.pause() }
 
     <div class="architecture-note">
       <strong>What this panel proves</strong>
-      <span>Large logical history stays decoupled from hot projection and mounted DOM, while background SessionKernels, queue/blockers, streaming and exact reader state remain observable.</span>
+      <span>Large logical history stays decoupled from hot projection and mounted DOM, while canonical Turn/Step/tool identity, background SessionKernels, queue/blockers, streaming and exact reader state remain observable.</span>
     </div>
   </aside>
 </template>
