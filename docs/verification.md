@@ -1,6 +1,6 @@
 # Verification and Release Contract
 
-This file defines what must be true before the repository can be called released. GitHub Actions metadata for the **exact `main` SHA** is authoritative.
+This file defines what must be true before the repository can be called released. GitHub Actions evidence for the **exact `main` SHA** is authoritative.
 
 ## Acceptance chain
 
@@ -11,55 +11,89 @@ One workflow owns validation and release:
 3. strict Vue/TypeScript typecheck and production build;
 4. full Chromium E2E against the local production server;
 5. on `main`, build and deploy GitHub Pages;
-6. run the same Chromium suite against the deployed Pages URL.
+6. run the same Chromium suite against the deployed Pages URL;
+7. publish `pages/deployed-e2e=success` for that exact SHA.
 
-A Pages upload by itself is not a release. The deployed-site browser gate must also pass.
+A Pages upload alone is not a release.
 
 ## Architecture invariants
 
 Automated tests must protect these boundaries:
 
 - `src/engine/**` never imports `src/demo/**`;
-- `src/engine/index.ts` remains framework-neutral and excludes Vue/Demo implementation plus runtime tuning/telemetry contracts;
-- `src/engine/vue/index.ts` exposes instance-oriented renderer composition rather than process-global mutation helpers;
-- Engine owns canonical/session semantics, not Agent-loop/provider/Demo policy;
-- multi-session routing, Recent metadata and hot-runtime LRU remain host/Demo composition rather than a hidden `WorkspaceKernel`;
-- `ConversationHistorySource` stays an honest synchronous hot-read contract; async DB/network fetch/prefetch/cache fill remains outside Engine;
-- a restored `working` session never infers its active assistant from history order; the host/provider supplies `activeAssistantIndex` explicitly when known;
-- `SessionStatus` and `lastTurnReason` remain independent: live state alone never invents a settled Turn outcome;
-- `status: 'waiting'` and `pendingInteraction` are one invariant state and must be present together;
-- `requestInteraction(...)` is the explicit `working → waiting` transition; `resolveInteraction(...)` clears only that blocker and returns to outcome-neutral `idle`;
-- approval and question blockers keep distinct typed resolutions; a question carries a user answer string or explicit no-answer/skip payload;
-- interaction request/resolution never invents `completed`, `aborted` or other Turn outcomes; execution adapters must report outcomes through `finishExecution(...)` explicitly;
-- queue payloads are runtime SessionKernel state and are not described as implicitly durable persistence;
-- realistic Demo scenarios enter through canonical `LogicalMessage + ContentBlock[]`, never renderer-only shortcuts;
-- presentation is bounded and rebuildable from canonical history;
-- semantic reader/Latest/anchor state is separate from DOM/virtualizer measurements;
-- tool/result/artifact correlation uses stable producer IDs;
-- Demo playback cadence, fixture injection and synthetic telemetry do not become Engine APIs;
-- Engine CSS remains host-scoped; Demo alone may style the host page globally.
+- framework-neutral Engine layers do not depend on Vue/DOM/physical layout;
+- `src/engine/index.ts` excludes Vue/Demo implementation and tuning telemetry;
+- `src/engine/vue/index.ts` remains instance-oriented rather than exposing process-global renderer mutation;
+- external adapters own provider decoding, Agent/tool orchestration, delegated-Agent scheduling, permission policy, persistence, retries and async IO;
+- Demo owns workspace/LRU, playback timing, realistic scripted output, fake delegated runs and diagnostics;
+- no core `PresentationSurface`, panel, sidebar, tab, drawer or editor-routing contract is introduced without a proven reusable multi-surface requirement;
+- canonical or RenderUnit contracts contain no CSS class, color, width, panel placement or host open action.
+
+### Workbench semantic invariants
+
+- `ResourceRef` is the only canonical resource/location identity for resource-aware blocks and contains no host navigation behavior;
+- `diff` uses `ResourceRef`, not a parallel `file` identity;
+- PlanItem describes intended/progress work and never replaces or derives `stepId`;
+- `ToolCategory` describes capability while `ToolPresentationIntent` independently describes renderer-neutral interpretation;
+- presentation intent remains limited to generic/resources/changes/terminal semantics and contains no physical placement;
+- tool call/result remain separate records correlated through producer-owned `callId`;
+- AgentRunRef is renderable producer-reported evidence only; Engine has no spawn/schedule/cancel Agent operation;
+- terminal output is first-class canonical content rather than repeated opaque tool JSON;
+- append-only terminal output emits `append-terminal` and `ProjectionEngine.appendTerminalDelta(...)` updates one stable terminal RenderUnit while unrelated siblings retain identity;
+- terminal process lifecycle remains execution-adapter policy.
+
+### Existing session/runtime invariants
+
+- `ConversationHistorySource` remains synchronous hot-read; async fetch/prefetch/cache fill stays outside Engine;
+- restored `working` sessions never infer active assistant position from history order;
+- `SessionStatus` and `lastTurnReason` remain independent;
+- `status:'waiting'` exists iff one `pendingInteraction` exists;
+- `requestInteraction(...)` is the explicit working→waiting transition;
+- `resolveInteraction(...)` clears the blocker without inventing a Turn outcome;
+- approval/question resolutions remain typed;
+- queue payloads are runtime state, not implied durable persistence;
+- realistic Demo scenarios enter through canonical `LogicalMessage + ContentBlock[]` only;
+- presentation remains bounded/rebuildable;
+- semantic reader/Latest/anchor is independent from virtualizer measurement;
+- Demo playback/diagnostics never become Engine APIs;
+- Engine Vue CSS stays host-scoped; only Demo may globally style the host page.
 
 ## Browser coverage
 
-The local and deployed suites exercise the same product behavior:
+Local and deployed suites exercise the same real behavior.
 
-- 1,000,000+ addressable messages with bounded hot state and DOM;
-- a realistic multi-Step Agent Turn with separate canonical assistant tool-call and `role: tool` result records;
-- filesystem/search/shell tool categories correlated by stable `callId`;
-- continuously growing GFM tables, task lists, nested lists, blockquotes and fenced code;
-- a user-entered question answer plus independent approval behavior;
-- blocker resolution returning to an outcome-neutral idle state until execution policy explicitly continues or finishes the Turn;
-- a fresh empty session remaining `Idle` with `lastTurnReason = none`, not an invented completed/active outcome;
-- realistic preset task tails for code/transport work, multimodal handoff and failure recovery;
-- image/file/audio attachments, image generation, TTS/ASR, code, diff, HTML and broad Markdown forms;
-- queue, failure/resume and background execution while viewports/hot runtimes are switched or evicted;
-- far jump, prepend, exact Latest/follow behavior and session restore;
-- desktop/mobile reflow and variable-height composer/blocker UI;
-- renderer containment, sanitized HTML and no page-level horizontal overflow;
-- hostile host CSS without breaking Engine geometry;
-- a scenario-focused public workspace with one-click Demo-owned Session diagnostics and no fake search/model/attachment controls.
+### Default coding-agent workbench flow
 
-## Deterministic bounds
+The browser must prove the default public scenario, not a hidden fixture:
+
+- the seeded first assistant Step visibly contains a Plan with one active and later completed items;
+- filesystem/search tools expose stable `callId`, capability category, `resources` presentation intent and ResourceRef labels;
+- Plan progress changes independently from actual model/tool Step coordinates;
+- Step 3 renders a delegated reviewer AgentRunRef without invoking any Engine-side Agent action;
+- shell verification exposes `terminal` presentation intent;
+- a standalone role:tool result streams a dedicated Terminal block through multiple deltas;
+- terminal output contains unit/build/Chromium evidence and settles with explicit status/exit code;
+- projection incremental counters increase during terminal growth;
+- final synthesis includes rich GFM, resource-aware diff/code and artifacts;
+- the original Plan reaches all-completed state;
+- mounted rows stay bounded and adjacent rows do not overlap throughout.
+
+### General coverage
+
+The suite also covers:
+
+- 1,000,000+ addressable messages with bounded hot state/cache/DOM;
+- continuously growing GFM tables, tasks, nested lists, blockquotes and fenced code;
+- typed user question answers and independent approval behavior;
+- fresh idle sessions with no invented Turn outcome;
+- failure/resume and background execution while viewports are switched/evicted;
+- image/file/audio attachments, generated images, TTS/ASR, code, diff and sanitized HTML;
+- far jump, prepend, exact Latest/follow and session restore;
+- desktop/mobile reflow and variable-height content including expanded reasoning/terminal rows;
+- hostile host CSS without breaking reference adapter containment;
+- a focused public workspace with one-click Demo-owned Session diagnostics and no fake search/model/attachment/product controls.
+
+## Deterministic reference bounds
 
 ```text
 logical history             >= 1,000,000
@@ -75,24 +109,26 @@ body horizontal overflow    <= 1 px
 virtual wrapper block gap   exactly 0 px margin/padding
 ```
 
-These are reference implementation verification bounds, not framework-neutral public API constants. FPS, heap and long-task counters remain diagnostics because shared CI hardware is noisy.
+These are verification bounds for the reference implementation, not framework-neutral API constants. FPS/heap/long-task values remain diagnostics because shared CI hardware is noisy.
 
 ## Public API checks
 
-Architecture tests should fail if the neutral public entry starts exporting implementation details such as `SessionUiSnapshot`, `ShiftPlan`, `WINDOW_MESSAGES` or `SHIFT_MESSAGES`.
+Architecture tests fail if the neutral entry exposes implementation details such as `SessionUiSnapshot`, `ShiftPlan`, `WINDOW_MESSAGES` or `SHIFT_MESSAGES`, or if workbench semantics acquire panel/layout/style fields.
 
-Vue API checks should fail if `ConversationNodeSeat` or process-global registry mutation helpers become public without an explicit architecture decision.
+Architecture tests also assert the presence of the stable semantic additions (`ResourceRef`, PlanItem, ToolPresentationIntent, AgentRunRef and terminal append support) and the absence of a speculative `PresentationSurface` core API.
 
-The repository currently verifies source-level reuse; its package manifest disables npm publication. It does not claim package distribution. A future package release requires its own library build/export-map and consumer smoke tests.
+The Vue API remains an optional reference adapter. Plan/Terminal/AgentRun components and `workbench-renderers.css` may define physical presentation but cannot change canonical semantics. Every Engine Vue stylesheet must remain rooted at `[data-conversation-engine].conversation-shell` and must not reset `html`, `body` or `#app`.
+
+The repository verifies source-level reuse; its package manifest disables npm publication. Package distribution requires a separate library-build/export-map/consumer-smoke-test decision.
 
 ## Workflow policy
 
-- `pnpm-lock.yaml` is committed and CI installs with `--frozen-lockfile`.
-- Node and pnpm versions are explicit.
+- `pnpm-lock.yaml` is committed and CI uses `--frozen-lockfile`.
+- Node/pnpm versions are explicit.
 - PRs run the full validation gate but never deploy Pages.
 - `main` deploys only after validation succeeds.
-- release concurrency is isolated from merged-PR cleanup.
-- failures upload Playwright reports for diagnosis.
+- main release concurrency is isolated from merged-PR cleanup.
+- failures upload Playwright reports.
 
 ## Release evidence
 
@@ -101,9 +137,10 @@ A release is complete only when the exact `main` SHA has:
 ```text
 unit / architecture       Green
 strict type + build       Green
-local Chromium            Green
+local full Chromium       Green
 Pages deployment          Green
 public deployed Chromium  Green
+pages/deployed-e2e        success
 ```
 
-Missing, cancelled or stale evidence means the release is not complete.
+Missing, cancelled or stale evidence means the release is incomplete.
