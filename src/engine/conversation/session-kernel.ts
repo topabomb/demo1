@@ -18,6 +18,7 @@ export type SessionKernelEventKind = 'content' | 'append' | 'status' | 'queue' |
 export type SessionKernelContentPatch =
   | { kind: 'append-markdown'; blockId: string; delta: string }
   | { kind: 'append-reasoning'; blockId: string; delta: string }
+  | { kind: 'append-terminal'; blockId: string; delta: string }
 export interface SessionKernelEvent {
   kind: SessionKernelEventKind
   messageIndex?: number
