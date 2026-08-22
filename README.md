@@ -28,7 +28,7 @@ src/
     ├── synthetic.ts         lazy deep-history source for stress coverage
     ├── scenarios.ts         diagnostics/E2E compatibility gallery
     ├── stream-controller.ts synthetic provider/execution timing
-    └── components/          workspace + optional diagnostics UI
+    └── components/          workspace + diagnostics UI
 ```
 
 `engine/**` never imports `demo/**`. Architecture tests enforce that direction.
@@ -77,9 +77,11 @@ Synthetic deep history remains a Demo-only storage substitute so the same scenar
 
 Demo scenario tails are canonical messages; there is no renderer-only shortcut.
 
-### Diagnostics
+### Session diagnostics
 
-Performance counters, fixture injection, arbitrary global jumps and stress controls are verification tools rather than product affordances. They are hidden from the normal public workspace and can be enabled explicitly with `?diagnostics=1`; Playwright also enables them through `navigator.webdriver`.
+The public workspace keeps a one-click **Session diagnostics** panel because observability is part of the engine demonstration, not disposable test chrome. It is closed by default for normal use and automatically open under Playwright.
+
+The panel intentionally focuses on high-value evidence: exact history navigation, bounded window loading, live-output cadence, canonical renderer verification, logical/hot/DOM scale, concurrent SessionKernel/runtime counts, projection/incremental work, queue/reader state, provider token/cache/context accounting, and browser frame performance. Low-value implementation counters such as virtual epochs, renderer counts and individual renderer-cache sizes are not part of the public diagnostics surface.
 
 ## Extension rule
 

@@ -107,8 +107,9 @@ describe('engine architecture boundaries', () => {
     expect(liveScript).toContain("'attachments'")
   })
 
-  it('keeps the public workspace scenario-focused while diagnostics remain explicitly non-product', () => {
+  it('keeps the public workspace scenario-focused while diagnostics remain an explicit engine surface', () => {
     const workspace = readFileSync(join(demoRoot, 'components/AgentWorkspace.vue'), 'utf8')
+    const diagnostics = readFileSync(join(demoRoot, 'components/DemoDiagnosticsPanel.vue'), 'utf8')
     const viewport = readFileSync(join(engineRoot, 'vue/ConversationViewport.vue'), 'utf8')
 
     expect(workspace).toContain("./DemoDiagnosticsPanel.vue")
@@ -118,9 +119,12 @@ describe('engine architecture boundaries', () => {
     expect(workspace).not.toContain('data-testid="scenario-launch"')
     expect(workspace).not.toContain('Synthetic playback')
     expect(workspace).not.toContain('canonical blocks · bounded projection')
+    expect(workspace).toContain('data-testid="diagnostics-open"')
     expect(workspace).toContain('navigator.webdriver')
-    expect(workspace).toContain("has('diagnostics')")
     expect(workspace).not.toContain('data-testid="metrics"')
+    expect(diagnostics).toContain('Session diagnostics')
+    expect(diagnostics).toContain('data-testid="metrics"')
+    expect(diagnostics).not.toMatch(/virtual epoch|renderer registry|fold state|highlight LRU|markdown LRU|Fenwick leaves/i)
     expect(workspace).toContain('#header-actions')
     expect(workspace).not.toContain('data-conversation-engine=')
     expect(viewport).toContain('data-conversation-engine="vue"')

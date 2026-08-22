@@ -24,10 +24,9 @@ interface ViewportHandle {
 
 const { workspace, activeSession, activeUiState, workspaceRevision } = useWorkspaceRuntime()
 const viewportRef = ref<ViewportHandle | null>(null)
-const diagnosticsAvailable = typeof navigator !== 'undefined' && (
-  navigator.webdriver || (typeof location !== 'undefined' && new URLSearchParams(location.search).has('diagnostics'))
-)
-const diagnosticsOpen = ref(diagnosticsAvailable)
+// Keep the public workspace clean by default, but diagnostics are always one click away.
+// Playwright opens the panel automatically because the E2E suite consumes its observability surface.
+const diagnosticsOpen = ref(typeof navigator !== 'undefined' && navigator.webdriver)
 const mountedRows = ref(0)
 const mobileSessionsOpen = ref(false)
 const fixtureOrdinal = ref(1)
@@ -35,7 +34,6 @@ const { fps, frameP95, longTasks, heapMb } = usePerformanceMetrics()
 
 const activeStream = computed(() => workspace.executionFor(activeSession.value.id))
 const sessionDescriptors = computed(() => { void workspaceRevision.value; return workspace.descriptors })
-const hotSessionIds = computed(() => { void workspaceRevision.value; return workspace.hotSessionIds.join(', ') })
 const hotSessionCount = computed(() => { void workspaceRevision.value; return workspace.hotSessionCount })
 const runningSessionCount = computed(() => { void workspaceRevision.value; return workspace.runningSessionCount })
 const blockedSessionCount = computed(() => { void workspaceRevision.value; return workspace.blockedSessionCount })
@@ -70,7 +68,8 @@ function indicatorDetail(descriptor: DemoSessionDescriptor): string {
   return `${descriptor.logicalCount.toLocaleString()} messages`
 }
 
-// Diagnostics-only fixture controls. They are intentionally absent from the public workspace surface.
+// Verification fixtures stay in Demo ownership. They exercise the normal canonical
+// model/projector/renderer path and are exposed only inside Session diagnostics.
 async function injectMixed(turns: number): Promise<void> {
   if (!canInjectFixtures.value) return
   const start = fixtureOrdinal.value
@@ -151,10 +150,10 @@ async function injectAgentScenarios(): Promise<void> {
       :ui-state="activeUiState"
       @viewport-metrics="mountedRows = $event.mountedRows"
     >
-      <template v-if="diagnosticsAvailable" #header-actions>
-        <button class="demo-header-action" data-testid="diagnostics-open" type="button" :aria-pressed="diagnosticsOpen" title="Toggle engine diagnostics" @click="diagnosticsOpen = !diagnosticsOpen">◫</button>
+      <template #header-actions>
+        <button class="demo-header-action" data-testid="diagnostics-open" type="button" :aria-pressed="diagnosticsOpen" title="Session diagnostics" aria-label="Session diagnostics" @click="diagnosticsOpen = !diagnosticsOpen">◫</button>
       </template>
-      <template v-if="diagnosticsAvailable" #viewport-overlay="{ mountedRows: visibleRows, followLabel, uiState }">
+      <template #viewport-overlay="{ mountedRows: visibleRows, followLabel, uiState }">
         <div v-show="diagnosticsOpen" class="conversation-meta-strip">
           <span>Loaded <strong data-testid="segment-range">{{ uiState.rangeStart.toLocaleString() }} – {{ Math.max(uiState.rangeStart, uiState.rangeEnd - 1).toLocaleString() }}</strong></span>
           <span>Reader <strong data-testid="reader-position">#{{ uiState.reader.toLocaleString() }}</strong></span>
@@ -164,13 +163,11 @@ async function injectAgentScenarios(): Promise<void> {
     </ConversationViewport>
 
     <DemoDiagnosticsPanel
-      v-if="diagnosticsAvailable"
       v-show="diagnosticsOpen"
       :runtime="activeSession"
       :ui-state="activeUiState"
       :stream="activeStream"
       :mounted-rows="mountedRows"
-      :hot-session-ids="hotSessionIds"
       :hot-session-count="hotSessionCount"
       :running-session-count="runningSessionCount"
       :blocked-session-count="blockedSessionCount"
