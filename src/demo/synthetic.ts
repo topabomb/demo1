@@ -153,18 +153,21 @@ function blocksFor(index: number, seed: number, intensity: number, pattern: Patt
     const phase = pattern.toolPhase ?? 'call'
     const callId = `call_${Math.floor(index / TURN_PATTERN.length).toString(36)}_${pattern.turn}_${pattern.step}_${name}`
     const rows = intBetween(seed + 7, 3, 8 + intensity)
-    const input = { path: `/workspace/src/${name}-${index % 31}.ts`, query: sentence(seed, 7), limit: intBetween(seed + 5, 10, 200), recursive: seed % 2 === 0 }
+    const path = `/workspace/src/${name}-${index % 31}.ts`
+    const location = { id: `synthetic-resource-${index}`, kind: 'file' as const, uri: path, label: path }
+    const input = { path, query: sentence(seed, 7), limit: intBetween(seed + 5, 10, 200), recursive: seed % 2 === 0 }
     const outputRows = Array.from({ length: rows }, (_, row) => ({ line: intBetween(seed + row * 17, 1, 4000), score: Number((((seed + row * 19) % 1000) / 1000).toFixed(3)), preview: sentence(seed + row * 29, 10 + (row % 8)) }))
     const status = phase === 'result' && seed % 17 === 0 ? 'error' : phase === 'result' ? 'success' : 'running'
     return phase === 'result'
-      ? [block('tool-result', 'tool-result', { name, callId, durationMs: intBetween(seed, 5, 9000), status, output: { rows: outputRows, truncated: rows > 10, exitCode: status === 'error' ? 1 : 0 }, defaultOpen: false })]
-      : [block('tool-call', 'tool-call', { name, callId, durationMs: intBetween(seed, 5, 9000), status, input, defaultOpen: false })]
+      ? [block('tool-result', 'tool-result', { name, callId, category: name === 'test' ? 'shell' : 'filesystem', presentation: { kind: 'resources', resources: [location] }, resources: [location], durationMs: intBetween(seed, 5, 9000), status, output: { rows: outputRows, truncated: rows > 10, exitCode: status === 'error' ? 1 : 0 }, defaultOpen: false })]
+      : [block('tool-call', 'tool-call', { name, callId, category: name === 'test' ? 'shell' : 'filesystem', presentation: { kind: 'resources', resources: [location] }, resources: [location], durationMs: intBetween(seed, 5, 9000), status, input, defaultOpen: false })]
   }
 
   if (pattern.kind === 'diff') {
     const lineCount = intBetween(seed + 8, 35, 100 + intensity * 24)
     const lines = Array.from({ length: lineCount }, (__, line) => `${line % 3 === 0 ? '+' : line % 5 === 0 ? '-' : ' '} ${String(line + 1).padStart(4, ' ')}  ${sentence(seed + line, 8 + (line % 11))}`)
-    return [block('diff', 'diff', { file: `src/generated-${index % 29}.ts`, lines })]
+    const uri = `src/generated-${index % 29}.ts`
+    return [block('diff', 'diff', { resource: { id: `synthetic-diff-${index}`, kind: 'file', uri, label: uri }, lines })]
   }
 
   return [block('unknown', 'text', { text: '[unsupported synthetic content]' })]
