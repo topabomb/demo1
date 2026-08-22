@@ -132,17 +132,23 @@ describe('ProjectionEngine', () => {
     expect(engine.stats.incrementalPatches).toBe(1)
   })
 
-  it('projects Plan and AgentRun as semantic render kinds without layout metadata', () => {
+  it('projects Plan and delegation batches without layout or child-trace metadata', () => {
     const engine = new ProjectionEngine(undefined, 256)
     const message: LogicalMessage = {
       id: 's:m-workbench', index: 4, turnId: 't-workbench', stepId: 't-workbench:s1', role: 'assistant', revision: 0,
       blocks: [
         block('plan', 'plan', { items: [{ id: 'inspect', text: 'Inspect renderer', status: 'in-progress' }] }),
-        block('delegated', 'agent-run', { runId: 'review-1', title: 'Review contract', agent: 'reviewer', status: 'completed', summary: 'No layout dependency.' }),
+        block('delegated', 'delegation', { runs: [
+          { runId: 'review-1', title: 'Review contract', agent: 'reviewer', mode: 'foreground', status: 'completed', childSessionId: 'child-review', summary: 'No layout dependency.' },
+          { runId: 'audit-1', title: 'Audit projection', agent: 'auditor', mode: 'background', status: 'running', childSessionId: 'child-audit' },
+        ] }),
       ],
     }
     const units = engine.projectMessage(message)
-    expect(units.map(unit => unit.kind)).toEqual(['plan', 'agent-run'])
+    expect(units.map(unit => unit.kind)).toEqual(['plan', 'delegation'])
+    const delegated = units[1]!
+    expect(delegated.payload.runs).toHaveLength(2)
+    expect(delegated.payload).not.toHaveProperty('messages')
     expect(units.every(unit => !('panel' in unit.payload) && !('placement' in unit.payload))).toBe(true)
   })
 
