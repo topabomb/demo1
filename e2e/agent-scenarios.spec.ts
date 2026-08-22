@@ -65,43 +65,44 @@ test('default Demo runs one Turn through multiple model/tool Steps with rich str
   await page.getByLabel('Stream rate').selectOption('60')
   await page.getByTestId('stream-start').click()
 
-  // Step 1: filesystem call/result, then the next assistant Step is appended.
-  await expect.poll(() => logicalCount(page), { timeout: 15_000 }).toBeGreaterThanOrEqual(84_002)
+  // Step 1: the streamed model record is followed by an addressable filesystem call,
+  // result and the next live assistant Step.
+  await expect.poll(() => logicalCount(page), { timeout: 15_000 }).toBeGreaterThanOrEqual(84_003)
   await page.getByRole('button', { name: 'Pause' }).click()
-  await jump(page, 83_999)
-  const fsCall = page.locator('[data-message-index="83999"]').getByTestId('tool-block')
+  await jump(page, 84_000)
+  const fsCall = page.locator('[data-message-index="84000"]').getByTestId('tool-block')
   await expect(fsCall).toHaveAttribute('data-category', 'filesystem')
   await expect(fsCall).toHaveAttribute('data-call-id', 'loop-read-renderer')
-  await jump(page, 84_000)
-  const fsResult = page.locator('[data-message-index="84000"]').getByTestId('tool-block')
+  await jump(page, 84_001)
+  const fsResult = page.locator('[data-message-index="84001"]').getByTestId('tool-block')
   await expect(fsResult).toHaveAttribute('data-category', 'filesystem')
   await expect(fsResult).toHaveAttribute('data-call-id', 'loop-read-renderer')
 
-  // Step 2: search call/result is a new canonical pair in the same Turn.
-  await page.getByTestId('stream-start').click()
-  await expect.poll(() => logicalCount(page), { timeout: 15_000 }).toBeGreaterThanOrEqual(84_004)
-  await page.getByRole('button', { name: 'Pause' }).click()
-  await jump(page, 84_001)
-  const searchCall = page.locator('[data-message-index="84001"]').getByTestId('tool-block')
-  await expect(searchCall).toHaveAttribute('data-category', 'search')
-  await expect(searchCall).toHaveAttribute('data-call-id', 'loop-search-boundaries')
-  await jump(page, 84_002)
-  await expect(page.locator('[data-message-index="84002"]').getByTestId('tool-block')).toHaveAttribute('data-call-id', 'loop-search-boundaries')
-
-  // Step 3: shell verification returns, then Step 4 becomes the live synthesis.
+  // Step 2: search is another canonical call/result pair in the same Turn.
   await page.getByTestId('stream-start').click()
   await expect.poll(() => logicalCount(page), { timeout: 15_000 }).toBeGreaterThanOrEqual(84_006)
   await page.getByRole('button', { name: 'Pause' }).click()
   await jump(page, 84_003)
-  const shellCall = page.locator('[data-message-index="84003"]').getByTestId('tool-block')
+  const searchCall = page.locator('[data-message-index="84003"]').getByTestId('tool-block')
+  await expect(searchCall).toHaveAttribute('data-category', 'search')
+  await expect(searchCall).toHaveAttribute('data-call-id', 'loop-search-boundaries')
+  await jump(page, 84_004)
+  await expect(page.locator('[data-message-index="84004"]').getByTestId('tool-block')).toHaveAttribute('data-call-id', 'loop-search-boundaries')
+
+  // Step 3: shell verification returns, then Step 4 becomes the live synthesis.
+  await page.getByTestId('stream-start').click()
+  await expect.poll(() => logicalCount(page), { timeout: 15_000 }).toBeGreaterThanOrEqual(84_009)
+  await page.getByRole('button', { name: 'Pause' }).click()
+  await jump(page, 84_006)
+  const shellCall = page.locator('[data-message-index="84006"]').getByTestId('tool-block')
   await expect(shellCall).toHaveAttribute('data-category', 'shell')
   await expect(shellCall).toHaveAttribute('data-call-id', 'loop-run-tests')
-  await jump(page, 84_004)
-  await expect(page.locator('[data-message-index="84004"]').getByTestId('tool-block')).toHaveAttribute('data-call-id', 'loop-run-tests')
+  await jump(page, 84_007)
+  await expect(page.locator('[data-message-index="84007"]').getByTestId('tool-block')).toHaveAttribute('data-call-id', 'loop-run-tests')
 
   await expect(page.getByTestId('active-turn-id')).toContainText('agent-loop:release-investigation')
   await expect(page.getByTestId('active-step-id')).toContainText(':step-4')
-  // Diagnostics count the complete current Turn, including the seeded release-evidence call in step 0.
+  // Diagnostics count the complete Turn, including the seeded release-evidence call in step 0.
   await expect(page.getByTestId('active-tool-calls')).toHaveText('4')
   await expect(page.getByTestId('active-tool-categories')).toContainText('filesystem')
   await expect(page.getByTestId('active-tool-categories')).toContainText('search')
@@ -112,8 +113,8 @@ test('default Demo runs one Turn through multiple model/tool Steps with rich str
   await page.getByTestId('stream-start').click()
   await expect.poll(() => streamTicks(page), { timeout: 15_000 }).toBeGreaterThan(beforeSynthesis + 12)
   await page.getByRole('button', { name: 'Pause' }).click()
-  await jump(page, 84_005)
-  const finalMarkdown = page.locator('[data-message-index="84005"]').getByTestId('markdown-block')
+  await jump(page, 84_008)
+  const finalMarkdown = page.locator('[data-message-index="84008"]').getByTestId('markdown-block')
   await expect(finalMarkdown.first()).toContainText('Final synthesis')
   await expect(finalMarkdown.locator('table')).toBeVisible()
   await expect(finalMarkdown.locator('input[type="checkbox"]')).toHaveCount(5)
