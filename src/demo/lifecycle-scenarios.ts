@@ -1,7 +1,37 @@
-import { block, type AppendCanonicalMessage, type ResourceRef } from '../engine/model/conversation'
+import { block, type AppendCanonicalMessage, type LogicalMessage, type ResourceRef } from '../engine/model/conversation'
+
+export type LifecycleScenarioKey = 'partial-failure-recovery' | 'steered-interruption'
 
 const fileRef = (id: string, uri: string, label = uri): ResourceRef => ({ id, kind: 'file', uri, label })
 const artifactRef = (id: string, uri: string, label: string): ResourceRef => ({ id, kind: 'artifact', uri, label })
+
+/** Demo-only routing for lifecycle scenarios; Engine knows none of these scenario names. */
+export function isLifecycleScenario(value: string): value is LifecycleScenarioKey {
+  return value === 'partial-failure-recovery' || value === 'steered-interruption'
+}
+
+export function createLifecycleScenarioTail(
+  sessionId: string,
+  logicalCount: number,
+  scenario: LifecycleScenarioKey,
+): readonly LogicalMessage[] {
+  if (logicalCount <= 0) return []
+  const entries = scenario === 'partial-failure-recovery'
+    ? partialFailureRecoveryScenario(sessionId)
+    : steeredInterruptionScenario(sessionId)
+  const kept = entries.slice(-Math.min(entries.length, logicalCount))
+  const start = logicalCount - kept.length
+  return kept.map((entry, offset) => ({
+    id: `${sessionId}:m-${start + offset}`,
+    index: start + offset,
+    turnId: entry.turnId,
+    stepId: entry.stepId,
+    role: entry.role,
+    blocks: entry.blocks,
+    revision: 0,
+    live: entry.live,
+  }))
+}
 
 /**
  * Demo-only Agent lifecycle fixtures. They exercise existing canonical semantics
