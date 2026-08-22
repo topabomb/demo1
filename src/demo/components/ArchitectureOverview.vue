@@ -70,7 +70,7 @@ const invariants = [
         <p>The Engine is deliberately smaller than the Demo. It preserves normalized conversation/session semantics and renders bounded hot state; provider orchestration, durable IO and multi-session product policy remain outside it.</p>
         <div class="hero-actions"><a class="primary-link" href="#lab">Exercise the demo</a><a class="secondary-link" href="https://github.com/topabomb/demo1/blob/main/docs/architecture.md">Read architecture contract</a></div>
       </div>
-      <div class="hero-proof"><span>Normal UI work</span><strong>O(changed + hot + visible)</strong><p>Total history is addressable, not reactive. Product policy stays outside the reusable Engine.</p><div><b>Provider-neutral model</b><b>Explicit execution identity</b><b>Semantic viewport</b><b>Replaceable adapter</b></div></div>
+      <div class="hero-proof"><span>Normal UI work</span><strong>O(changed + hot + visible)</strong><p>Total history is addressable, not reactive. Product policy stays outside the reusable Engine.</p><div><b>Provider-neutral model</b><b>Explicit execution identity</b><b>Semantic coordinates</b><b>Replaceable adapter</b></div></div>
     </section>
 
     <section id="ownership" class="architecture-section">
