@@ -61,8 +61,9 @@ test('default live scenario becomes a heterogeneous Agent turn while rich Markdo
 
   // Freeze the automatically-started Demo run before it can move older RenderUnits
   // outside the physical viewport. Then verify the scenario as each semantic shape
-  // is introduced; a virtualized engine is not required to mount every unit from one
-  // very tall message at the same instant.
+  // is introduced; one logical message may span several independently virtualized
+  // RenderUnits, so later checks navigate back to that message before inspecting
+  // earlier tool/diff/code units.
   await page.getByRole('button', { name: 'Pause' }).click()
   const live = page.locator('[data-message-index="999999"]')
   await expect(live.getByTestId('thinking-block')).toBeVisible()
@@ -79,15 +80,21 @@ test('default live scenario becomes a heterogeneous Agent turn while rich Markdo
   await expect(markdown.locator('pre code')).toBeVisible()
   await expect(markdown.locator('input[type="checkbox"]')).toHaveCount(4)
   await expect(markdown.locator('blockquote')).toBeVisible()
-  await expect(live.getByTestId('tool-block')).toHaveCount(1)
 
   await waitForStreamTicks(page, 38)
+  await jump(page, 999_999)
   await expect(live.getByTestId('tool-block')).toHaveCount(2)
+
   await waitForStreamTicks(page, 48)
+  await jump(page, 999_999)
   await expect(live.getByTestId('diff-block')).toBeVisible()
+
   await waitForStreamTicks(page, 60)
+  await jump(page, 999_999)
   await expect(live.getByTestId('code-block')).toBeVisible()
+
   await waitForStreamTicks(page, 72)
+  await jump(page, 999_999)
   const artifacts = live.getByTestId('attachments-block')
   await expect(artifacts).toBeVisible()
   await expect(artifacts).toContainText('Verification artifacts')
