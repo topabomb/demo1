@@ -115,7 +115,7 @@ async function injectAgentScenarios(): Promise<void> {
         <button class="new-session" data-testid="new-session" @click="newSession">＋ New session</button>
       </div>
 
-      <div class="session-section-label">Demo conversations</div>
+      <div class="session-section-label">Recent</div>
       <div class="session-list" data-testid="recent-sessions">
         <button
           v-for="descriptor in sessionDescriptors"
