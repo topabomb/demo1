@@ -50,6 +50,49 @@ describe('ConversationSessionKernel', () => {
     expect(kernel.getMessage(assistantIndex)).toMatchObject({ live: false, blocks: [{ type: 'reasoning', data: { status: 'complete' } }, { type: 'markdown' }] })
   })
 
+  it('counts one Turn across separately appended Agent-loop records and advances the execution target without resetting lifecycle', () => {
+    const descriptor = { id: 'loop', title: 'Loop', status: 'idle' as const, logicalCount: 0, turnCount: 0, stepCount: 0 }
+    const kernel = new ConversationSessionKernel(descriptor, new SyntheticHistoryAdapter('loop', 0, 4))
+    const turnId = 'loop:turn-1'
+    const step0 = `${turnId}:step-0`
+    const [user, assistant0] = kernel.appendCanonicalMessages([
+      { turnId, stepId: step0, role: 'user', blocks: [block('prompt', 'markdown', { markdown: 'inspect and verify' })] },
+      { turnId, stepId: step0, role: 'assistant', blocks: [block('answer', 'markdown', { markdown: 'checking' })], live: true },
+    ])
+    expect(user).toBe(0)
+    expect(kernel.turnCount).toBe(1)
+    expect(kernel.stepCount).toBe(1)
+    expect(kernel.startExecution(assistant0!)).toBe(true)
+
+    const [toolResult] = kernel.appendCanonicalMessages([{
+      turnId,
+      stepId: step0,
+      role: 'tool',
+      blocks: [block('tool-result', 'tool-result', { name: 'read_file', callId: 'call-1', category: 'filesystem', status: 'success', output: { lines: 12 } })],
+    }])
+    expect(toolResult).toBe(2)
+    expect(kernel.turnCount).toBe(1)
+    expect(kernel.stepCount).toBe(1)
+
+    const step1 = `${turnId}:step-1`
+    const [assistant1] = kernel.appendCanonicalMessages([{
+      turnId,
+      stepId: step1,
+      role: 'assistant',
+      blocks: [block('answer', 'markdown', { markdown: 'next model step' })],
+      live: true,
+    }])
+    expect(kernel.turnCount).toBe(1)
+    expect(kernel.stepCount).toBe(2)
+    kernel.continueExecutionAt(assistant1!)
+    expect(kernel.currentAssistantIndex).toBe(assistant1)
+    expect(kernel.status).toBe('working')
+
+    expect(() => kernel.continueExecutionAt(toolResult!)).toThrow(/assistant message/)
+    kernel.finishExecution('completed')
+    expect(() => kernel.continueExecutionAt(assistant1!)).toThrow(/not working/)
+  })
+
   it('owns a monotonic message revision for every canonical replacement', () => {
     const descriptor = { id: 'revision', title: 'Revision', status: 'idle' as const, logicalCount: 0 }
     const kernel = new ConversationSessionKernel(descriptor, new SyntheticHistoryAdapter('revision', 0, 4))
