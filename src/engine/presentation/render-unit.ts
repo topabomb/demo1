@@ -10,7 +10,7 @@ export type BuiltinRenderKind =
   | 'html'
   | 'tool'
   | 'terminal'
-  | 'agent-run'
+  | 'delegation'
   | 'diff'
   | 'unknown'
 
