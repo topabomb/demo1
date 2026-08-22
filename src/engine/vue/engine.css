@@ -85,9 +85,8 @@
     backdrop-filter:blur(14px);
   }
   & .conversation-heading { min-width:0; display:flex; align-items:center; gap:12px; }
-  & .conversation-title { min-width:0; display:grid; gap:2px; }
-  & .conversation-title strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; letter-spacing:-.01em; }
-  & .conversation-title span { color:var(--ce-subtle); font-size:9px; }
+  & .conversation-title { min-width:0; }
+  & .conversation-title strong { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; letter-spacing:-.01em; }
   & .conversation-header-context,
   & .conversation-header-actions { min-width:0; display:flex; align-items:center; gap:7px; }
   & .conversation-header-context:empty { display:none; }
@@ -168,7 +167,6 @@
     --conversation-content-width:100%;
     --conversation-row-gap:7px;
     --composer-max-height:220px;
-    & .conversation-title span { display:none; }
     & .conversation-heading { gap:8px; }
     & .conversation-header-context { overflow:hidden; }
     & .node-seat { padding-inline:11px; }
