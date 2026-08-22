@@ -78,14 +78,15 @@ test('pending approval is session-owned and survives switching plus viewport evi
 
 test('working sessions queue follow-ups independently of the mounted viewport', async ({ page }) => {
   await open(page)
+  await expect(page.getByTestId('active-session-id')).toHaveText('agent-loop')
   await expect(page.locator('.run-status')).toContainText('Working')
-  await send(page, 'follow up after the current release investigation')
+  await send(page, 'follow up after the current renderer investigation')
   await expect(page.getByTestId('queue-banner')).toContainText('1 follow-up')
   await expect(page.getByTestId('queued-prompts')).toHaveText('1')
 
   await switchTo(page, 'dsh-transport')
-  await expect(page.getByTestId('session-million')).toContainText('1 queued')
-  await switchTo(page, 'million')
+  await expect(page.getByTestId('session-agent-loop')).toContainText('1 queued')
+  await switchTo(page, 'agent-loop')
   await expect(page.getByTestId('queue-banner')).toContainText('1 follow-up')
 })
 
