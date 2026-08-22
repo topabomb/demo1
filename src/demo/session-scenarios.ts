@@ -1,4 +1,4 @@
-import { block, type AppendCanonicalMessage, type LogicalMessage } from '../engine/model/conversation'
+import { block, type AppendCanonicalMessage, type LogicalMessage, type ResourceRef } from '../engine/model/conversation'
 
 export type DemoScenarioKey =
   | 'release-investigation'
@@ -9,6 +9,8 @@ export type DemoScenarioKey =
   | 'multimodal-handoff'
   | 'android-rollout'
   | 'context-recovery'
+
+const fileRef = (id: string, uri: string, label = uri): ResourceRef => ({ id, kind: 'file', uri, label })
 
 /**
  * Realistic recent-tail fixtures for the public Demo.
@@ -54,6 +56,7 @@ function scenarioEntries(scope: string, scenario: DemoScenarioKey): readonly App
 function releaseInvestigation(scope: string): AppendCanonicalMessage[] {
   const turn = `${scope}:release-investigation`
   const step = `${turn}:step-0`
+  const workflow = { id: 'release-workflow', kind: 'url' as const, uri: 'https://github.com/topabomb/demo1/actions', label: 'GitHub Actions' }
   return [
     {
       turnId: turn, stepId: step, role: 'user',
@@ -65,15 +68,21 @@ function releaseInvestigation(scope: string): AppendCanonicalMessage[] {
     },
     {
       turnId: turn, stepId: step, role: 'assistant',
-      blocks: [block('release-check', 'tool-call', { name: 'read_ci_run', callId: 'release-ci-42', category: 'search', status: 'success', input: { run: 451, job: 'deploy-pages' }, durationMs: 214, defaultOpen: false })],
+      blocks: [block('release-check', 'tool-call', { name: 'read_ci_run', callId: 'release-ci-42', category: 'search', presentation: { kind: 'resources', resources: [workflow] }, resources: [workflow], status: 'success', input: { run: 451, job: 'deploy-pages' }, durationMs: 214, defaultOpen: false })],
     },
     {
       turnId: turn, stepId: step, role: 'tool',
-      blocks: [block('release-check-result', 'tool-result', { name: 'read_ci_run', callId: 'release-ci-42', category: 'search', status: 'success', output: { failedStep: 'deployed-site chromium', symptom: 'row geometry changed after async content measurement', affected: 'Markdown + tool output' }, durationMs: 418, defaultOpen: false })],
+      blocks: [block('release-check-result', 'tool-result', { name: 'read_ci_run', callId: 'release-ci-42', category: 'search', presentation: { kind: 'resources', resources: [workflow] }, resources: [workflow], status: 'success', output: { failedStep: 'deployed-site chromium', symptom: 'row geometry changed after async content measurement', affected: 'Markdown + tool output' }, durationMs: 418, defaultOpen: false })],
     },
     {
       turnId: turn, stepId: `${turn}:step-1`, role: 'assistant', live: true,
       blocks: [
+        block('work-plan', 'plan', { title: 'Release regression investigation', items: [
+          { id: 'inspect', text: 'Inspect projection and resource boundaries', status: 'in-progress' },
+          { id: 'correlate', text: 'Correlate tool and execution identity', status: 'pending' },
+          { id: 'verify', text: 'Run the full release gate with terminal evidence', status: 'pending' },
+          { id: 'synthesize', text: 'Summarize the smallest rendering-layer patch', status: 'pending' },
+        ] }),
         block('reasoning', 'reasoning', { text: 'I have the failing release evidence. I am correlating it with the renderer update before changing code. ', tokenCount: 27, durationMs: 640, defaultOpen: false, status: 'streaming' }),
         block('answer', 'markdown', { markdown: '## Investigating the release regression\n\nI found a measurement-sensitive renderer path and am validating it against the deployed behavior.\n\n' }),
       ],
@@ -85,13 +94,15 @@ function transportRefactor(scope: string): AppendCanonicalMessage[] {
   const turn = `${scope}:transport-refactor`
   const step = `${turn}:step-0`
   const callId = 'transport-read-17'
+  const adapter = fileRef('transport-adapter', 'src/transport/event-adapter.ts')
+  const normalized = fileRef('normalize-provider-event', 'src/transport/normalize-provider-event.ts')
   return [
     { turnId: turn, stepId: step, role: 'user', blocks: [block('request', 'markdown', { markdown: 'Refactor the agent transport adapter so provider events normalize into one stable conversation contract. Show the patch and verification, not a provider-specific UI.' })] },
     { turnId: turn, stepId: step, role: 'assistant', blocks: [block('thinking', 'reasoning', { text: 'Separate provider event decoding from conversation identity, then keep the renderer dependent only on canonical blocks.', tokenCount: 36, durationMs: 1260, defaultOpen: false, status: 'complete' })] },
-    { turnId: turn, stepId: step, role: 'assistant', blocks: [block('read', 'tool-call', { name: 'read_file', callId, category: 'filesystem', status: 'success', input: { path: 'src/transport/event-adapter.ts' }, durationMs: 18, defaultOpen: false })] },
-    { turnId: turn, stepId: step, role: 'tool', blocks: [block('read-result', 'tool-result', { name: 'read_file', callId, category: 'filesystem', status: 'success', output: { lines: 186, finding: 'provider event names leak into presentation mapping' }, durationMs: 29, defaultOpen: false })] },
-    { turnId: turn, stepId: `${turn}:step-1`, role: 'assistant', blocks: [block('patch', 'diff', { file: 'src/transport/event-adapter.ts', lines: ['- return { kind: providerEvent.type, payload: providerEvent }', '+ return normalizeProviderEvent(providerEvent)', '+ // presentation consumes canonical ContentBlock[] only', '+ return { turnId, stepId, role, blocks }'], defaultOpen: true })] },
-    { turnId: turn, stepId: `${turn}:step-1`, role: 'assistant', blocks: [block('code', 'code', { filename: 'src/transport/normalize-provider-event.ts', language: 'typescript', defaultOpen: true, code: `export function normalizeProviderEvent(event: ProviderEvent): CanonicalMutation {\n  return {\n    turnId: stableTurnId(event),\n    stepId: stableStepId(event),\n    role: normalizeRole(event),\n    blocks: normalizeBlocks(event),\n  }\n}` })] },
+    { turnId: turn, stepId: step, role: 'assistant', blocks: [block('read', 'tool-call', { name: 'read_file', callId, category: 'filesystem', presentation: { kind: 'resources', resources: [adapter] }, resources: [adapter], status: 'success', input: { path: adapter.uri }, durationMs: 18, defaultOpen: false })] },
+    { turnId: turn, stepId: step, role: 'tool', blocks: [block('read-result', 'tool-result', { name: 'read_file', callId, category: 'filesystem', presentation: { kind: 'resources', resources: [adapter] }, resources: [adapter], status: 'success', output: { lines: 186, finding: 'provider event names leak into presentation mapping' }, durationMs: 29, defaultOpen: false })] },
+    { turnId: turn, stepId: `${turn}:step-1`, role: 'assistant', blocks: [block('patch', 'diff', { resource: adapter, lines: ['- return { kind: providerEvent.type, payload: providerEvent }', '+ return normalizeProviderEvent(providerEvent)', '+ // presentation consumes canonical ContentBlock[] only', '+ return { turnId, stepId, role, blocks }'], defaultOpen: true })] },
+    { turnId: turn, stepId: `${turn}:step-1`, role: 'assistant', blocks: [block('code', 'code', { filename: normalized.label, resource: normalized, language: 'typescript', defaultOpen: true, code: `export function normalizeProviderEvent(event: ProviderEvent): CanonicalMutation {\n  return {\n    turnId: stableTurnId(event),\n    stepId: stableStepId(event),\n    role: normalizeRole(event),\n    blocks: normalizeBlocks(event),\n  }\n}` })] },
     { turnId: turn, stepId: `${turn}:step-2`, role: 'assistant', blocks: [block('summary', 'markdown', { markdown: '### Transport refactor verified\n\n- Provider decoding stays in the adapter.\n- `SessionKernel` receives canonical identities and blocks.\n- Renderer registration remains provider-neutral.\n- Existing history can replay without a provider SDK.' })] },
   ]
 }
@@ -99,11 +110,12 @@ function transportRefactor(scope: string): AppendCanonicalMessage[] {
 function configApproval(scope: string): AppendCanonicalMessage[] {
   const turn = `${scope}:config-approval`
   const step = `${turn}:step-0`
+  const config = fileRef('runtime-config', 'src/runtime/config.ts')
   return [
     { turnId: turn, stepId: step, role: 'user', blocks: [block('request', 'markdown', { markdown: 'Raise the production worker limit from 8 to 12, but do not apply the workspace edit until I approve the exact diff.' })] },
     { turnId: turn, stepId: step, role: 'assistant', blocks: [block('reasoning', 'reasoning', { text: 'The edit changes production concurrency. Prepare the exact diff and stop at the approval boundary.', tokenCount: 24, durationMs: 620, defaultOpen: false, status: 'complete' })] },
-    { turnId: turn, stepId: step, role: 'assistant', blocks: [block('patch', 'diff', { file: 'src/runtime/config.ts', lines: [' export const runtimeConfig = {', '-  maxWorkers: 8,', '+  maxWorkers: 12,', '   queuePolicy: \'bounded\',', ' }'], defaultOpen: true })] },
-    { turnId: turn, stepId: step, role: 'assistant', blocks: [block('edit', 'tool-call', { name: 'edit_file', callId: 'config-edit-approval', category: 'filesystem', status: 'running', input: { path: 'src/runtime/config.ts', patch: 'maxWorkers: 8 -> 12' }, durationMs: 0, defaultOpen: false })] },
+    { turnId: turn, stepId: step, role: 'assistant', blocks: [block('patch', 'diff', { resource: config, lines: [' export const runtimeConfig = {', '-  maxWorkers: 8,', '+  maxWorkers: 12,', '   queuePolicy: \'bounded\',', ' }'], defaultOpen: true })] },
+    { turnId: turn, stepId: step, role: 'assistant', blocks: [block('edit', 'tool-call', { name: 'edit_file', callId: 'config-edit-approval', category: 'filesystem', presentation: { kind: 'changes', resources: [config] }, resources: [config], status: 'running', input: { path: config.uri, patch: 'maxWorkers: 8 -> 12' }, durationMs: 0, defaultOpen: false })] },
     { turnId: turn, stepId: step, role: 'assistant', blocks: [block('waiting', 'markdown', { markdown: 'The patch is ready. Execution is paused at the workspace approval boundary; browsing another conversation will not discard this pending request.' })] },
   ]
 }
@@ -126,8 +138,8 @@ function responsiveArtifacts(scope: string): AppendCanonicalMessage[] {
   return [
     { turnId: turn, stepId: step, role: 'user', blocks: [block('request', 'markdown', { markdown: 'Review these generated artifacts on desktop and mobile. Wide tables, code, images and HTML must stay contained while I expand details.' })] },
     { turnId: turn, stepId: step, role: 'assistant', blocks: [block('preview', 'attachments', { title: 'Generated review artifacts', provenance: { origin: 'tool-output', toolName: 'generate_preview', toolCallId: 'preview-28' }, items: [
-      { id: 'preview-desktop', name: 'dashboard-desktop.png', kind: 'image', mimeType: 'image/png', width: 1600, height: 900, sizeBytes: 842_000, seed: 9281 },
-      { id: 'preview-mobile', name: 'dashboard-mobile.png', kind: 'image', mimeType: 'image/png', width: 780, height: 1380, sizeBytes: 624_000, seed: 9282 },
+      { id: 'preview-desktop', name: 'dashboard-desktop.png', kind: 'image', mimeType: 'image/png', width: 1600, height: 900, sizeBytes: 842_000, seed: 9281, resource: { id: 'preview-desktop-resource', kind: 'artifact', uri: 'artifact://dashboard-desktop', label: 'dashboard-desktop.png' } },
+      { id: 'preview-mobile', name: 'dashboard-mobile.png', kind: 'image', mimeType: 'image/png', width: 780, height: 1380, sizeBytes: 624_000, seed: 9282, resource: { id: 'preview-mobile-resource', kind: 'artifact', uri: 'artifact://dashboard-mobile', label: 'dashboard-mobile.png' } },
     ] })] },
     { turnId: turn, stepId: `${turn}:step-1`, role: 'assistant', blocks: [block('layout-table', 'markdown', { markdown: '### Responsive checks\n\n| Surface | Desktop | Mobile | Behavior |\n| --- | --- | --- | --- |\n| image gallery | 2 columns | 1 column | contained |\n| wide table | internal scroll | internal scroll | no page overflow |\n| code | horizontal scroll | horizontal scroll | measured row remains stable |\n| disclosure | expands | expands | adjacent rows re-measure |' })] },
     { turnId: turn, stepId: `${turn}:step-1`, role: 'assistant', blocks: [block('artifact-html', 'html', { html: '<section class="synthetic-html"><h3>Build summary artifact</h3><p>12 checks passed · 0 overflow regressions</p><div class="html-chip">responsive container</div><script>window.__unsafeArtifact=true</script></section>' })] },
