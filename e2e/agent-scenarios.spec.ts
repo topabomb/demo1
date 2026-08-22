@@ -101,7 +101,8 @@ test('default Demo runs one Turn through multiple model/tool Steps with rich str
 
   await expect(page.getByTestId('active-turn-id')).toContainText('agent-loop:release-investigation')
   await expect(page.getByTestId('active-step-id')).toContainText(':step-4')
-  await expect(page.getByTestId('active-tool-calls')).toHaveText('3')
+  // Diagnostics count the complete current Turn, including the seeded release-evidence call in step 0.
+  await expect(page.getByTestId('active-tool-calls')).toHaveText('4')
   await expect(page.getByTestId('active-tool-categories')).toContainText('filesystem')
   await expect(page.getByTestId('active-tool-categories')).toContainText('search')
   await expect(page.getByTestId('active-tool-categories')).toContainText('shell')
