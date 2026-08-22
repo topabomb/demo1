@@ -24,9 +24,9 @@ Automated tests must protect these boundaries:
 - framework-neutral Engine layers do not depend on Vue/DOM/physical layout;
 - `src/engine/index.ts` excludes Vue/Demo implementation, workspace navigation and tuning telemetry;
 - `src/engine/vue/index.ts` remains an optional physical adapter;
-- external adapters own provider decoding, Agent/tool/child orchestration, child concurrency/provider selection, permission policy, connectors/authentication, real external side effects, persistence, retries and async IO;
-- Demo owns workspace/LRU, parent/child navigation, scripted coding/office/child sessions, synthetic source/action evidence, playback and diagnostics;
-- no core `PresentationSurface`, session-tree router, panel, sidebar, tab, drawer or editor-routing contract is introduced without a proven reusable requirement;
+- external adapters own provider decoding, Agent/tool/child orchestration, child concurrency/provider selection, permission policy, connectors/authentication, real external side effects, persistence, retries/backoff/fallback choice and async IO;
+- Demo owns workspace/LRU, parent/child navigation, scripted coding/office/lifecycle/child sessions, synthetic source/action evidence, playback and diagnostics;
+- no core `PresentationSurface`, session-tree router, retry/fallback policy, panel, sidebar, tab, drawer or editor-routing contract is introduced without a proven reusable requirement;
 - canonical/session contracts contain no CSS class, color, width, panel placement or host open action.
 
 ### Plan / current-work invariants
@@ -48,8 +48,18 @@ Automated tests must protect these boundaries:
 - `childSessionId` is an address only; Engine model/contracts must not gain `parentSessionId`, `sessionTree`, child-list routing or `openChildSession()` behavior;
 - parent delegation never recursively embeds child `LogicalMessage[]` or child tool history;
 - child status never redefines parent `SessionStatus`, WorkPlan or `lastTurnReason`;
+- a failed child must remain representable while sibling runs and the parent are completed; Engine must not infer parent failure or retry policy from that child status;
 - Demo/Host may map `childSessionId` to an independently addressable conversation, hide that session from normal Recent, activate it and provide a return-to-parent action;
 - detailed child messages must live in the child session itself and use the normal canonical/projector/renderer path.
+
+### Agent lifecycle / resilience invariants
+
+- `PendingQuestion`/`InteractionResolution` represent a typed clarification blocker and its answer, not what the runtime must do after receiving that answer;
+- resolving a question clears the blocker to outcome-neutral idle; a provider/runtime decides whether to resume an existing operation, start a new request or update its plan;
+- failed child/tool evidence is independent from retry/fallback policy, retry budgets, backoff and parent outcome;
+- terminal/Turn `interrupted` evidence is historical execution truth, not a command to resume or retry;
+- a later user steering instruction may be a distinct Turn with its own Plan/tools/outcome while the interrupted Turn remains unchanged;
+- no scenario name, `RetryPolicy`, `FallbackPolicy`, `ResumePolicy`, retry counter, fallback-source selector or provider recovery workflow belongs in framework-neutral Engine contracts.
 
 ### Workbench semantic invariants
 
@@ -59,7 +69,7 @@ Automated tests must protect these boundaries:
 - presentation intent is limited to generic/resources/changes/terminal semantics and contains no physical placement or application routing;
 - tool call/result remain separate records correlated through producer-owned `callId`;
 - terminal output is first-class canonical content and append-only growth patches one stable RenderUnit;
-- terminal process lifecycle remains execution-adapter policy; Demo abort evidence settles terminal as `interrupted` with exit code `130`.
+- terminal process lifecycle remains execution-adapter policy; Demo abort/interruption evidence settles terminal as `interrupted` with exit code `130`.
 
 ### Office/knowledge-work boundary invariants
 
@@ -130,6 +140,16 @@ Executive briefing must show cross-source ResourceRefs, completed WorkPlan/Plan,
 
 Meeting follow-up must show neutral transcript/mail/document evidence, blocked send/schedule WorkPlan/Plan item, staged productivity call, typed waiting approval, and generic resolution without claiming an actual mail/calendar mutation.
 
+### Agent lifecycle resilience
+
+The browser must prove all three lifecycle transitions through the public application:
+
+- **clarify/continue:** `android-protocol` exposes a typed question, an answer clears the blocker, composer becomes usable, and the same session can start a subsequent Turn with logical history increasing;
+- **partial failure/fallback:** `resilience-fallback` is a completed parent with WorkPlan 3/3 while one delegated specialist is failed and two are completed; the cached-export fallback appears as ordinary correlated tool call/result evidence and the final brief explicitly labels stale evidence;
+- **interrupt/steer:** `steered-migration` is currently completed with WorkPlan 3/3 while its older Turn retains an interrupted terminal with exit `130`; a later user message changes direction, begins a different Turn and produces a read-only final report.
+
+These tests must not depend on a core retry/fallback/resume API because none exists.
+
 ### General coverage
 
 The suite also covers:
@@ -163,9 +183,9 @@ These are reference-implementation verification bounds, not framework-neutral AP
 
 ## Public API checks
 
-Architecture tests fail if the neutral entry exposes Demo/session-tree/physical details such as `parentSessionId`, child navigation commands, `SessionUiSnapshot`, `ShiftPlan`, `WINDOW_MESSAGES` or `SHIFT_MESSAGES`, or if semantics acquire panel/layout/style/orchestration/connector fields.
+Architecture tests fail if the neutral entry exposes Demo/session-tree/physical/recovery-policy details such as `parentSessionId`, child navigation commands, `RetryPolicy`, `FallbackPolicy`, `SessionUiSnapshot`, `ShiftPlan`, `WINDOW_MESSAGES` or `SHIFT_MESSAGES`, or if semantics acquire panel/layout/style/orchestration/connector fields.
 
-Tests assert stable ResourceRef, PlanItem, WorkPlan, ToolPresentationIntent, AgentRunMode/AgentRunRef, delegation and terminal append support; historical Plan/current WorkPlan separation; child-address/session-tree separation; and the absence of speculative PresentationSurface or provider-specific APIs.
+Tests assert stable ResourceRef, PlanItem, WorkPlan, ToolPresentationIntent, AgentRunMode/AgentRunRef, delegation and terminal append support; historical Plan/current WorkPlan separation; child-address/session-tree separation; lifecycle evidence/policy separation; and the absence of speculative PresentationSurface or provider-specific APIs.
 
 The Vue API may expose `ActivePlanStrip` and renderer components because they are explicitly optional physical adapters; their geometry does not enter the neutral Engine API.
 
