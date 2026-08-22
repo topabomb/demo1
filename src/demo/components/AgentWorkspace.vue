@@ -34,12 +34,42 @@ type DemoNavigationTarget =
   | 'lifecycle-fallback'
   | 'lifecycle-steer'
 
+type DirectDemoTarget =
+  | 'office-briefing'
+  | 'office-followup'
+  | 'lifecycle-clarify'
+  | 'lifecycle-fallback'
+  | 'lifecycle-steer'
+
 const AGENT_DEMO_MESSAGE = {
   'agent-plan': 83_999,
   'agent-delegation': 84_005,
   'agent-terminal': 84_007,
   'agent-final': 84_008,
 } as const
+
+const DIRECT_DEMO_SESSION: Record<DirectDemoTarget, string> = {
+  'office-briefing': 'office-briefing',
+  'office-followup': 'office-followup',
+  'lifecycle-clarify': 'android-protocol',
+  'lifecycle-fallback': 'resilience-fallback',
+  'lifecycle-steer': 'steered-migration',
+}
+
+function isDirectDemoTarget(target: DemoNavigationTarget): target is DirectDemoTarget {
+  return target === 'office-briefing'
+    || target === 'office-followup'
+    || target === 'lifecycle-clarify'
+    || target === 'lifecycle-fallback'
+    || target === 'lifecycle-steer'
+}
+
+function isAgentJumpTarget(target: DemoNavigationTarget): target is keyof typeof AGENT_DEMO_MESSAGE {
+  return target === 'agent-plan'
+    || target === 'agent-delegation'
+    || target === 'agent-terminal'
+    || target === 'agent-final'
+}
 
 const { workspace, activeSession, activeUiState, workspaceRevision } = useWorkspaceRuntime()
 const viewportRef = ref<ViewportHandle | null>(null)
@@ -126,20 +156,14 @@ async function navigateDemo(target: DemoNavigationTarget): Promise<void> {
     return
   }
 
-  const directSession = {
-    'office-briefing': 'office-briefing',
-    'office-followup': 'office-followup',
-    'lifecycle-clarify': 'android-protocol',
-    'lifecycle-fallback': 'resilience-fallback',
-    'lifecycle-steer': 'steered-migration',
-  }[target]
-  if (directSession) {
-    switchSession(directSession)
+  if (isDirectDemoTarget(target)) {
+    switchSession(DIRECT_DEMO_SESSION[target])
     await nextTick()
     await viewportRef.value?.jumpToLatest()
     return
   }
 
+  if (!isAgentJumpTarget(target)) return
   switchSession('agent-loop')
   await nextTick()
   const messageIndex = AGENT_DEMO_MESSAGE[target]
