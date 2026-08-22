@@ -1,4 +1,4 @@
-import { block, type AppendCanonicalMessage, type ContentBlock } from '../engine/model/conversation'
+import { block, type AppendCanonicalMessage, type ContentBlock, type ResourceRef } from '../engine/model/conversation'
 
 export interface DemoScenarioMessage extends AppendCanonicalMessage {
   /** Demo/test locator only; never enters the canonical message model. */
@@ -31,20 +31,23 @@ export function createMixedDemoTurn(scope: string, ordinal: number): DemoScenari
   const stepId = `${turnId}:step-0`
   const callId = `fixture_call_${ordinal}`
   const visual = ordinal % 4
+  const path = `/workspace/fixture-${ordinal}.ts`
+  const fixtureResource: ResourceRef = { id: `fixture-resource-${ordinal}`, kind: 'file', uri: path, label: path }
   const rich: ContentBlock[] = [
     block('reasoning', 'reasoning', { text: `Inspect session state, preserve stable identities, and verify viewport invariants for mixed turn ${ordinal}.`, tokenCount: 58 + ordinal, durationMs: 1200 + ordinal * 73, defaultOpen: false, status: 'complete' }),
     block('answer', 'markdown', { markdown: `## Runtime-injected heterogeneous turn ${ordinal}\n\nThis content entered through the canonical SessionKernel and the same projection/renderer path used by real history.`, flavor: 'gfm' }),
   ]
-  if (visual === 0) rich.push(block('code', 'code', { language: 'typescript', filename: `src/runtime-fixture-${ordinal}.ts`, code: Array.from({ length: 46 }, (_, i) => `const fixture_${ordinal}_${i} = project(blocks[${i}], { stable: true })`).join('\n') }))
-  if (visual === 1) rich.push(block('diff', 'diff', { file: `src/runtime-${ordinal}.ts`, lines: Array.from({ length: 64 }, (_, i) => `${i % 3 === 0 ? '+' : i % 5 === 0 ? '-' : ' '} line ${i + 1}: renderer registry invariant ${ordinal}`) }))
+  if (visual === 0) rich.push(block('code', 'code', { language: 'typescript', filename: `src/runtime-fixture-${ordinal}.ts`, resource: fixtureResource, code: Array.from({ length: 46 }, (_, i) => `const fixture_${ordinal}_${i} = project(blocks[${i}], { stable: true })`).join('\n') }))
+  if (visual === 1) rich.push(block('diff', 'diff', { resource: fixtureResource, lines: Array.from({ length: 64 }, (_, i) => `${i % 3 === 0 ? '+' : i % 5 === 0 ? '-' : ' '} line ${i + 1}: renderer registry invariant ${ordinal}`) }))
   if (visual === 2) rich.push(block('image', 'image', { width: 1440, height: 810, seed: 9000 + ordinal, alt: `Synthetic responsive image fixture ${ordinal}` }))
   if (visual === 3) rich.push(block('html', 'html', { html: `<section class="synthetic-html"><h3>Runtime artifact ${ordinal}</h3><p>Sanitized HTML follows the same ContentBlock contract.</p><div class="html-chip">responsive container</div><script>window.__fixtureUnsafe=true</script></section>` }))
 
+  const presentation = { kind: 'resources' as const, resources: [fixtureResource] }
   return [
     { fixtureId: `mixed:${ordinal}:user`, turnId, stepId, role: 'user', blocks: [block('request', 'markdown', { markdown: `Please execute runtime fixture **${ordinal}** and demonstrate a mixed Agent turn.` })] },
     { fixtureId: `mixed:${ordinal}:assistant`, turnId, stepId, role: 'assistant', blocks: rich },
-    { fixtureId: `mixed:${ordinal}:tool-call`, turnId, stepId, role: 'assistant', blocks: [block('tool-call', 'tool-call', { name: ordinal % 2 ? 'search' : 'read_file', callId, category: ordinal % 2 ? 'search' : 'filesystem', input: { path: `/workspace/fixture-${ordinal}.ts`, query: `renderer ${ordinal}`, limit: 20 }, durationMs: 18, status: 'success', defaultOpen: false })] },
-    { fixtureId: `mixed:${ordinal}:tool-result`, turnId, stepId, role: 'tool', blocks: [block('tool-result', 'tool-result', { name: ordinal % 2 ? 'search' : 'read_file', callId, category: ordinal % 2 ? 'search' : 'filesystem', output: { rows: [{ line: 12, preview: 'stable keyed content' }, { line: 41, preview: 'responsive renderer containment' }], exitCode: 0 }, durationMs: 32, status: 'success', defaultOpen: false })] },
+    { fixtureId: `mixed:${ordinal}:tool-call`, turnId, stepId, role: 'assistant', blocks: [block('tool-call', 'tool-call', { name: ordinal % 2 ? 'search' : 'read_file', callId, category: ordinal % 2 ? 'search' : 'filesystem', presentation, resources: [fixtureResource], input: { path, query: `renderer ${ordinal}`, limit: 20 }, durationMs: 18, status: 'success', defaultOpen: false })] },
+    { fixtureId: `mixed:${ordinal}:tool-result`, turnId, stepId, role: 'tool', blocks: [block('tool-result', 'tool-result', { name: ordinal % 2 ? 'search' : 'read_file', callId, category: ordinal % 2 ? 'search' : 'filesystem', presentation, resources: [fixtureResource], output: { rows: [{ line: 12, preview: 'stable keyed content' }, { line: 41, preview: 'responsive renderer containment' }], exitCode: 0 }, durationMs: 32, status: 'success', defaultOpen: false })] },
     { fixtureId: `mixed:${ordinal}:summary`, turnId, stepId, role: 'assistant', blocks: [block('summary', 'markdown', { markdown: `### Verified\n\nFixture ${ordinal} crossed **SessionKernel → Projector Registry → keyed projection → virtualizer → Renderer Registry**.` })] },
   ]
 }
@@ -109,7 +112,7 @@ export function createAgentScenarioPack(scope: string, ordinal: number): DemoSce
       blocks: [block('generated-images', 'attachments', {
         title: 'Generated image set',
         provenance: { origin: 'tool-output', toolCallId: imageCall, toolName: 'generate_image', model: imageModel, prompt: imagePrompt },
-        items: Array.from({ length: 4 }, (_, i) => ({ id: `generated-${ordinal}-${i + 1}`, name: `agent-workstation-${i + 1}.png`, kind: 'image' as const, mimeType: 'image/png', width: 1024, height: 1024, sizeBytes: 1_100_000 + i * 73_000, seed: 8800 + ordinal * 10 + i })),
+        items: Array.from({ length: 4 }, (_, i) => ({ id: `generated-${ordinal}-${i + 1}`, name: `agent-workstation-${i + 1}.png`, kind: 'image' as const, mimeType: 'image/png', width: 1024, height: 1024, sizeBytes: 1_100_000 + i * 73_000, seed: 8800 + ordinal * 10 + i, resource: { id: `generated-resource-${ordinal}-${i + 1}`, kind: 'artifact' as const, uri: `artifact://generated-${ordinal}-${i + 1}`, label: `agent-workstation-${i + 1}.png` } })),
       })],
     },
     {
