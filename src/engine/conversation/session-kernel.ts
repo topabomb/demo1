@@ -12,7 +12,7 @@ import type {
   TokenUsage,
   TurnEndReasonKind,
 } from './contracts'
-import { defaultTurnReason, normalizeTokenUsage } from './session-semantics'
+import { normalizeTokenUsage } from './session-semantics'
 
 export type SessionKernelEventKind = 'content' | 'append' | 'status' | 'queue' | 'interaction' | 'foreground' | 'usage'
 export type SessionKernelContentPatch =
@@ -65,7 +65,7 @@ export class ConversationSessionKernel {
     this.history = history
     this.#status = descriptor.status
     this.#pendingInteraction = descriptor.pendingInteraction ?? null
-    this.#lastTurnReason = descriptor.lastTurnReason ?? defaultTurnReason(descriptor.status)
+    this.#lastTurnReason = descriptor.lastTurnReason ?? null
     this.#lastFailure = descriptor.lastFailure ?? null
     this.#usage = normalizeTokenUsage(descriptor.usage)
     this.#context = descriptor.context
@@ -238,10 +238,25 @@ export class ConversationSessionKernel {
     this.#emit({ kind: 'status', messageIndex: currentAssistantIndex })
   }
 
-  /** Finish execution without inventing any content. */
+  /** Suspend live execution on a typed user interaction without settling the Turn. */
+  requestInteraction(interaction: PendingInteraction): void {
+    if (this.#pendingInteraction) throw new Error(`interaction ${this.#pendingInteraction.id} is already pending`)
+    const index = this.#currentAssistantIndex
+    this.#pendingInteraction = { ...interaction }
+    this.#status = 'waiting'
+    this.#lastTurnReason = null
+    this.#lastFailure = null
+    this.#currentAssistantIndex = null
+    if (this.#runStartedAt > 0) this.#lastTurnDurationMs = Math.max(0, now() - this.#runStartedAt)
+    this.#runStartedAt = 0
+    this.#firstOutputAt = 0
+    this.#emit({ kind: 'interaction', messageIndex: index ?? undefined })
+  }
+
+  /** Finish a Turn explicitly without inventing any content. */
   finishExecution(reason: TurnEndReasonKind, failure: LlmFailure | null = null): void {
     const index = this.#currentAssistantIndex
-    this.#status = reason === 'blocked' ? 'waiting' : reason === 'aborted' || reason === 'interrupted' ? 'interrupted' : 'idle'
+    this.#status = reason === 'aborted' || reason === 'interrupted' ? 'interrupted' : 'idle'
     this.#lastTurnReason = reason
     this.#lastFailure = failure ? { ...failure } : null
     this.#currentAssistantIndex = null
