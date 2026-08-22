@@ -1,6 +1,6 @@
 import type { LogicalMessage } from '../model/conversation'
 
-/** Live execution state. Historical Turn outcome is deliberately separate. */
+/** Live execution state. `waiting` is reserved for a pending user interaction. */
 export type SessionStatus = 'idle' | 'working' | 'waiting' | 'interrupted'
 
 /** Explicitly settled Turn outcomes. A waiting interaction is live state, not an end reason. */
@@ -64,6 +64,7 @@ export interface ConversationDescriptor {
   unread?: boolean
   /** Summary count only; queued prompt payloads are live SessionKernel state, not descriptor persistence. */
   queuedPrompts?: number
+  /** Required exactly when status is `waiting`; absent for all other live states. */
   pendingInteraction?: PendingInteraction | null
   /** Latest explicitly settled Turn outcome. Live waiting/working state never infers this value. */
   lastTurnReason?: TurnEndReasonKind | null
