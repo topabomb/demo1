@@ -107,6 +107,8 @@ describe('engine architecture boundaries', () => {
     const viewport = readFileSync(join(engineRoot, 'vue/ConversationViewport.vue'), 'utf8')
 
     expect(workspace).toContain("./DemoDiagnosticsPanel.vue")
+    expect(workspace).toContain("from '../../engine/vue'")
+    expect(workspace).not.toContain('../../engine/vue/ConversationViewport.vue')
     expect(workspace).not.toContain('data-testid="metrics"')
     expect(workspace).toContain('#header-context')
     expect(workspace).toContain('#header-actions')
