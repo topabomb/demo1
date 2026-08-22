@@ -6,10 +6,12 @@ export interface DemoSessionDescriptor extends ConversationDescriptor {
   age: string
 }
 
+export type ChildDemoScenarioKey = 'child-rendering-review' | 'child-terminal-audit' | 'child-resource-audit'
+
 export interface DemoSessionSeed extends DemoSessionDescriptor {
   seedOffset: number
   liveTail?: boolean
-  scenario?: DemoScenarioKey
+  scenario?: DemoScenarioKey | ChildDemoScenarioKey
   playbackMode?: DemoPlaybackMode
   /** Demo workspace relationship only; Engine does not own a session tree. */
   parentSessionId?: string
