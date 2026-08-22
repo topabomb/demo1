@@ -64,7 +64,12 @@ export function highlightCode(code: string, language: string): Promise<string> {
       },
       reject,
     })
-    getWorker().postMessage({ id, code, language })
+    try {
+      getWorker().postMessage({ id, code, language })
+    } catch (error) {
+      pending.delete(id)
+      reject(error)
+    }
   })
   inFlight.set(key, promise)
   const cleanup = () => { if (inFlight.get(key) === promise) inFlight.delete(key) }

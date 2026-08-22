@@ -101,6 +101,9 @@ export class ProjectionEngine {
     const chunks = splitMarkdown(`${oldTailText}${delta}`)
     const baseIndex = settledPrefix.length
     const partCount = settledPrefix.length + chunks.length
+    const normalizedPrefix = settledPrefix.map(unit => unit.payload.partCount === partCount
+      ? unit
+      : { ...unit, payload: { ...unit.payload, partCount } })
     const tailUnits = chunks.map((chunk, localIndex) => {
       // Once an append creates another chunk, the old tail is no longer the last
       // part and must publish new continuation metadata even if its text is stable.
@@ -124,7 +127,7 @@ export class ProjectionEngine {
 
     const units = [
       ...cached.units.slice(0, first),
-      ...settledPrefix,
+      ...normalizedPrefix,
       ...tailUnits,
       ...cached.units.slice(last + 1),
     ]

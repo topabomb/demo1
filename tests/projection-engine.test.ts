@@ -59,12 +59,13 @@ describe('ProjectionEngine', () => {
 
     const delta = `\n\n${'new section '.repeat(600)}`
     const after = engine.appendMarkdownDelta(live(`${initialText}${delta}`, 1), 'answer', delta)
-    const nextOldTail = after.find(unit => unit.id === oldTail.id)!
+    const answerUnits = after.filter(unit => unit.blockId === 'answer')
+    const nextOldTail = answerUnits.find(unit => unit.id === oldTail.id)!
 
     expect(after.length).toBeGreaterThan(before.length)
     expect(nextOldTail).not.toBe(oldTail)
     expect(Number(nextOldTail.payload.partIndex)).toBeLessThan(Number(nextOldTail.payload.partCount) - 1)
-    expect(after.at(-1)?.payload.partCount).toBe(after.filter(unit => unit.blockId === 'answer').length)
+    expect(answerUnits.every(unit => unit.payload.partCount === answerUnits.length)).toBe(true)
   })
 
   it('patches reasoning inside a mixed live message without invalidating the answer sibling', () => {
