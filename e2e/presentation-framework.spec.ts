@@ -138,20 +138,28 @@ test('Markdown compatibility gallery covers GFM structures, sanitization and lon
   await assertNoRowOverlap(page)
 })
 
-test('live Markdown uses incremental projection rather than full-project work per publish', async ({ page }) => {
+test('live Markdown uses incremental projection after structural scenario milestones settle', async ({ page }) => {
   await openApp(page)
   await expect(page.getByTestId('active-session-id')).toHaveText('million')
+  await page.getByLabel('Stream rate').selectOption('60')
+
+  // The realistic Demo intentionally adds tool/result/diff/code/artifact Blocks at
+  // publishes 28..68. Those are legitimate shape changes and therefore full projects.
+  // Measure the Markdown hot path only after the final structural milestone.
+  await expect.poll(async () => numeric(await page.getByTestId('stream-ticks').textContent()), { timeout: 15_000 }).toBeGreaterThan(72)
+  await page.getByRole('button', { name: 'Pause' }).click()
+  await settleNavigationFrames(page, 2)
+
   const fullBefore = numeric(await page.getByTestId('projection-full-projects').textContent())
   const incrementalBefore = numeric(await page.getByTestId('projection-incremental').textContent())
   const ticksBefore = numeric(await page.getByTestId('stream-ticks').textContent())
 
-  await page.locator('.control-group select').selectOption('60')
   await page.getByTestId('stream-start').click()
   await expect.poll(async () => numeric(await page.getByTestId('stream-ticks').textContent()), { timeout: 15_000 }).toBeGreaterThan(ticksBefore + 20)
   await expect.poll(async () => numeric(await page.getByTestId('projection-incremental').textContent()), { timeout: 15_000 }).toBeGreaterThan(incrementalBefore + 15)
   const fullAfter = numeric(await page.getByTestId('projection-full-projects').textContent())
 
-  expect(fullAfter - fullBefore).toBeLessThan(4)
+  expect(fullAfter - fullBefore).toBeLessThanOrEqual(1)
   expect(numeric(await page.getByTestId('projection-cache').textContent())).toBeLessThanOrEqual(4096)
 })
 
