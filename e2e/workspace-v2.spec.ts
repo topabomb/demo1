@@ -69,7 +69,10 @@ test('pending approval is session-owned and survives switching plus viewport evi
   await expect(page.getByTestId('pending-interaction')).toBeVisible()
   await page.getByTestId('approve-interaction').click()
   await expect(page.getByTestId('pending-interaction')).toHaveCount(0)
-  await expect(page.locator('.run-status')).toContainText('Completed')
+  // Resolving a blocker only clears session interaction state. The execution adapter,
+  // not SessionKernel, decides whether the blocked Turn continues or completes.
+  await expect(page.locator('.run-status')).toContainText('Idle')
+  await expect(page.getByTestId('last-turn-reason')).toHaveText('none')
 
   await send(page, 'continue after approval')
   await expect(page.getByTestId('logical-count')).toHaveText('420,002')
@@ -98,6 +101,8 @@ test('New session is a real empty resumable conversation and the public sidebar 
   await page.getByTestId('new-session').click()
   await expect(page.getByTestId('active-session-id')).toHaveText('new-1')
   await expect(page.getByTestId('empty-conversation')).toBeVisible()
+  await expect(page.locator('.run-status')).toContainText('Idle')
+  await expect(page.getByTestId('last-turn-reason')).toHaveText('none')
   await send(page, 'implement a fresh agent task')
   await expect(page.getByTestId('logical-count')).toHaveText('2')
   await expect(page.locator('[data-message-index="0"]')).toContainText('implement a fresh agent task')

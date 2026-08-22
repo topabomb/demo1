@@ -17,7 +17,7 @@ import ConversationNodeSeat from './ConversationNodeSeat.vue'
 import type { RendererResolver } from './renderers/registry'
 import { ViewportNavigationController } from './viewport-navigation-controller'
 
-const props = defineProps<{ runtime: ConversationSessionRuntime; stream: ConversationExecutionController; uiState: SessionUiSnapshot; renderers?: RendererResolver }>()
+const props = defineProps<{ runtime: ConversationSessionRuntime; execution: ConversationExecutionController; uiState: SessionUiSnapshot; renderers?: RendererResolver }>()
 const emit = defineEmits<{ viewportMetrics: [metrics: { mountedRows: number }] }>()
 
 const VIRTUAL_BUFFER_PX = 900
@@ -29,6 +29,7 @@ const composerInputRef = ref<HTMLTextAreaElement | null>(null)
 const composerShellRef = ref<HTMLElement | null>(null)
 const order = shallowRef<string[]>([...props.runtime.projection.order])
 const composerText = ref(props.runtime.draftText)
+const interactionAnswer = ref('')
 const mountedRows = ref(0)
 const shifting = ref(false)
 const uiState = computed(() => props.uiState)
@@ -50,6 +51,7 @@ const sessionIndicator = computed(() => {
 })
 const statusLabel = computed(() => sessionIndicatorLabel(sessionIndicator.value))
 const canSend = computed(() => Boolean(composerText.value.trim()) && !uiState.value.pendingInteraction)
+const canAnswerQuestion = computed(() => Boolean(interactionAnswer.value.trim()))
 const sendLabel = computed(() => uiState.value.sessionStatus === 'working' ? 'Queue prompt' : 'Send prompt')
 const composerPlaceholder = computed(() => uiState.value.pendingInteraction
   ? 'Resolve the pending request before continuing…'
@@ -63,8 +65,6 @@ const tokenUsage = computed(() => {
 const billedInput = computed(() => billedInputTokens(tokenUsage.value))
 const cacheHit = computed(() => cacheHitPercent(tokenUsage.value))
 const contextPercent = computed(() => contextOccupancyPercent(props.runtime.kernel.context))
-const interactionPrimary = computed(() => uiState.value.pendingInteraction?.kind === 'question' ? 'Continue' : 'Approve')
-const interactionSecondary = computed(() => uiState.value.pendingInteraction?.kind === 'question' ? 'Skip' : 'Deny')
 
 function frame(): Promise<void> { return new Promise(resolve => requestAnimationFrame(() => resolve())) }
 async function settleFrames(count = 2): Promise<void> { for (let i = 0; i < count; i += 1) { await nextTick(); await frame() } }
@@ -105,7 +105,7 @@ function refreshMountedRows(): void {
 function onUserWheel(event: WheelEvent): void {
   const direction: -1 | 0 | 1 = event.deltaY < 0 ? -1 : event.deltaY > 0 ? 1 : 0
   navigation.markUserIntent(direction)
-  if (direction < 0 && uiState.value.streamTarget && props.runtime.followTail) {
+  if (direction < 0 && uiState.value.activeMessageId && props.runtime.followTail) {
     event.preventDefault(); props.runtime.setFollowTail(false); const delta = event.deltaY
     requestAnimationFrame(() => { if (!props.runtime.followTail) listRef.value?.scrollBy(delta) })
   }
@@ -116,7 +116,7 @@ function onVirtualScroll(offset: number): void {
   const hasIntent = navigation.hasUserIntent()
   if (hasIntent) navigation.updateReaderFromUserScroll(offset)
   refreshMountedRows()
-  if (!hasIntent || !uiState.value.streamTarget) return
+  if (!hasIntent || !uiState.value.activeMessageId) return
   if (navigation.scrollDirection < 0) props.runtime.setFollowTail(false)
   else if (navigation.scrollDirection > 0 && navigation.remainingToBottom() < VIEWPORT_POLICY.bottomTolerancePx) props.runtime.setFollowTail(true)
 }
@@ -177,14 +177,20 @@ async function jumpToLatest(): Promise<void> {
     if (!await navigation.scrollToLogical(last, 'end', revision)) return
     const pinned = await navigation.pinMeasuredEnd(VIEWPORT_POLICY.restoreAttempts, revision)
     if (!navigation.isCurrent(revision)) return
-    props.runtime.setFollowTail(props.stream.running && pinned)
+    props.runtime.setFollowTail(props.execution.running && pinned)
   } finally {
     navigation.finish(revision)
   }
 }
 
-function abortRun(): void { props.stream.abort() }
-function resolveInteraction(approved: boolean): void { props.stream.resolveInteraction(approved) }
+function abortRun(): void { props.execution.abort() }
+function resolveApproval(approved: boolean): void { props.execution.resolveInteraction({ kind: 'approval', approved }) }
+function resolveQuestion(answer: string | null): void {
+  const normalized = answer === null ? null : answer.trim()
+  if (normalized !== null && !normalized) return
+  props.execution.resolveInteraction({ kind: 'question', answer: normalized })
+  interactionAnswer.value = ''
+}
 
 function resizeComposer(): void {
   const input = composerInputRef.value
@@ -212,7 +218,7 @@ function onComposerInput(): void {
 async function sendComposer(): Promise<void> {
   const prompt = composerText.value.trim()
   if (!prompt || uiState.value.pendingInteraction) return
-  const disposition = props.stream.submit(prompt)
+  const disposition = props.execution.submit(prompt)
   if (disposition === 'blocked') return
   composerText.value = ''; props.runtime.setDraftText('')
   capturePendingLayoutIntent()
@@ -299,6 +305,7 @@ watch(() => props.uiState.eventRevision, (next, previous) => {
   if (next === previous || !props.uiState.followTail) return
   void nextTick().then(() => listRef.value?.scrollToIndex(Math.max(0, order.value.length - 1), { align: 'end' }))
 })
+watch(() => props.uiState.pendingInteraction?.id, () => { interactionAnswer.value = '' })
 
 onMounted(() => {
   unsubscribeOrder = props.runtime.projection.subscribeOrder(() => { order.value = [...props.runtime.projection.order] })
@@ -344,8 +351,17 @@ defineExpose({ captureSnapshot, jumpToMessage, jumpToLatest, shiftBackward, shif
 
     <footer ref="composerShellRef" class="composer-shell" data-testid="composer-shell">
       <div v-if="uiState.pendingInteraction" class="pending-interaction" data-testid="pending-interaction" :data-kind="uiState.pendingInteraction.kind">
-        <div class="pending-icon">!</div><div><strong>{{ uiState.pendingInteraction.title }}</strong><p>{{ uiState.pendingInteraction.detail }}</p></div>
-        <div class="pending-actions"><button class="secondary" data-testid="deny-interaction" type="button" @click="resolveInteraction(false)">{{ interactionSecondary }}</button><button data-testid="approve-interaction" type="button" @click="resolveInteraction(true)">{{ interactionPrimary }}</button></div>
+        <div class="pending-icon">!</div>
+        <div class="pending-copy"><strong>{{ uiState.pendingInteraction.title }}</strong><p>{{ uiState.pendingInteraction.detail }}</p></div>
+        <template v-if="uiState.pendingInteraction.kind === 'approval'">
+          <div class="pending-actions"><button class="secondary" data-testid="deny-interaction" type="button" @click="resolveApproval(false)">Deny</button><button data-testid="approve-interaction" type="button" @click="resolveApproval(true)">Approve</button></div>
+        </template>
+        <template v-else>
+          <div class="pending-question-response">
+            <input v-model="interactionAnswer" data-testid="question-answer" type="text" placeholder="Type an answer…" @keydown.enter.prevent="resolveQuestion(interactionAnswer)" />
+            <div class="pending-actions"><button class="secondary" data-testid="deny-interaction" type="button" @click="resolveQuestion(null)">Skip</button><button data-testid="approve-interaction" type="button" :disabled="!canAnswerQuestion" @click="resolveQuestion(interactionAnswer)">Answer</button></div>
+          </div>
+        </template>
       </div>
       <div v-else-if="sessionIndicator === 'failed'" class="turn-outcome-banner failure" data-testid="last-turn-failure"><strong>Last turn failed</strong><span>{{ runtime.kernel.lastFailure?.code }} · {{ runtime.kernel.lastFailure?.message }}</span></div>
       <div v-else-if="sessionIndicator === 'max-tokens'" class="turn-outcome-banner warning"><strong>Last turn reached the output-token limit</strong><span>You can continue this session with another prompt.</span></div>

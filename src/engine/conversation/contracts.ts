@@ -1,12 +1,12 @@
 import type { LogicalMessage } from '../model/conversation'
 
-/** Live execution state. Historical Turn outcome is deliberately separate. */
+/** Live execution state. `waiting` is reserved for a pending user interaction. */
 export type SessionStatus = 'idle' | 'working' | 'waiting' | 'interrupted'
 
+/** Explicitly settled Turn outcomes. A waiting interaction is live state, not an end reason. */
 export type TurnEndReasonKind =
   | 'completed'
   | 'aborted'
-  | 'blocked'
   | 'error'
   | 'max-tokens'
   | 'interrupted'
@@ -33,13 +33,27 @@ export interface SessionContextStats {
   contextWindow: number
 }
 
-export interface PendingInteraction {
+interface PendingInteractionBase {
   id: string
-  kind: 'approval' | 'question'
   title: string
   detail: string
+}
+
+export interface PendingApproval extends PendingInteractionBase {
+  kind: 'approval'
   toolName?: string
 }
+
+export interface PendingQuestion extends PendingInteractionBase {
+  kind: 'question'
+}
+
+export type PendingInteraction = PendingApproval | PendingQuestion
+
+/** Explicit response to a session-owned blocker. Execution adapters interpret the value. */
+export type InteractionResolution =
+  | { kind: 'approval'; approved: boolean }
+  | { kind: 'question'; answer: string | null }
 
 /** Durable/session semantics only. Relative age, badges and other list chrome belong to products. */
 export interface ConversationDescriptor {
@@ -48,23 +62,31 @@ export interface ConversationDescriptor {
   status: SessionStatus
   logicalCount: number
   unread?: boolean
+  /** Summary count only; queued prompt payloads are live SessionKernel state, not descriptor persistence. */
   queuedPrompts?: number
+  /** Required exactly when status is `waiting`; absent for all other live states. */
   pendingInteraction?: PendingInteraction | null
+  /** Latest explicitly settled Turn outcome. Live waiting/working state never infers this value. */
   lastTurnReason?: TurnEndReasonKind | null
   lastFailure?: LlmFailure | null
   usage?: Partial<TokenUsage>
   context?: SessionContextStats
   turnCount?: number
   stepCount?: number
+  /** Explicit active assistant record for a rehydrated working session. Never inferred from history order. */
+  activeAssistantIndex?: number | null
 }
 
-/** Cold-history read port. A production adapter may page from DB/network. */
-export interface ConversationBackend {
+/**
+ * Synchronous, globally addressable history source used by SessionKernel/Runtime.
+ * Remote/database integrations should place async fetching and caching outside this
+ * hot read contract, then expose the locally available range through this interface.
+ */
+export interface ConversationHistorySource {
   readonly sessionId: string
   readonly count: number
   loadRange(start: number, count: number): readonly LogicalMessage[]
 }
-export interface ConversationHistoryAdapter extends ConversationBackend {}
 
 export type SubmitDisposition = 'started' | 'queued' | 'blocked'
 
@@ -73,6 +95,6 @@ export interface ConversationExecutionController {
   readonly running: boolean
   abort(): void
   submit(prompt: string): SubmitDisposition
-  resolveInteraction(approved: boolean): void
+  resolveInteraction(resolution: InteractionResolution): void
   dispose?(): void
 }

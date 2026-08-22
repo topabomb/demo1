@@ -1,12 +1,10 @@
 import type {
   ConversationDescriptor,
   SessionContextStats,
-  SessionStatus,
   TokenUsage,
-  TurnEndReasonKind,
 } from './contracts'
 
-/** Product-facing state derived from live execution + the last settled turn. */
+/** Product-facing state derived from live execution + the last explicitly settled Turn. */
 export type SessionIndicator =
   | 'working'
   | 'blocked'
@@ -90,13 +88,6 @@ export function normalizeTokenUsage(usage?: Partial<TokenUsage>): TokenUsage {
     cacheWriteTokens: nonNegative(usage?.cacheWriteTokens),
     reasoningTokens: nonNegative(usage?.reasoningTokens),
   }
-}
-
-export function defaultTurnReason(status: SessionStatus): TurnEndReasonKind | null {
-  if (status === 'working') return null
-  if (status === 'waiting') return 'blocked'
-  if (status === 'interrupted') return 'interrupted'
-  return 'completed'
 }
 
 function nonNegative(value: number | undefined): number {

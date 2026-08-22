@@ -26,9 +26,9 @@ export interface SessionUiSnapshot {
   followTail: boolean
   atVisualBottom: boolean
   eventRevision: number
-  streamTarget: string | null
+  activeMessageId: string | null
   messagesAfter: number
-  liveChunkCount: number
+  activeRenderUnitCount: number
   projectionSize: number
   projectionCacheSize: number
   projectionCacheHits: number
@@ -101,9 +101,9 @@ export class ConversationSessionRuntime {
       followTail: this.followTail,
       atVisualBottom: this.atVisualBottom,
       eventRevision: this.#eventRevision,
-      streamTarget: target === null ? null : `${this.id}:m-${target}`,
+      activeMessageId: target === null ? null : `${this.id}:m-${target}`,
       messagesAfter: this.messagesAfterCurrent,
-      liveChunkCount: target === null ? 0 : this.#activeUnits.filter(unit => unit.messageIndex === target).length,
+      activeRenderUnitCount: target === null ? 0 : this.#activeUnits.filter(unit => unit.messageIndex === target).length,
       projectionSize: this.projection.size,
       projectionCacheSize: projectionStats.cacheSize,
       projectionCacheHits: projectionStats.cacheHits,

@@ -3,7 +3,8 @@ import type { AppendCanonicalMessage, LogicalMessage } from '../model/conversati
 import { cloneBlocks } from '../model/message-mutations'
 import type {
   ConversationDescriptor,
-  ConversationHistoryAdapter,
+  ConversationHistorySource,
+  InteractionResolution,
   LlmFailure,
   PendingInteraction,
   SessionContextStats,
@@ -11,7 +12,7 @@ import type {
   TokenUsage,
   TurnEndReasonKind,
 } from './contracts'
-import { defaultTurnReason, normalizeTokenUsage } from './session-semantics'
+import { normalizeTokenUsage } from './session-semantics'
 
 export type SessionKernelEventKind = 'content' | 'append' | 'status' | 'queue' | 'interaction' | 'foreground' | 'usage'
 export type SessionKernelContentPatch =
@@ -27,13 +28,14 @@ export interface SessionKernelEvent {
  * Canonical session truth.
  *
  * This kernel stores normalized messages and lifecycle/accounting facts but never
- * invents provider output, default assistant blocks, token estimates or product copy.
- * Execution adapters own those decisions and publish them through these semantic APIs.
+ * invents provider output, execution targets, default assistant blocks, token estimates
+ * or product copy. Execution adapters own those decisions and publish them through
+ * these semantic APIs.
  */
 export class ConversationSessionKernel {
   readonly id: string
   readonly title: string
-  readonly backend: ConversationHistoryAdapter
+  readonly history: ConversationHistorySource
 
   #appended: LogicalMessage[] = []
   #overrides = new Map<number, LogicalMessage>()
@@ -57,13 +59,16 @@ export class ConversationSessionKernel {
   #lastTurnDurationMs = 0
   #lastTtftMs = 0
 
-  constructor(descriptor: ConversationDescriptor, backend: ConversationHistoryAdapter) {
+  constructor(descriptor: ConversationDescriptor, history: ConversationHistorySource) {
     this.id = descriptor.id
     this.title = descriptor.title
-    this.backend = backend
+    this.history = history
     this.#status = descriptor.status
     this.#pendingInteraction = descriptor.pendingInteraction ?? null
-    this.#lastTurnReason = descriptor.lastTurnReason ?? defaultTurnReason(descriptor.status)
+    if ((this.#status === 'waiting') !== (this.#pendingInteraction !== null)) {
+      throw new Error('waiting session state requires exactly one pending interaction')
+    }
+    this.#lastTurnReason = descriptor.lastTurnReason ?? null
     this.#lastFailure = descriptor.lastFailure ?? null
     this.#usage = normalizeTokenUsage(descriptor.usage)
     this.#context = descriptor.context
@@ -72,10 +77,13 @@ export class ConversationSessionKernel {
     this.#turnCount = Math.max(0, Math.floor(descriptor.turnCount ?? 0))
     this.#stepCount = Math.max(this.#turnCount, Math.floor(descriptor.stepCount ?? this.#turnCount))
 
-    if (descriptor.status === 'working' && backend.count > 0) {
-      this.#currentAssistantIndex = backend.count - 1
+    if (descriptor.status === 'working') {
       this.#lastTurnReason = null
       this.#runStartedAt = now()
+      if (descriptor.activeAssistantIndex !== undefined && descriptor.activeAssistantIndex !== null) {
+        this.#assertAssistantMessage(descriptor.activeAssistantIndex)
+        this.#currentAssistantIndex = descriptor.activeAssistantIndex
+      }
     }
   }
 
@@ -90,7 +98,7 @@ export class ConversationSessionKernel {
   get pendingInteraction(): PendingInteraction | null { return this.#pendingInteraction }
   get queuedPrompts(): number { return this.#queuedPrompts.length }
   get currentAssistantIndex(): number | null { return this.#currentAssistantIndex }
-  get count(): number { return this.backend.count + this.#appended.length }
+  get count(): number { return this.history.count + this.#appended.length }
   get unread(): boolean { return this.#unread }
   get foreground(): boolean { return this.#foreground }
   get lastTurnReason(): TurnEndReasonKind | null { return this.#lastTurnReason }
@@ -117,6 +125,7 @@ export class ConversationSessionKernel {
       context: this.context,
       turnCount: this.#turnCount,
       stepCount: this.#stepCount,
+      activeAssistantIndex: this.#currentAssistantIndex,
     }
   }
 
@@ -131,12 +140,12 @@ export class ConversationSessionKernel {
     if (!Number.isInteger(index) || index < 0 || index >= this.count) throw new RangeError(`message index ${index} outside 0..${this.count - 1}`)
     const override = this.#overrides.get(index)
     if (override) return override
-    if (index < this.backend.count) {
-      const found = this.backend.loadRange(index, 1)[0]
-      if (!found) throw new RangeError(`backend message ${index} missing`)
+    if (index < this.history.count) {
+      const found = this.history.loadRange(index, 1)[0]
+      if (!found) throw new RangeError(`history message ${index} missing`)
       return found
     }
-    const message = this.#appended[index - this.backend.count]
+    const message = this.#appended[index - this.history.count]
     if (!message) throw new RangeError(`appended message ${index} missing`)
     return message
   }
@@ -160,15 +169,10 @@ export class ConversationSessionKernel {
       const index = this.count
       indexes.push(index)
 
-      // Canonical history is append-ordered. Count Turn/Step transitions, not
-      // append calls: one Agent Turn may append several assistant/tool records
-      // over time while keeping the same turnId/stepId.
       if (entry.turnId !== previousTurnId) this.#turnCount += 1
       if (entry.stepId) {
         if (entry.stepId !== previousStepId) this.#stepCount += 1
       } else {
-        // Producers without stable step coordinates retain the conservative
-        // historical behavior of one step per appended message.
         this.#stepCount += 1
       }
 
@@ -189,7 +193,6 @@ export class ConversationSessionKernel {
     return indexes
   }
 
-  /** Replace normalized content while preserving producer-owned message identity. */
   replaceCanonicalMessage(index: number, message: LogicalMessage, contentPatch?: SessionKernelContentPatch): void {
     const current = this.getMessage(index)
     if (
@@ -200,16 +203,12 @@ export class ConversationSessionKernel {
       message.role !== current.role
     ) throw new Error(`canonical identity changed for message ${index}`)
 
-    // Message revision is Kernel-owned mutation identity. Providers may supply a
-    // newer revision, but a replacement can never reuse the currently committed
-    // revision because presentation caches key their rebuildable work by it.
     const revision = Math.max((current.revision ?? 0) + 1, message.revision ?? 0)
     this.#writeMessage(index, { ...message, revision, blocks: cloneBlocks(message.blocks) })
     if (contentPatch) this.#recordFirstOutput()
     this.#emit({ kind: 'content', messageIndex: index, contentPatch })
   }
 
-  /** Begin provider/runtime execution after the adapter has appended any new canonical records. */
   startExecution(currentAssistantIndex: number | null = null): boolean {
     if (this.#pendingInteraction) return false
     if (currentAssistantIndex !== null) this.#assertAssistantMessage(currentAssistantIndex)
@@ -223,7 +222,6 @@ export class ConversationSessionKernel {
     return true
   }
 
-  /** Move an already-running execution to the next assistant record without resetting Turn timing. */
   continueExecutionAt(currentAssistantIndex: number): void {
     if (this.#status !== 'working') throw new Error('cannot continue an execution that is not working')
     this.#assertAssistantMessage(currentAssistantIndex)
@@ -232,10 +230,24 @@ export class ConversationSessionKernel {
     this.#emit({ kind: 'status', messageIndex: currentAssistantIndex })
   }
 
-  /** Finish execution without inventing any content. */
+  requestInteraction(interaction: PendingInteraction): void {
+    if (this.#pendingInteraction) throw new Error(`interaction ${this.#pendingInteraction.id} is already pending`)
+    if (this.#status !== 'working') throw new Error('cannot request an interaction when execution is not working')
+    const index = this.#currentAssistantIndex
+    this.#pendingInteraction = { ...interaction }
+    this.#status = 'waiting'
+    this.#lastTurnReason = null
+    this.#lastFailure = null
+    this.#currentAssistantIndex = null
+    if (this.#runStartedAt > 0) this.#lastTurnDurationMs = Math.max(0, now() - this.#runStartedAt)
+    this.#runStartedAt = 0
+    this.#firstOutputAt = 0
+    this.#emit({ kind: 'interaction', messageIndex: index ?? undefined })
+  }
+
   finishExecution(reason: TurnEndReasonKind, failure: LlmFailure | null = null): void {
     const index = this.#currentAssistantIndex
-    this.#status = reason === 'blocked' ? 'waiting' : reason === 'aborted' || reason === 'interrupted' ? 'interrupted' : 'idle'
+    this.#status = reason === 'aborted' || reason === 'interrupted' ? 'interrupted' : 'idle'
     this.#lastTurnReason = reason
     this.#lastFailure = failure ? { ...failure } : null
     this.#currentAssistantIndex = null
@@ -245,7 +257,6 @@ export class ConversationSessionKernel {
     this.#emit({ kind: 'status', messageIndex: index ?? undefined })
   }
 
-  /** Store provider-normalized accounting; the Engine never estimates billing/cache semantics. */
   setAccounting(usage: Partial<TokenUsage>, context: SessionContextStats = this.#context): void {
     this.#usage = normalizeTokenUsage(usage)
     this.#context = {
@@ -275,11 +286,14 @@ export class ConversationSessionKernel {
     this.#emit({ kind: 'queue' })
   }
 
-  resolveInteraction(approved: boolean): void {
-    if (!this.#pendingInteraction) return
+  resolveInteraction(resolution: InteractionResolution): void {
+    const pending = this.#pendingInteraction
+    if (!pending) return
+    if (pending.kind !== resolution.kind) throw new Error(`interaction ${pending.id} expects ${pending.kind} resolution`)
+
     this.#pendingInteraction = null
-    this.#status = approved ? 'idle' : 'interrupted'
-    this.#lastTurnReason = approved ? 'completed' : 'aborted'
+    this.#status = 'idle'
+    this.#lastTurnReason = null
     this.#lastFailure = null
     this.#emit({ kind: 'interaction' })
   }
@@ -290,8 +304,8 @@ export class ConversationSessionKernel {
   }
 
   #writeMessage(index: number, message: LogicalMessage): void {
-    if (index < this.backend.count) this.#overrides.set(index, message)
-    else this.#appended[index - this.backend.count] = message
+    if (index < this.history.count) this.#overrides.set(index, message)
+    else this.#appended[index - this.history.count] = message
   }
 
   #recordFirstOutput(): void {

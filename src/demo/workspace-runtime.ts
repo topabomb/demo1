@@ -131,8 +131,11 @@ export class DemoWorkspaceRuntime {
     const tail = descriptor.scenario
       ? createScenarioTail(descriptor.id, descriptor.logicalCount, descriptor.scenario)
       : []
-    const adapter = new SyntheticHistoryAdapter(descriptor.id, descriptor.logicalCount, descriptor.seedOffset, descriptor.liveTail === true, tail)
-    const kernel = new ConversationSessionKernel(descriptor, adapter)
+    const history = new SyntheticHistoryAdapter(descriptor.id, descriptor.logicalCount, descriptor.seedOffset, descriptor.liveTail === true, tail)
+    const kernelDescriptor: ConversationDescriptor = descriptor.status === 'working' && descriptor.liveTail && descriptor.logicalCount > 0
+      ? { ...descriptor, activeAssistantIndex: descriptor.logicalCount - 1 }
+      : descriptor
+    const kernel = new ConversationSessionKernel(kernelDescriptor, history)
     this.#kernels.set(descriptor.id, kernel)
     this.#ages.set(descriptor.id, descriptor.age)
     this.#executions.set(descriptor.id, new SyntheticStreamController(kernel, descriptor.playbackMode ?? 'standard'))

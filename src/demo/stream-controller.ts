@@ -1,4 +1,4 @@
-import type { ConversationExecutionController, LlmFailure, SubmitDisposition, TokenUsage } from '../engine/conversation/contracts'
+import type { ConversationExecutionController, InteractionResolution, LlmFailure, SubmitDisposition, TokenUsage } from '../engine/conversation/contracts'
 import type { ConversationSessionKernel } from '../engine/conversation/session-kernel'
 import { block, type LogicalMessage } from '../engine/model/conversation'
 import {
@@ -114,7 +114,7 @@ export class SyntheticStreamController implements ConversationExecutionControlle
     return 'started'
   }
 
-  resolveInteraction(approved: boolean): void { this.#kernel.resolveInteraction(approved) }
+  resolveInteraction(resolution: InteractionResolution): void { this.#kernel.resolveInteraction(resolution) }
 
   setRate(rate: number): void {
     const wasRunning = this.running
