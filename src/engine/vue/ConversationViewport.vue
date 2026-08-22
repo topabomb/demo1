@@ -358,7 +358,7 @@ defineExpose({ captureSnapshot, jumpToMessage, jumpToLatest, shiftBackward, shif
         </template>
         <template v-else>
           <div class="pending-question-response">
-            <input v-model="interactionAnswer" data-testid="question-answer" type="text" :placeholder="uiState.pendingInteraction.placeholder ?? 'Type an answer…'" @keydown.enter.prevent="resolveQuestion(interactionAnswer)" />
+            <input v-model="interactionAnswer" data-testid="question-answer" type="text" placeholder="Type an answer…" @keydown.enter.prevent="resolveQuestion(interactionAnswer)" />
             <div class="pending-actions"><button class="secondary" data-testid="deny-interaction" type="button" @click="resolveQuestion(null)">Skip</button><button data-testid="approve-interaction" type="button" :disabled="!canAnswerQuestion" @click="resolveQuestion(interactionAnswer)">Answer</button></div>
           </div>
         </template>
