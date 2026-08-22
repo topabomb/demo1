@@ -34,7 +34,7 @@ test('diagnostics shortcuts expose the live Plan, delegation and terminal eviden
   await expect(page.getByTestId('terminal-block')).toContainText('pnpm test')
 
   await page.getByTestId('demo-agent-plan').click()
-  await expect(page.getByTestId('plan-block')).toContainText('Release regression investigation')
+  await expect(page.getByTestId('plan-block')).toContainText('Rendering-engine hardening plan')
 })
 
 test('executive briefing demonstrates cross-source research, parallel specialists and office deliverables', async ({ page }) => {
