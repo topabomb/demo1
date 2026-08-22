@@ -1,16 +1,17 @@
-import type { ConversationHistoryAdapter } from '../engine/conversation/contracts'
+import type { ConversationHistorySource } from '../engine/conversation/contracts'
 import type { LogicalMessage } from '../engine/model/conversation'
 import { SyntheticConversationSource } from './synthetic'
 
 /**
- * Demo-only cold-history adapter.
+ * Demo-only synchronous history source.
  *
  * The large history is generated lazily for stress coverage, while a small canonical
  * scenario tail can replace the newest records so the public Demo lands on realistic
- * Agent work instead of lorem-like synthetic content. Real products replace this port
- * with DB/network paging.
+ * Agent work instead of lorem-like synthetic content. A real product can back the same
+ * Engine contract with a local cache/read-through store; async DB/network fetching stays
+ * outside the hot synchronous history-read path.
  */
-export class SyntheticHistoryAdapter implements ConversationHistoryAdapter {
+export class SyntheticHistoryAdapter implements ConversationHistorySource {
   readonly #source: SyntheticConversationSource
   readonly #tail: ReadonlyMap<number, LogicalMessage>
 
