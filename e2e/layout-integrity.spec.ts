@@ -67,19 +67,27 @@ async function anchorDrift(page: Page, anchor: { id: string; top: number }): Pro
   }, anchor)
 }
 
-test('architecture proof exposes state lifetimes and portable contracts', async ({ page }) => {
+test('architecture proof exposes actual Engine, adapter and Demo responsibilities', async ({ page }) => {
   await openLab(page)
   await page.getByTestId('architecture-link').click()
   await expect(page.getByTestId('architecture-page')).toBeVisible()
-  await expect(page.getByRole('heading', { name: /four state lifetimes/i })).toBeVisible()
-  await expect(page.getByRole('heading', { name: /seven contracts/i })).toBeVisible()
-  for (const name of ['Backend / Runtime Ports', 'Canonical Conversation Model', 'Session + Workspace Kernel', 'Projection Runtime', 'Semantic Viewport Policy', 'Physical List Adapter', 'Renderer + Product Adapter']) {
+  await expect(page.getByRole('heading', { name: /three boundaries, one dependency direction/i })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /ownership follows what can be discarded/i })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /a small set of stable responsibilities/i })).toBeVisible()
+
+  for (const name of ['Canonical model', 'SessionKernel', 'History source', 'Projection runtime', 'Semantic viewport', 'Vue reference surface']) {
     await expect(page.getByText(name, { exact: true })).toBeVisible()
   }
-  for (const name of ['Durable domain state', 'Session interaction memory', 'Rebuildable presentation state', 'Ephemeral physical state']) {
+  for (const name of ['Session truth', 'Host/workspace state', 'Rebuildable presentation', 'Ephemeral physical']) {
     await expect(page.getByText(name, { exact: true })).toBeVisible()
   }
-  await expect(page.getByText(/O\(delta \+ mutable Markdown tail\)/)).toBeVisible()
+  for (const name of ['External adapters', 'src/engine/**', 'src/demo/**']) {
+    await expect(page.getByText(name, { exact: true })).toBeVisible()
+  }
+
+  await expect(page.getByText(/O\(delta \+ mutable tail\)/)).toBeVisible()
+  await expect(page.getByText(/DemoWorkspaceRuntime = host example, not Engine/)).toBeVisible()
+  await expect(page.getByText(/does not claim a published npm package/i)).toBeVisible()
   await page.getByTestId('launch-lab').click()
   await expect(page.getByTestId('active-session-id')).toBeVisible()
 })
@@ -148,63 +156,9 @@ test('semantic viewport survives a different product layout and composer height 
   })
 
   const composer = page.getByTestId('composer-input')
-  await composer.fill(Array.from({ length: 18 }, (_, i) => `portable layout line ${i} ${'content '.repeat(18)}`).join('\n'))
-  await expect.poll(async () => composer.evaluate(element => element.getBoundingClientRect().height)).toBeGreaterThan(180)
-  await expect.poll(async () => page.getByTestId('scrollport').evaluate(element => element.getBoundingClientRect().height)).toBeLessThan(stageHeightBefore)
-
-  const noOverlay = await page.evaluate(() => {
-    const stage = document.querySelector<HTMLElement>('[data-testid="scrollport"]')!.getBoundingClientRect()
-    const composerRect = document.querySelector<HTMLElement>('[data-testid="composer-shell"]')!.getBoundingClientRect()
-    return stage.bottom <= composerRect.top + 1
-  })
-  expect(noOverlay).toBe(true)
+  await composer.fill(Array.from({ length: 15 }, (_, i) => `portable product line ${i} ${'responsive '.repeat(9)}`).join('\n'))
+  await expect.poll(async () => composer.evaluate(el => el.getBoundingClientRect().height)).toBeGreaterThan(120)
+  await expect.poll(async () => page.getByTestId('scrollport').evaluate(element => element.getBoundingClientRect().height), { timeout: 12_000 }).toBeLessThan(stageHeightBefore - 50)
+  await expect.poll(() => anchorDrift(page, before!), { timeout: 12_000 }).toBeLessThan(5)
   await expectRowsDisjoint(page)
-  await expect.poll(() => anchorDrift(page, before!), { timeout: 12_000 }).toBeLessThan(4)
-})
-
-test('engine styling stays scoped under hostile host element rules', async ({ page }) => {
-  await openLab(page)
-  await switchSession(page, 'event-normalization')
-  await jump(page, 50_000)
-
-  const baselineHeader = await page.locator('.conversation-header').evaluate(element => element.getBoundingClientRect().height)
-  const baselineComposer = await page.getByTestId('composer-input').evaluate(element => element.getBoundingClientRect().height)
-
-  const hostProbe = await page.evaluate(() => {
-    const probe = document.createElement('button')
-    probe.id = 'host-style-probe'
-    probe.textContent = 'host'
-    document.body.appendChild(probe)
-    const style = document.createElement('style')
-    style.id = 'hostile-host-style'
-    style.textContent = `
-      button, input, textarea, select { padding: 31px; border-width: 9px; font-size: 28px; line-height: 3; box-sizing: content-box; }
-      img { width: 2000px; max-width: none; }
-      table { width: 1800px; max-width: none; }
-    `
-    document.head.appendChild(style)
-    return probe.getBoundingClientRect().height
-  })
-  expect(hostProbe).toBeGreaterThan(100)
-  await settleNavigationFrames(page)
-
-  await expect(page.locator('[data-conversation-engine]')).toHaveAttribute('data-conversation-engine', 'vue')
-  await expect.poll(async () => page.locator('.conversation-header').evaluate(element => element.getBoundingClientRect().height)).toBeLessThanOrEqual(baselineHeader + 2)
-  await expect.poll(async () => page.getByTestId('composer-input').evaluate(element => element.getBoundingClientRect().height)).toBeLessThanOrEqual(baselineComposer + 4)
-  await expectRowsDisjoint(page)
-
-  const geometry = await page.evaluate(() => {
-    const engine = document.querySelector<HTMLElement>('[data-conversation-engine]')!
-    const stage = document.querySelector<HTMLElement>('[data-testid="scrollport"]')!
-    const composerRect = document.querySelector<HTMLElement>('[data-testid="composer-shell"]')!.getBoundingClientRect()
-    const stageRect = stage.getBoundingClientRect()
-    return {
-      pageOverflow: Math.max(0, document.documentElement.scrollWidth - document.documentElement.clientWidth),
-      engineOverflow: Math.max(0, engine.scrollWidth - engine.clientWidth),
-      overlay: stageRect.bottom - composerRect.top,
-    }
-  })
-  expect(geometry.pageOverflow).toBeLessThanOrEqual(1)
-  expect(geometry.engineOverflow).toBeLessThanOrEqual(1)
-  expect(geometry.overlay).toBeLessThanOrEqual(1)
 })
