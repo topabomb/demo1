@@ -12,7 +12,7 @@ import {
 import { createAgentScenarioPack, createMarkdownGalleryTurn, createMixedDemoTurns } from '../scenarios'
 import type { DemoSessionDescriptor } from '../workspace-fixtures'
 import { useWorkspaceRuntime } from '../vue/use-workspace-runtime'
-import ConversationViewport from '../../engine/vue/ConversationViewport.vue'
+import { ConversationViewport } from '../../engine/vue'
 import DemoDiagnosticsPanel from './DemoDiagnosticsPanel.vue'
 
 interface ViewportHandle {
