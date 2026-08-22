@@ -1,0 +1,47 @@
+/* Optional visuals for workbench semantic renderers. Core model/projection remains layout and style agnostic. */
+[data-conversation-engine].conversation-shell {
+  & .plan-card,
+  & .terminal-card,
+  & .agent-run-card { min-width:0; max-width:100%; box-sizing:border-box; overflow:hidden; background:#0d141b; border-color:#263441; box-shadow:none; }
+
+  & .plan-head,
+  & .terminal-head,
+  & .agent-run-head { min-height:42px; display:flex; align-items:center; gap:9px; padding:9px 12px; border:0; border-bottom:1px solid #202c37; background:transparent; color:#b8c5d1; text-align:left; }
+  & button.terminal-head { width:100%; cursor:pointer; }
+  & .plan-head strong,
+  & .terminal-title strong,
+  & .agent-run-title strong { color:#c8d4df; font-size:10px; }
+  & .plan-head small { margin-left:auto; color:#718292; font-size:8px; }
+  & .plan-glyph,
+  & .terminal-glyph,
+  & .agent-run-glyph { display:grid; place-items:center; width:24px; height:24px; flex:0 0 24px; border-radius:7px; background:#172635; color:#8bc6ff; font:10px ui-monospace,SFMono-Regular,Menlo,monospace; }
+  & .terminal-title,
+  & .agent-run-title { min-width:0; display:grid; gap:2px; flex:1; }
+  & .terminal-title strong,
+  & .terminal-title small,
+  & .agent-run-title strong,
+  & .agent-run-title small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  & .terminal-title small,
+  & .agent-run-title small { color:#68798a; font-size:8px; }
+
+  & .plan-items { display:grid; gap:0; margin:0; padding:5px 12px 9px; list-style:none; }
+  & .plan-items li { display:grid; grid-template-columns:20px minmax(0,1fr); gap:6px; align-items:start; padding:6px 3px; color:#9fadb9; font-size:10px; line-height:1.45; }
+  & .plan-status { color:#718394; font:11px ui-monospace,SFMono-Regular,Menlo,monospace; }
+  & .plan-completed { color:#7f9184 !important; }
+  & .plan-completed .plan-status { color:#7ee787; }
+  & .plan-in-progress .plan-status { color:#79c0ff; }
+  & .plan-blocked .plan-status { color:#ff9b94; }
+  & .plan-cancelled { color:#68798a !important; text-decoration:line-through; }
+
+  & .terminal-output { max-height:520px; max-width:100%; overflow:auto; overscroll-behavior:contain; margin:0; padding:12px 14px; background:#070c11; color:#aebbc7; font:10px/1.58 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; white-space:pre; }
+  & .terminal-output code { white-space:pre; overflow-wrap:normal; word-break:normal; }
+  & .terminal-exit { color:#718394; font:8px ui-monospace,SFMono-Regular,Menlo,monospace; white-space:nowrap; }
+
+  & .agent-run-summary { margin:0; padding:9px 12px 11px 45px; color:#8f9ead; font-size:10px; line-height:1.5; }
+  & .agent-run-running .agent-run-glyph { color:#79c0ff; }
+  & .agent-run-completed .agent-run-glyph { color:#7ee787; }
+  & .agent-run-failed .agent-run-glyph { color:#ff9b94; }
+
+  & .tool-resources { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px; }
+  & .tool-resource { min-width:0; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:4px 7px; border:1px solid #293a49; border-radius:999px; background:#111b24; color:#8da6bb; font:8px ui-monospace,SFMono-Regular,Menlo,monospace; }
+}
