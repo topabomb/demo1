@@ -112,7 +112,7 @@ The Engine preserves these coordinates. It does not decide when another model St
 - queue payloads for the current runtime session;
 - approval/question blockers;
 - foreground/unread attention;
-- last Turn outcome/failure;
+- last explicitly settled Turn outcome/failure;
 - normalized token/context accounting;
 - Turn/Step counters.
 
@@ -125,9 +125,10 @@ It does **not** imply durable persistence. A host that requires restart-safe que
 In particular:
 
 - `idle` means no execution is currently running;
+- `waiting` means exactly one user interaction is pending;
 - `idle` does **not** imply `completed`;
 - a fresh session therefore has `status: 'idle'` and `lastTurnReason: null`;
-- `completed`, `error`, `max-tokens`, `aborted` and other outcomes are written only when an execution adapter explicitly calls `finishExecution(...)`.
+- `completed`, `error`, `max-tokens`, `aborted` and `interrupted` are written only when an execution adapter explicitly calls `finishExecution(...)`.
 
 This prevents product badges and recovery logic from inferring history from a live-state enum.
 
@@ -143,7 +144,7 @@ If a session is `working` and this coordinate is absent, the Kernel keeps `curre
 
 `continueExecutionAt(index)` has one narrow responsibility: move an already-running execution to another canonical assistant record without resetting Turn timing. It contains no Agent-loop policy.
 
-## 4. Blocker contract
+## 4. Blocker contract and lifecycle
 
 Approval and user questions are different semantic interactions:
 
@@ -155,7 +156,20 @@ type InteractionResolution =
 
 A question is therefore not reduced to a fake “approved” boolean. `answer: null` is an explicit no-answer/skip payload; it does not itself mean that the Turn was aborted.
 
-`SessionKernel.resolveInteraction()` validates that the resolution kind matches the pending blocker and clears blocker state. It does **not** translate approval, denial, answer or skip into a Turn outcome. The execution adapter receives the semantic response and decides whether to resume work, change strategy or explicitly finish the Turn. Neither `approved: false` nor `answer: null` changes `lastTurnReason` by itself.
+There is one interaction lifecycle:
+
+```text
+working
+  │ requestInteraction(pending)
+  ▼
+waiting + pendingInteraction
+  │ resolveInteraction(typed response)
+  ▼
+idle + no pendingInteraction + no inferred Turn outcome
+  │ execution adapter chooses resume / alternate strategy / explicit finishExecution(...)
+```
+
+The invariant is strict: restored `status: 'waiting'` and `pendingInteraction` must appear together, and `requestInteraction(...)` is valid only from `working` state. `SessionKernel.resolveInteraction()` validates that the resolution kind matches the pending blocker and clears blocker state. It does **not** translate approval, denial, answer or skip into a Turn outcome. Neither `approved: false` nor `answer: null` changes `lastTurnReason` by itself.
 
 ## 5. History source and async IO boundary
 
@@ -297,7 +311,7 @@ Diagnostics are explicitly **Demo-owned observability**. They mix two categories
 - **Demo controls/telemetry** — playback rate, pause/resume, ingress/publish counts, fixture injection;
 - **Engine evidence** — logical/hot/DOM scale, projection work, reader state, Turn/Step/tool identity, queue/blockers and normalized accounting.
 
-Diagnostics may inspect Engine state, but its synthetic controls do not become Engine APIs.
+Diagnostics may inspect Engine state, but its synthetic controls do not become Engine APIs. A missing `lastTurnReason` is displayed as `none`, not overloaded as a live execution label.
 
 ## 11. Distribution status
 
@@ -314,9 +328,10 @@ A release must prove architecture and behavior together:
 - Engine never imports Demo;
 - neutral public API does not leak Demo/Vue/tuning details;
 - working-session restore never guesses active history position;
-- idle status never invents a completed Turn outcome;
+- live status never invents a settled Turn outcome;
+- `waiting` and `pendingInteraction` remain one consistent state;
 - approval and question resolutions remain typed;
-- resolving a blocker never invents completion/abort policy;
+- interaction request/resolve transitions never invent completion/abort policy;
 - async IO responsibility stays outside `ConversationHistorySource`;
 - multi-step Demo data enters through canonical Message/Block paths;
 - 1M history keeps hot state and mounted DOM bounded;
