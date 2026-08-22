@@ -71,12 +71,16 @@ test('executive briefing demonstrates cross-source research, parallel specialist
   await expect(deliverables).toContainText('KPI Snapshot.xlsx')
 })
 
-test('meeting follow-up demonstrates a session-owned approval before external office actions', async ({ page }) => {
+test('meeting follow-up correlates one exact approval to an unexecuted proposed action', async ({ page }) => {
   await page.goto('./')
   await page.getByTestId('demo-office-followup').click()
   await expect(page.getByTestId('active-session-id')).toHaveText('office-followup')
-  await expect(page.getByTestId('pending-interaction')).toHaveAttribute('data-kind', 'approval')
-  await expect(page.getByTestId('pending-interaction')).toContainText('Approve follow-up and Friday review')
+
+  const pending = page.getByTestId('pending-interaction')
+  await expect(pending).toHaveAttribute('data-kind', 'approval')
+  await expect(pending).toHaveAttribute('data-interaction-id', 'approval-meeting-followup')
+  await expect(pending).toHaveAttribute('data-call-id', 'meeting-followup-approval')
+  await expect(pending).toContainText('Approve follow-up and Friday review')
   await expect(page.getByTestId('approve-interaction')).toBeVisible()
   await expect(page.getByTestId('deny-interaction')).toBeVisible()
 
@@ -88,7 +92,9 @@ test('meeting follow-up demonstrates a session-owned approval before external of
   const action = page.locator('[data-message-index="35998"]').getByTestId('tool-block')
   await expect(action).toHaveAttribute('data-category', 'productivity')
   await expect(action).toHaveAttribute('data-call-id', 'meeting-followup-approval')
+  await expect(action).not.toHaveAttribute('data-status', /.+/)
   await expect(action).toContainText('send_meeting_followup')
+  await expect(action.locator('.status')).toHaveCount(0)
 
   await page.getByTestId('deny-interaction').click()
   await expect(page.getByTestId('pending-interaction')).toHaveCount(0)
