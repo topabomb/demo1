@@ -18,12 +18,14 @@ export {
 } from './model/conversation'
 
 export {
-  type ConversationBackend,
   type ConversationDescriptor,
   type ConversationExecutionController,
-  type ConversationHistoryAdapter,
+  type ConversationHistorySource,
+  type InteractionResolution,
   type LlmFailure,
+  type PendingApproval,
   type PendingInteraction,
+  type PendingQuestion,
   type SessionContextStats,
   type SessionStatus,
   type SubmitDisposition,
@@ -63,10 +65,9 @@ export {
 } from './viewport/contracts'
 export { type SemanticViewportSnapshot, type SessionViewMemory } from './viewport/state'
 
-export {
-  ConversationSessionRuntime,
-  SHIFT_MESSAGES,
-  WINDOW_MESSAGES,
-  type SessionUiSnapshot,
-  type ShiftPlan,
-} from './runtime/session-runtime'
+/**
+ * SessionUiSnapshot, shift plans, window sizes and cache telemetry are adapter/runtime
+ * implementation details. Consumers compose the runtime but should not treat those
+ * tuning details as stable framework contracts.
+ */
+export { ConversationSessionRuntime } from './runtime/session-runtime'
