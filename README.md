@@ -1,6 +1,6 @@
 # Agent Workbench Rendering Engine Lab
 
-A provider-neutral **front-end rendering Engine + executable Demo host** for long-running Agent workbenches: very long histories, multi-step tool loops, plans, resource references, delegated runs, streaming terminal output, rich Markdown/media and dynamic virtualization.
+A provider-neutral **front-end rendering Engine + executable Demo host** for long-running Agent workbenches: very long histories, multi-step tool loops, plans, resource references, delegated child runs, streaming terminal output, rich Markdown/media and dynamic virtualization.
 
 - Live demo: https://topabomb.github.io/demo1/
 - Architecture view: https://topabomb.github.io/demo1/#architecture
@@ -31,7 +31,7 @@ src/demo/**
   stress history · diagnostics · architecture page
 ```
 
-External adapters own provider decoding, Agent/model/tool orchestration, retries, permission policy, durable persistence, async DB/network IO and recovery strategy. The Demo owns multi-session product composition and scripted evidence. `engine/**` never imports `demo/**`; architecture tests enforce the dependency direction.
+External adapters own provider decoding, Agent/model/tool orchestration, child-agent scheduling, retries, permission policy, durable persistence, async DB/network IO and recovery strategy. The Demo owns multi-session product composition and scripted evidence. `engine/**` never imports `demo/**`; architecture tests enforce the dependency direction.
 
 The **framework-neutral Engine core is layout- and style-agnostic**. Vue components and CSS are reference physical adapters: they may measure and display semantic units, but their geometry or visual choices never enter canonical contracts or projection identity.
 
@@ -58,7 +58,7 @@ One Turn can contain many assistant/tool records and model Steps. DOM adjacency 
 - **Block** — stable semantic content inside a Message.
 - **callId** — producer-owned tool call/result correlation.
 - **ResourceRef** — host-neutral file/URL/artifact identity, optionally with a source range.
-- **AgentRunRef** — reference to delegated work already reported by an external Agent runtime.
+- **AgentRunRef** — parent-facing identity/status reference for one delegated child run.
 
 A `ResourceRef` can identify `src/engine/runtime/session-runtime.ts:120` without saying whether a host should open VS Code, a browser, a drawer or nothing. Navigation is a host concern.
 
@@ -88,9 +88,34 @@ Long shell output is not forced through `tool-result.output: unknown`. A `termin
 
 `ProjectionEngine.appendTerminalDelta(...)` replaces one stable terminal `RenderUnit` while unrelated tool/result siblings retain identity. This preserves the same incremental principle already used by live reasoning and Markdown.
 
-### Delegated Agent runs are references, not orchestration
+### Child delegation: references and statuses, not recursive traces
 
-`agent-run` can display a producer-reported delegated run with `runId`, title, agent, status, optional child-session reference and summary. The Engine never spawns, schedules, cancels or selects that Agent. Those operations remain external runtime responsibilities.
+A single `delegation` block represents one parent-visible delegation batch and contains one or more `AgentRunRef`s:
+
+```ts
+type AgentRunMode = 'foreground' | 'background'
+type AgentRunStatus =
+  | 'queued' | 'running' | 'waiting'
+  | 'completed' | 'failed' | 'interrupted'
+
+interface AgentRunRef {
+  runId: string
+  title: string
+  agent?: string
+  mode: AgentRunMode
+  status: AgentRunStatus
+  childSessionId?: string
+  summary?: string
+}
+```
+
+`foreground` means the producer reports that parent flow waited for that child before advancing. `background` means parent flow may continue while the child remains active. These fields are **observations for rendering**, not scheduler commands.
+
+One `delegation` block covers both a single synchronous child and multiple concurrent/background children without introducing separate `agent-run` / `agent-runs` concepts. Each child keeps a stable `runId`; `childSessionId` is only a host-navigable address. The parent does **not** recursively embed the child conversation. Detailed child messages, tools and nested descendants remain in the child session/thread and can be opened by a Host that supports it.
+
+This avoids two common UI errors: a child becoming idle must not imply the parent is finished, and several concurrent children must remain individually addressable rather than collapsing into one anonymous “subagent running” state.
+
+The Engine never starts, schedules, resumes, stops or routes a child Agent. It also does not define worktree isolation, child permissions or parent/child navigation behavior.
 
 ## Session and history contracts
 
@@ -113,17 +138,17 @@ Normal navigation/reflow rules are semantic:
 - follow-tail intent separate from visual-bottom measurement;
 - requested jumps commit only after the physical target resolves.
 
-Responsive reflow, disclosure expansion, terminal growth and media measurement may change physical height without redefining Turn/Step/reader identity.
+Responsive reflow, disclosure expansion, terminal growth, delegation status changes and media measurement may change physical height without redefining Turn/Step/reader identity.
 
 Markdown chunking and HTML rendering share the same Marked GFM parser contract. Lists, tables, blockquotes and fences remain atomic; append-only Markdown reparses only its mutable tail.
 
 ## Public API and optional Vue adapter
 
-`src/engine/index.ts` is the framework-neutral surface. It exports semantic contracts such as `ResourceRef`, `PlanItem`, `ToolPresentationIntent`, `AgentRunRef`, `ContentBlock`, `SessionKernel`, projection and viewport contracts while excluding Demo controls and runtime tuning telemetry.
+`src/engine/index.ts` is the framework-neutral surface. It exports semantic contracts such as `ResourceRef`, `PlanItem`, `ToolPresentationIntent`, `AgentRunRef`, `AgentRunMode`, `ContentBlock`, `SessionKernel`, projection and viewport contracts while excluding Demo controls and runtime tuning telemetry.
 
 `src/engine/vue/index.ts` is an optional reference UI adapter exposing `ConversationViewport`, `RenderUnitView`, per-viewport `RendererRegistry` and `createDefaultRendererRegistry`.
 
-Reference renderers now include Plan, Terminal and delegated Agent run visuals in addition to Markdown, reasoning, code, diff, tool, media and attachments. Products may replace these renderers without changing canonical history.
+Reference renderers include Plan, Terminal and Delegation visuals in addition to Markdown, reasoning, code, diff, tool, media and attachments. Products may replace these renderers without changing canonical history.
 
 This repository is a Vite Demo/Pages application with package publication disabled (`"private": true`). The Engine is source-level reusable/extraction-ready; this repo does not claim a published npm package.
 
@@ -137,14 +162,16 @@ visible plan
 → filesystem read with ResourceRef evidence
 → next model Step
 → code search with multiple ResourceRefs
-→ next model Step + delegated reviewer AgentRunRef
-→ shell verification call
+→ one foreground child review completes
+→ two background child reviews remain running
+→ parent continues into shell verification
+→ background children settle independently
 → live terminal stream: unit → build → Chromium
 → final synthesis + resource-aware diff + code + artifacts
 → plan completed
 ```
 
-Every item uses the same canonical Message/Block/projection pipeline. There are no fake tabs, inactive preview buttons or placeholder “future features”. Tool timing and fake provider output remain Demo-only.
+Every item uses the same canonical Message/Block/projection pipeline. There are no fake tabs, inactive preview buttons or placeholder “future features”. Child/tool timing and fake provider output remain Demo-only.
 
 The separate **Million-message streaming stress** session keeps one responsibility: prove 1,000,000+ addressable records, bounded hot projection/cache/DOM, far navigation and incremental rich Markdown without contaminating the measurement with scripted workbench transitions.
 
@@ -160,10 +187,11 @@ The rendering Engine does **not** own:
 
 - Project/repository/worktree lifecycle;
 - model/Agent selection or routing;
-- subagent scheduling;
+- child-agent scheduling, concurrency limits or provider selection;
+- child permissions, resume/interrupt semantics or team messaging;
 - permission rule evaluation / allowlists;
 - MCP/skills registries;
-- editor/resource opening actions;
+- editor/resource/child-session opening actions;
 - Changes/Artifacts/Preview panel layout;
 - tabs, sidebars, drawers or workspace navigation;
 - preview-server/background-job lifecycle;
@@ -177,7 +205,7 @@ CSS belongs to the optional Vue/reference layer, never to framework-neutral sema
 
 - `src/engine/vue/engine.css` — reference viewport/composer/blocker geometry;
 - `src/engine/vue/renderers.css` — existing renderer visuals/containment;
-- `src/engine/vue/workbench-renderers.css` — Plan/Terminal/AgentRun reference visuals;
+- `src/engine/vue/workbench-renderers.css` — Plan/Terminal/Delegation reference visuals;
 - `src/demo/styles/*` — host workspace, diagnostics and architecture page.
 
 All Engine Vue styles are rooted at `[data-conversation-engine].conversation-shell`; only Demo styles may reset `html`, `body` or `#app`.
