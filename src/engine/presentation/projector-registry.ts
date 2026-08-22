@@ -65,13 +65,19 @@ export function createDefaultContentProjectors(): ContentProjectorRegistry {
         status: data.status ?? (message.live ? 'streaming' : 'complete'),
       })]
     })
+    .register('plan', ({ message, block: contentBlock }) => {
+      const data = contentBlock.data as { title?: string; items?: readonly Record<string, unknown>[] }
+      const items = data.items ?? []
+      return [makeRenderUnit(message, contentBlock, 'plan', 'plan', 74 + Math.min(420, items.length * 38), { title: data.title, items })]
+    })
     .register('code', ({ message, block: contentBlock }) => {
-      const data = contentBlock.data as { code: string; language?: string; filename?: string; defaultOpen?: boolean }
+      const data = contentBlock.data as { code: string; language?: string; filename?: string; resource?: Record<string, unknown>; defaultOpen?: boolean }
       const lines = data.code.split('\n')
       return chunkArray(lines, 80).map((part, index) => makeRenderUnit(message, contentBlock, `code-${index}`, 'code', 110 + Math.min(30, part.length) * 20, {
         language: data.language ?? 'text',
         code: part.join('\n'),
         filename: data.filename,
+        resource: data.resource,
         defaultOpen: data.defaultOpen ?? part.length <= 34,
       }))
     })
@@ -105,10 +111,21 @@ export function createDefaultContentProjectors(): ContentProjectorRegistry {
       const data = contentBlock.data as Record<string, unknown>
       return [makeRenderUnit(message, contentBlock, 'tool-result', 'tool', 76, { ...data, phase: 'result', status: data.status ?? 'success' })]
     })
+    .register('terminal', ({ message, block: contentBlock }) => {
+      const data = contentBlock.data as { output: string; command?: string; callId?: string; cwd?: Record<string, unknown>; status?: string; exitCode?: number; durationMs?: number; defaultOpen?: boolean }
+      const lines = Math.max(1, data.output.split('\n').length)
+      const estimate = data.defaultOpen === false ? 76 : 112 + Math.min(560, lines * 18)
+      return [makeRenderUnit(message, contentBlock, 'terminal', 'terminal', estimate, { ...data })]
+    })
+    .register('agent-run', ({ message, block: contentBlock }) => {
+      const data = contentBlock.data as Record<string, unknown>
+      return [makeRenderUnit(message, contentBlock, 'agent-run', 'agent-run', 92, data)]
+    })
     .register('diff', ({ message, block: contentBlock }) => {
-      const data = contentBlock.data as { file: string; lines: readonly string[]; defaultOpen?: boolean }
+      const data = contentBlock.data as { resource: Record<string, unknown>; lines: readonly string[]; defaultOpen?: boolean }
       return chunkArray([...data.lines], 72).map((lines, index) => makeRenderUnit(message, contentBlock, `diff-${index}`, 'diff', 110 + Math.min(28, lines.length) * 20, {
-        file: data.file,
+        resource: data.resource,
+        file: typeof data.resource.label === 'string' ? data.resource.label : data.resource.uri,
         lines,
         defaultOpen: data.defaultOpen ?? lines.length <= 32,
       }))
