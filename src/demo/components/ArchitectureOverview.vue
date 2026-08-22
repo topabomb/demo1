@@ -158,7 +158,7 @@ Child traces remain in child sessions.</pre></div>
 
     <section class="architecture-section">
       <header class="section-heading"><span>08 · Distribution honesty</span><h2>Reusable source boundary today; package distribution remains separate</h2></header>
-      <div class="workspace-band"><span>Current repository</span><strong>Vite Demo application · package publishing disabled</strong><p>`private: true` disables npm publication; it does not describe repository visibility. The Engine is source-level reusable and extraction-ready. There is still no core PresentationSurface.</p></div>
+      <div class="workspace-band"><span>Current repository</span><strong>Vite Demo application · package publishing disabled</strong><p>`private: true` disables npm publication; it does not describe repository visibility. The Engine is source-level reusable and extraction-ready.</p></div>
     </section>
   </main>
 </template>
