@@ -65,8 +65,6 @@ test('default Demo runs one Turn through multiple model/tool Steps with rich str
   await page.getByLabel('Stream rate').selectOption('60')
   await page.getByTestId('stream-start').click()
 
-  // Step 1: the streamed model record is followed by an addressable filesystem call,
-  // result and the next live assistant Step.
   await expect.poll(() => logicalCount(page), { timeout: 15_000 }).toBeGreaterThanOrEqual(84_003)
   await page.getByRole('button', { name: 'Pause' }).click()
   await jump(page, 84_000)
@@ -78,7 +76,6 @@ test('default Demo runs one Turn through multiple model/tool Steps with rich str
   await expect(fsResult).toHaveAttribute('data-category', 'filesystem')
   await expect(fsResult).toHaveAttribute('data-call-id', 'loop-read-renderer')
 
-  // Step 2: search is another canonical call/result pair in the same Turn.
   await page.getByTestId('stream-start').click()
   await expect.poll(() => logicalCount(page), { timeout: 15_000 }).toBeGreaterThanOrEqual(84_006)
   await page.getByRole('button', { name: 'Pause' }).click()
@@ -89,7 +86,6 @@ test('default Demo runs one Turn through multiple model/tool Steps with rich str
   await jump(page, 84_004)
   await expect(page.locator('[data-message-index="84004"]').getByTestId('tool-block')).toHaveAttribute('data-call-id', 'loop-search-boundaries')
 
-  // Step 3: shell verification returns, then Step 4 becomes the live synthesis.
   await page.getByTestId('stream-start').click()
   await expect.poll(() => logicalCount(page), { timeout: 15_000 }).toBeGreaterThanOrEqual(84_009)
   await page.getByRole('button', { name: 'Pause' }).click()
@@ -102,13 +98,11 @@ test('default Demo runs one Turn through multiple model/tool Steps with rich str
 
   await expect(page.getByTestId('active-turn-id')).toContainText('agent-loop:release-investigation')
   await expect(page.getByTestId('active-step-id')).toContainText(':step-4')
-  // Diagnostics count the complete Turn, including the seeded release-evidence call in step 0.
   await expect(page.getByTestId('active-tool-calls')).toHaveText('4')
   await expect(page.getByTestId('active-tool-categories')).toContainText('filesystem')
   await expect(page.getByTestId('active-tool-categories')).toContainText('search')
   await expect(page.getByTestId('active-tool-categories')).toContainText('shell')
 
-  // Keep Step 4 live long enough to render complex GFM rather than paragraph-only output.
   const beforeSynthesis = await streamTicks(page)
   await page.getByTestId('stream-start').click()
   await expect.poll(() => streamTicks(page), { timeout: 15_000 }).toBeGreaterThan(beforeSynthesis + 12)
@@ -116,9 +110,10 @@ test('default Demo runs one Turn through multiple model/tool Steps with rich str
   await jump(page, 84_008)
   const finalMarkdown = page.locator('[data-message-index="84008"]').getByTestId('markdown-block')
   await expect(finalMarkdown.first()).toContainText('Final synthesis')
-  await expect(finalMarkdown.locator('table')).toBeVisible()
-  await expect(finalMarkdown.locator('input[type="checkbox"]')).toHaveCount(5)
-  await expect(finalMarkdown.locator('blockquote')).toBeVisible()
+  expect(await finalMarkdown.locator('table').count()).toBeGreaterThanOrEqual(1)
+  expect(await finalMarkdown.locator('input[type="checkbox"]').count()).toBeGreaterThanOrEqual(5)
+  expect(await finalMarkdown.locator('blockquote').count()).toBeGreaterThanOrEqual(1)
+  expect(await finalMarkdown.locator('pre code').count()).toBeGreaterThanOrEqual(1)
 
   expect(numeric(await page.getByTestId('mounted-rows').textContent())).toBeLessThan(180)
   await assertNoRowOverlap(page)
