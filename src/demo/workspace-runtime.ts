@@ -40,7 +40,10 @@ export class DemoWorkspaceRuntime {
     this.#activeSessionId = RECENT_SESSIONS[0]!.id
     this.kernelFor(this.#activeSessionId).setForeground(true)
     this.ensureRuntime(this.#activeSessionId)
-    for (const kernel of this.#kernels.values()) if (kernel.status === 'working') this.executionFor(kernel.id).start(false)
+    // Seeded working sessions begin a fresh synthetic Demo playback here. This
+    // initializes Demo-only Plan/delegation coordinates once; later Pause/Resume
+    // uses start(false) and preserves the same run state.
+    for (const kernel of this.#kernels.values()) if (kernel.status === 'working') this.executionFor(kernel.id).start(true)
   }
 
   subscribe(listener: () => void): Unsubscribe { return this.#notifier.subscribe(listener) }

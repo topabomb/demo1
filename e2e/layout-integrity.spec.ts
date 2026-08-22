@@ -67,27 +67,31 @@ async function anchorDrift(page: Page, anchor: { id: string; top: number }): Pro
   }, anchor)
 }
 
-test('architecture proof exposes actual Engine, adapter and Demo responsibilities', async ({ page }) => {
+test('architecture proof exposes layout-agnostic Engine, delegation, adapter and Demo responsibilities', async ({ page }) => {
   await openLab(page)
   await page.getByTestId('architecture-link').click()
   await expect(page.getByTestId('architecture-page')).toBeVisible()
-  await expect(page.getByRole('heading', { name: /three boundaries, one dependency direction/i })).toBeVisible()
-  await expect(page.getByRole('heading', { name: /ownership follows what can be discarded/i })).toBeVisible()
-  await expect(page.getByRole('heading', { name: /a small set of stable responsibilities/i })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /external runtime.*semantic engine.*demo host/i })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /compact set of concepts that survive across agent clients/i })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /concepts that must not collapse into each other/i })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /rich workbench output does not change the scaling law/i })).toBeVisible()
 
-  for (const name of ['Canonical model', 'SessionKernel', 'History source', 'Projection runtime', 'Semantic viewport', 'Vue reference surface']) {
+  for (const name of ['Canonical identity', 'Workbench semantics', 'Delegated child refs', 'SessionKernel', 'History source', 'Projection', 'Semantic viewport', 'Vue reference adapter']) {
     await expect(page.getByText(name, { exact: true })).toBeVisible()
   }
-  for (const name of ['Session truth', 'Host/workspace state', 'Rebuildable presentation', 'Ephemeral physical']) {
+  for (const name of ['Plan ≠ Step', 'Tool category ≠ presentation intent', 'ResourceRef ≠ host action', 'Delegation ≠ subagent runtime', 'Child status ≠ parent status', 'Child reference ≠ child trace', 'Semantic content ≠ layout surface']) {
     await expect(page.getByText(name, { exact: true })).toBeVisible()
   }
-  for (const name of ['External adapters', 'src/engine/**', 'src/demo/**']) {
+  for (const name of ['External adapters', 'Framework-neutral Engine', 'Demo host']) {
     await expect(page.getByText(name, { exact: true })).toBeVisible()
   }
 
   await expect(page.getByText(/O\(delta \+ mutable tail\)/)).toBeVisible()
-  await expect(page.getByText(/DemoWorkspaceRuntime = host example, not Engine/)).toBeVisible()
-  await expect(page.getByText(/does not claim a published npm package/i)).toBeVisible()
+  await expect(page.getByText(/^Streaming terminal/)).toBeVisible()
+  await expect(page.getByText(/^Delegation status update/)).toBeVisible()
+  await expect(page.getByText(/Child traces remain in child sessions/)).toBeVisible()
+  await expect(page.getByText(/no core PresentationSurface/)).toBeVisible()
+  await expect(page.getByText(/package publishing disabled/i)).toBeVisible()
   await page.getByTestId('launch-lab').click()
   await expect(page.getByTestId('active-session-id')).toBeVisible()
 })

@@ -1,49 +1,62 @@
 <script setup lang="ts">
 const ownership = [
-  ['External adapters', 'Provider · persistence · network', 'Own async IO, provider protocol, durable persistence, Agent orchestration and recovery. They normalize into Engine contracts.'],
-  ['src/engine/**', 'Reusable Engine', 'Own canonical conversation/session semantics, synchronous addressable history reads, bounded projection, semantic viewport and the Vue reference surface.'],
-  ['src/demo/**', 'Executable host', 'Own multi-session workspace composition, fake ages, seeded scenarios, synthetic playback, stress history, diagnostics and the architecture page.'],
+  ['External adapters', 'Provider · Agent runtime · persistence', 'Own protocol decoding, model/tool/delegated-child orchestration, child concurrency/provider choice, permission policy, retries, durable persistence and async IO. Normalize renderable evidence into Engine contracts.'],
+  ['Framework-neutral Engine', 'src/engine core', 'Own canonical renderable semantics, runtime session truth, synchronous hot reads, bounded projection and semantic viewport policy. No layout, styling or product orchestration.'],
+  ['Demo host', 'src/demo/**', 'Own multi-session composition, realistic scripted Agent tasks, child lifecycle timing, synthetic playback/history, diagnostics and this architecture page.'],
 ]
 
 const contracts = [
-  ['01', 'Canonical model', 'LogicalMessage + ContentBlock[]', 'Provider-neutral Message / Turn / Step / Block identity. Tool correlation uses callId; artifacts use explicit provenance.'],
-  ['02', 'SessionKernel', 'runtime session truth', 'Messages, live execution state, blockers, queue, explicit Turn outcomes and normalized accounting. Idle never implies Completed, and the Kernel never guesses provider policy.'],
-  ['03', 'History source', 'sync hot read boundary', 'ConversationHistorySource is globally addressable and synchronous. Async database/network fetch and caching remain outside the hot rendering path.'],
-  ['04', 'Projection runtime', 'rebuildable presentation', 'A bounded hot message window becomes stable RenderUnits. Incremental Markdown/reasoning work touches changed hot content only.'],
-  ['05', 'Semantic viewport', 'interaction state', 'Reader, exact Latest, follow intent and anchor are semantic coordinates; DOM measurement cannot redefine them.'],
-  ['06', 'Vue reference surface', 'physical adapter', 'ConversationViewport binds the generic execution port, Virtua and renderer registry. Products may replace this layer without changing session semantics.'],
+  ['01', 'Canonical identity', 'Message · Turn · Step · Block · callId', 'Stable producer coordinates survive remounts and virtualization. DOM adjacency is never business identity.'],
+  ['02', 'Workbench semantics', 'ResourceRef · Plan · Tool intent · Terminal · Delegation', 'Describe resources, progress, streams and delegated child evidence without defining editor actions, panels, scheduling or provider policy.'],
+  ['03', 'Delegated child refs', 'AgentRunRef · foreground/background · child status', 'One delegation block covers one or many child runs. Each child stays addressable; detailed child trace remains in its own session/thread.'],
+  ['04', 'SessionKernel', 'runtime session truth', 'Normalized messages, parent execution state, blockers, queue, explicit outcomes and accounting. Child status does not redefine parent status.'],
+  ['05', 'History source', 'sync hot-read boundary', 'Async database/network fetch and cache fill stop before ConversationHistorySource.'],
+  ['06', 'Projection', 'bounded rebuildable presentation', 'Hot canonical content becomes stable RenderUnits. Markdown, reasoning and terminal append paths update incrementally.'],
+  ['07', 'Semantic viewport', 'reader · Latest · anchor · follow', 'Conversation position remains semantic while physical height changes under rich workbench content.'],
+  ['08', 'Vue reference adapter', 'optional physical integration', 'Virtua, DOM measurement, components and CSS demonstrate one implementation without entering core semantics.'],
 ]
 
-const stateClasses = [
-  ['Session truth', 'history mutations · execution/blockers · queue · explicit outcomes · usage/context', 'Engine runtime state. Persistence is an external adapter concern; queued prompt payloads are not implicitly durable.'],
-  ['Host/workspace state', 'session list · relative ages · active session · hot-runtime LRU · product routing', 'Owned by the application host. The Demo supplies one example; Engine has no WorkspaceKernel.'],
-  ['Rebuildable presentation', 'hot window · projection cache · keyed RenderUnits · height estimates', 'Bounded and disposable. Reconstruct from session/history state.'],
-  ['Ephemeral physical', 'Virtua measurements · ResizeObserver · mounted DOM · local renderer caches', 'Mounted lifetime only. Safe to discard and recreate.'],
-]
-
-const agentLoop = [
-  ['Turn', 'One user-level interaction lifecycle. Several assistant/tool history records may share the same turnId.'],
-  ['Step', 'Producer-owned model/tool-loop coordinate. Engine preserves stepId but does not decide when another Step occurs.'],
-  ['Tool call/result', 'Separate canonical records linked by callId. DOM adjacency is never business identity.'],
-  ['Blocker lifecycle', 'requestInteraction is the only working → waiting transition; waiting always has one pending interaction. resolveInteraction clears it to outcome-neutral idle; the execution adapter owns continuation and the final Turn outcome.'],
-  ['Restore', 'A working session may provide activeAssistantIndex explicitly. Engine never assumes the last history record is the active execution target.'],
+const distinctions = [
+  ['Plan ≠ Step', 'Plan reports intended/progress work; Step reports execution that actually happened.'],
+  ['Tool category ≠ presentation intent', 'Capability such as filesystem/search/shell is independent from generic/resources/changes/terminal interpretation.'],
+  ['ResourceRef ≠ host action', 'File/URL/artifact identity and range do not say whether the host opens an editor, browser, drawer or nothing.'],
+  ['Delegation ≠ subagent runtime', 'Engine renders producer-reported run identity, mode and status; it never schedules, resumes, stops or selects a child Agent.'],
+  ['Child status ≠ parent status', 'A background child may still be running while its parent advances or settles; child idle/completed never implies parent completion.'],
+  ['Child reference ≠ child trace', 'Parent history keeps runId/childSessionId/summary only. Child messages/tools/nested delegation remain in the child session.'],
+  ['Semantic content ≠ layout surface', 'There is intentionally no core PresentationSurface, panel, sidebar, tab or preview-placement contract.'],
 ]
 
 const hotPaths = [
-  ['Streaming reasoning', 'O(delta)', 'Patch one stable thinking RenderUnit.'],
-  ['Streaming Markdown', 'O(delta + mutable tail)', 'Re-tokenize only the mutable parser-aligned tail; settled prefix units retain identity.'],
+  ['Streaming reasoning', 'O(delta)', 'Replace one stable thinking RenderUnit.'],
+  ['Streaming Markdown', 'O(delta + mutable tail)', 'Reparse only the parser-aligned mutable tail; settled prefix units retain identity.'],
+  ['Streaming terminal', 'O(delta)', 'Append output into one stable terminal RenderUnit while tool-result siblings retain identity.'],
+  ['Delegation status update', 'O(changed block)', 'Reproject one parent-visible delegation block; never project child history recursively.'],
   ['Neighbor history shift', 'O(incoming slice)', 'Project only the incoming 512-message slice.'],
-  ['Far jump', 'O(hot window)', 'Rebase around the target without scanning total history.'],
-  ['Visible render', 'O(visible + overscan)', 'Virtua mounts bounded physical rows.'],
+  ['Far jump', 'O(hot window)', 'Rebase one bounded hot window without scanning total history.'],
+  ['Visible render', 'O(visible + overscan)', 'The physical adapter mounts only visible/overscan rows.'],
   ['Latest', 'O(1)', 'logicalCount - 1 - committed reader.'],
 ]
 
 const demoEvidence = [
-  ['Agent loop investigation', 'One Turn moves through filesystem, search and shell tool phases with separate canonical tool call/result records and rich streaming GFM.'],
-  ['Million-message stress', 'Dedicated 1M history scenario proves bounded projection/DOM independently of Agent-loop structural transitions.'],
-  ['Session diagnostics', 'Demo-owned controls expose playback plus Engine evidence: logical/hot/DOM scale, projection work, reader state, accounting and browser performance.'],
-  ['Blockers & recovery', 'Approval, question blockers with user-entered answers, failure/resume, queue and off-screen execution survive session switching and hot-runtime eviction.'],
-  ['Renderer coverage', 'Markdown, reasoning, code, diff, tools, attachments, audio, HTML and responsive containment use the canonical projector/renderer path.'],
+  ['Coding-agent task', 'Visible Plan → resource-aware filesystem/search → one completed foreground child + two running background children → parent shell/terminal continues → background children settle → final diff/code/artifacts.'],
+  ['Delegated child lifecycle', 'Stable runId/mode/status/childSessionId are rendered independently. Parent history does not duplicate child reasoning/tool traces.'],
+  ['Million-message stress', 'Dedicated 1M scenario proves bounded projection/cache/DOM independently from workbench structural transitions.'],
+  ['Typed blockers & recovery', 'Approval, user-entered questions, queue, failure/resume and off-screen execution preserve the session contract.'],
+  ['Media & artifacts', 'Uploads, generated images, TTS/ASR, code, diff and HTML all use the canonical projection/renderer path.'],
+  ['Session diagnostics', 'Demo-owned controls expose synthetic playback plus read-only Engine evidence without becoming a second Engine API.'],
+]
+
+const nonGoals = [
+  'Project / repository / worktree lifecycle',
+  'Agent/model routing or delegated-child scheduling/concurrency',
+  'child provider selection, permissions, resume / interrupt / disposal',
+  'Agent Teams, shared task lists or member messaging',
+  'permission / allowlist evaluation',
+  'editor, resource or child-session opening behavior',
+  'Changes / Artifacts / Preview panel layout',
+  'tabs / sidebars / drawers / workspace navigation',
+  'preview server, process or background-job lifecycle',
+  'durable cloud sync and provider retry policy',
 ]
 
 const invariants = [
@@ -59,33 +72,28 @@ const invariants = [
 <template>
   <main class="architecture-page" data-testid="architecture-page">
     <header class="architecture-nav">
-      <a class="architecture-brand" href="#architecture"><span>N</span> Agent Conversation Engine</a>
-      <nav><a href="#ownership">Ownership</a><a href="#contracts">Contracts</a><a href="#efficiency">Efficiency</a><a href="#evidence">Evidence</a><a class="launch-lab" href="#lab" data-testid="launch-lab">Open demo →</a></nav>
+      <a class="architecture-brand" href="#architecture"><span>N</span> Agent Workbench Rendering Engine</a>
+      <nav><a href="#ownership">Ownership</a><a href="#contracts">Semantics</a><a href="#efficiency">Efficiency</a><a href="#evidence">Evidence</a><a class="launch-lab" href="#lab" data-testid="launch-lab">Open demo →</a></nav>
     </header>
 
     <section class="architecture-hero">
       <div class="hero-copy">
-        <span class="architecture-kicker">reusable source engine · executable host proof</span>
-        <h1>Keep <em>conversation truth, presentation and product orchestration</em> at different lifetimes.</h1>
-        <p>The Engine is deliberately smaller than the Demo. It preserves normalized conversation/session semantics and renders bounded hot state; provider orchestration, durable IO and multi-session product policy remain outside it.</p>
+        <span class="architecture-kicker">layout-agnostic rendering semantics · executable host proof</span>
+        <h1>Render a real Agent workbench without turning the Engine into <em>the workbench product.</em></h1>
+        <p>The core records what happened and projects bounded renderable state. Provider execution, delegated-child scheduling, editor actions, permission policy and workspace layout remain outside it; Vue is an optional physical reference adapter.</p>
         <div class="hero-actions"><a class="primary-link" href="#lab">Exercise the demo</a><a class="secondary-link" href="https://github.com/topabomb/demo1/blob/main/docs/architecture.md">Read architecture contract</a></div>
       </div>
-      <div class="hero-proof"><span>Normal UI work</span><strong>O(changed + hot + visible)</strong><p>Total history is addressable, not reactive. Product policy stays outside the reusable Engine.</p><div><b>Provider-neutral model</b><b>Explicit execution identity</b><b>Semantic coordinates</b><b>Replaceable adapter</b></div></div>
+      <div class="hero-proof"><span>Normal UI work</span><strong>O(changed + hot + visible)</strong><p>One million records stay addressable while only hot semantic state and visible physical rows do work.</p><div><b>Resource-aware</b><b>Plan-aware</b><b>Delegation-aware</b><b>Layout-agnostic</b></div></div>
     </section>
 
     <section id="ownership" class="architecture-section">
-      <header class="section-heading"><span>01 · Ownership</span><h2>Three boundaries, one dependency direction</h2><p>External adapters feed normalized state into the Engine; a host such as the Demo composes Engine instances into a product. The Engine imports neither.</p></header>
+      <header class="section-heading"><span>01 · Ownership</span><h2>External runtime → semantic Engine ← Demo host</h2><p>The reusable core has one-way dependencies and deliberately knows less than the application around it.</p></header>
       <div class="invariant-grid state-grid"><article v-for="entry in ownership" :key="entry[0]"><strong>{{ entry[0] }}</strong><span>{{ entry[1] }}</span><p>{{ entry[2] }}</p></article></div>
-      <div class="workspace-band"><span>Dependency rule</span><strong>External adapters / Demo → Engine · never Engine → Demo</strong><p>Multi-session routing, hot-runtime LRU and synthetic playback are host composition, not hidden Engine services.</p></div>
-    </section>
-
-    <section class="architecture-section">
-      <header class="section-heading"><span>02 · State lifetimes</span><h2>Ownership follows what can be discarded</h2><p>The Engine is not a persistence server, and the physical viewport is not conversation truth.</p></header>
-      <div class="invariant-grid state-grid"><article v-for="entry in stateClasses" :key="entry[0]"><strong>{{ entry[0] }}</strong><span>{{ entry[1] }}</span><p>{{ entry[2] }}</p></article></div>
+      <div class="workspace-band"><span>Core rule</span><strong>Semantic renderability is Engine responsibility · product layout and execution policy are not</strong><p>`src/engine/**` never imports Demo. Framework-neutral layers never import Vue/DOM.</p></div>
     </section>
 
     <section id="contracts" class="architecture-section">
-      <header class="section-heading"><span>03 · Engine contracts</span><h2>A small set of stable responsibilities</h2><p>The public neutral API intentionally omits runtime tuning constants, UI snapshots and Demo telemetry.</p></header>
+      <header class="section-heading"><span>02 · Rendering contracts</span><h2>A compact set of concepts that survive across Agent clients</h2><p>The additions are semantic evidence, not a generic workbench/plugin/runtime framework.</p></header>
       <div class="layer-stack">
         <article v-for="layer in contracts" :key="layer[0]" class="layer-card">
           <div class="layer-number">{{ layer[0] }}</div>
@@ -96,15 +104,15 @@ const invariants = [
 
     <section class="architecture-section split-section">
       <div>
-        <header class="section-heading compact"><span>04 · Agent identity</span><h2>Engine preserves the loop; it does not orchestrate it</h2></header>
-        <div class="scenario-table"><div v-for="row in agentLoop" :key="row[0]" class="scenario-row"><strong>{{ row[0] }}</strong><span>{{ row[1] }}</span></div></div>
+        <header class="section-heading compact"><span>03 · Semantic uniqueness</span><h2>Concepts that must not collapse into each other</h2></header>
+        <div class="scenario-table"><div v-for="row in distinctions" :key="row[0]" class="scenario-row"><strong>{{ row[0] }}</strong><span>{{ row[1] }}</span></div></div>
       </div>
       <div>
-        <header class="section-heading compact"><span>05 · Data path</span><h2>Async IO stops before the hot renderer path</h2></header>
-        <div class="code-diagram"><pre>Provider / DB / network
-        │ async adapter + cache
+        <header class="section-heading compact"><span>04 · Data path</span><h2>Async IO and product policy stop before the hot renderer</h2></header>
+        <div class="code-diagram"><pre>Provider / Agent runtime / DB
+        │ normalize + async cache
         ▼
-ConversationHistorySource + normalized events
+ConversationHistorySource + canonical mutations
         │
         ▼
 ConversationSessionKernel
@@ -116,26 +124,32 @@ ProjectionEngine → keyed RenderUnits
 Semantic viewport
         │
         ▼
-Vue/Virtua reference surface
+optional Vue / Virtua physical adapter
 
-DemoWorkspaceRuntime = host example, not Engine</pre></div>
+Child traces remain in child sessions.
+Host decides panels, navigation and actions.</pre></div>
       </div>
     </section>
 
     <section id="efficiency" class="architecture-section">
-      <header class="section-heading"><span>06 · Hot-path budgets</span><h2>Performance is an architectural contract</h2></header>
+      <header class="section-heading"><span>05 · Hot-path budgets</span><h2>Rich workbench output does not change the scaling law</h2><p>Terminal growth is incremental; delegation status changes reproject one changed parent block, never a nested child conversation tree.</p></header>
       <div class="scenario-table"><div v-for="row in hotPaths" :key="row[0]" class="scenario-row"><strong>{{ row[0] }}<small style="display:block;margin-top:4px;opacity:.65">{{ row[1] }}</small></strong><span>{{ row[2] }}</span></div></div>
     </section>
 
     <section id="evidence" class="architecture-section">
-      <header class="section-heading"><span>07 · Demo responsibilities</span><h2>The Demo proves the Engine without becoming the Engine</h2><p>Scenario data, playback cadence and diagnostics controls stay in `src/demo/**`; assertions verify that they enter through canonical Engine paths.</p></header>
+      <header class="section-heading"><span>06 · Executable evidence</span><h2>The Demo behaves like a real task, not a component gallery</h2><p>Every visible capability enters through canonical Message/Block mutations. There are no inactive tabs or placeholder workbench controls.</p></header>
       <div class="scenario-table"><div v-for="row in demoEvidence" :key="row[0]" class="scenario-row"><strong>{{ row[0] }}</strong><span>{{ row[1] }}</span></div></div>
       <div class="invariant-grid"><article v-for="entry in invariants" :key="entry[1]"><strong>{{ entry[0] }}</strong><span>{{ entry[1] }}</span></article></div>
     </section>
 
     <section class="architecture-section">
-      <header class="section-heading"><span>08 · Distribution honesty</span><h2>Reusable source boundary today; packaging is a separate release concern</h2></header>
-      <div class="workspace-band"><span>Current repository</span><strong>Vite Demo application · package publishing disabled</strong><p>`package.json` uses `private: true` to disable package publication; it does not describe GitHub repository visibility. The Engine is source-level reusable and extraction-ready, but this repository does not claim a published npm package.</p></div>
+      <header class="section-heading"><span>07 · Explicit non-goals</span><h2>Useful workbench features that stay outside this rendering Engine</h2><p>A host may use all of them. Their existence does not justify coupling them to canonical rendering semantics.</p></header>
+      <div class="scenario-table"><div v-for="item in nonGoals" :key="item" class="scenario-row"><strong>Host / external adapter</strong><span>{{ item }}</span></div></div>
+    </section>
+
+    <section class="architecture-section">
+      <header class="section-heading"><span>08 · Distribution honesty</span><h2>Reusable source boundary today; package distribution remains separate</h2></header>
+      <div class="workspace-band"><span>Current repository</span><strong>Vite Demo application · package publishing disabled</strong><p>`private: true` disables npm publication; it does not describe repository visibility. The Engine is source-level reusable and extraction-ready.</p></div>
     </section>
   </main>
 </template>

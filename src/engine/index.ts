@@ -4,6 +4,9 @@
  */
 export {
   block,
+  type AgentRunMode,
+  type AgentRunRef,
+  type AgentRunStatus,
   type AppendCanonicalMessage,
   type ArtifactProvenance,
   type AttachmentItem,
@@ -14,7 +17,13 @@ export {
   type ContentBlockType,
   type LogicalMessage,
   type LogicalRole,
+  type PlanItem,
+  type PlanItemStatus,
+  type ResourceKind,
+  type ResourceRange,
+  type ResourceRef,
   type ToolCategory,
+  type ToolPresentationIntent,
 } from './model/conversation'
 
 export {

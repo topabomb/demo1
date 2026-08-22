@@ -2,12 +2,15 @@ import type { Component } from 'vue'
 import TextBlock from './TextBlock.vue'
 import MarkdownBlock from './MarkdownBlock.vue'
 import ThinkingBlock from './ThinkingBlock.vue'
+import PlanBlock from './PlanBlock.vue'
 import CodeBlock from './CodeBlock.vue'
 import ImageBlock from './ImageBlock.vue'
 import AttachmentBlock from './AttachmentBlock.vue'
 import AudioBlock from './AudioBlock.vue'
 import HtmlBlock from './HtmlBlock.vue'
 import ToolBlock from './ToolBlock.vue'
+import TerminalBlock from './TerminalBlock.vue'
+import DelegationBlock from './DelegationBlock.vue'
 import DiffBlock from './DiffBlock.vue'
 import UnknownBlock from './UnknownBlock.vue'
 
@@ -19,18 +22,21 @@ const DEFAULT_ENTRIES: readonly (readonly [string, Component])[] = [
   ['text', TextBlock],
   ['markdown', MarkdownBlock],
   ['thinking', ThinkingBlock],
+  ['plan', PlanBlock],
   ['code', CodeBlock],
   ['image', ImageBlock],
   ['attachments', AttachmentBlock],
   ['audio', AudioBlock],
   ['html', HtmlBlock],
   ['tool', ToolBlock],
+  ['terminal', TerminalBlock],
+  ['delegation', DelegationBlock],
   ['diff', DiffBlock],
   ['unknown', UnknownBlock],
 ]
 
 /**
- * Per-surface physical renderer registry. Semantic projection remains framework
+ * Per-viewport physical renderer registry. Semantic projection remains framework
  * neutral; products can clone/replace renderer IDs for one viewport without
  * mutating every Engine instance mounted in the same application.
  */

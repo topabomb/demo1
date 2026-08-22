@@ -26,7 +26,7 @@ export interface ProjectionEngineStats {
  * Owns rebuildable presentation work for one hot conversation runtime.
  *
  * The registry is semantic policy; this engine adds bounded message-level memoization
- * and incremental paths for high-frequency LLM Markdown/reasoning output. Session
+ * and incremental paths for high-frequency Markdown/reasoning/terminal output. Session
  * and domain state never depend on this cache.
  */
 export class ProjectionEngine {
@@ -74,11 +74,7 @@ export class ProjectionEngine {
     return units
   }
 
-  /**
-   * Append-only Markdown fast path. Only the previous mutable Markdown tail plus
-   * the new delta is re-chunked. Other blocks in the same message keep their
-   * RenderUnit identity, which lets reasoning + answer coexist in one live message.
-   */
+  /** Append-only Markdown fast path; settled prefix RenderUnits remain referentially stable. */
   appendMarkdownDelta(message: LogicalMessage, blockId: string, delta: string): readonly RenderUnit[] {
     const cached = this.#cache.get(message.id)
     const contentBlock = message.blocks?.find(entry => entry.id === blockId && entry.type === 'markdown') as ContentBlock<'markdown'> | undefined
@@ -91,9 +87,7 @@ export class ProjectionEngine {
     const blockUnits = cached.units.slice(first, last + 1)
     const previousSource = blockUnits.map(unit => String(unit.payload.markdown ?? '')).join('')
     const currentSource = contentBlock.data.markdown
-    if (currentSource.length !== previousSource.length + delta.length || !currentSource.endsWith(delta)) {
-      return this.projectMessage(message)
-    }
+    if (currentSource.length !== previousSource.length + delta.length || !currentSource.endsWith(delta)) return this.projectMessage(message)
 
     const oldTail = blockUnits[blockUnits.length - 1]!
     const oldTailText = String(oldTail.payload.markdown ?? '')
@@ -102,9 +96,6 @@ export class ProjectionEngine {
     const baseIndex = settledPrefix.length
     const finalPartIndex = baseIndex + chunks.length - 1
     const tailUnits = chunks.map((chunk, localIndex) => {
-      // Once an append creates another chunk, the old tail ceases to be the last
-      // part and must publish that one boundary change. Earlier prefix units stay
-      // referentially stable because `hasNextPart` was already true for them.
       if (chunks.length === 1 && localIndex === 0 && chunk.text === oldTailText && chunk.hash === oldTail.revision) return oldTail
       const partIndex = baseIndex + localIndex
       return makeRenderUnit(
@@ -123,20 +114,12 @@ export class ProjectionEngine {
       )
     })
 
-    const units = [
-      ...cached.units.slice(0, first),
-      ...settledPrefix,
-      ...tailUnits,
-      ...cached.units.slice(last + 1),
-    ]
+    const units = [...cached.units.slice(0, first), ...settledPrefix, ...tailUnits, ...cached.units.slice(last + 1)]
     this.#incrementalPatches += 1
     return this.#remember(message, units)
   }
 
-  /**
-   * Reasoning text is one stable presentation node. An append replaces only that
-   * node while preserving every sibling block in the live assistant message.
-   */
+  /** Reasoning text is one stable presentation node; append replaces only that node. */
   appendReasoningDelta(message: LogicalMessage, blockId: string, delta: string): readonly RenderUnit[] {
     const cached = this.#cache.get(message.id)
     const contentBlock = message.blocks?.find(entry => entry.id === blockId && entry.type === 'reasoning') as ContentBlock<'reasoning'> | undefined
@@ -158,6 +141,29 @@ export class ProjectionEngine {
       defaultOpen: data.defaultOpen ?? false,
       status: data.status ?? (message.live ? 'streaming' : 'complete'),
     })
+    const units = [...cached.units]
+    units[index] = next
+    this.#incrementalPatches += 1
+    return this.#remember(message, units)
+  }
+
+  /** Terminal output uses the same one-node append invariant as reasoning, so long logs do not re-project siblings. */
+  appendTerminalDelta(message: LogicalMessage, blockId: string, delta: string): readonly RenderUnit[] {
+    const cached = this.#cache.get(message.id)
+    const contentBlock = message.blocks?.find(entry => entry.id === blockId && entry.type === 'terminal') as ContentBlock<'terminal'> | undefined
+    if (!cached || !contentBlock || !delta) return this.projectMessage(message)
+
+    const index = cached.units.findIndex(unit => unit.blockId === blockId)
+    if (index < 0 || cached.units.some((unit, candidate) => candidate !== index && unit.blockId === blockId)) return this.projectMessage(message)
+    const previous = cached.units[index]!
+    const previousOutput = String(previous.payload.output ?? '')
+    const currentOutput = contentBlock.data.output
+    if (currentOutput.length !== previousOutput.length + delta.length || !currentOutput.endsWith(delta)) return this.projectMessage(message)
+
+    const data = contentBlock.data
+    const lines = Math.max(1, currentOutput.split('\n').length)
+    const estimate = data.defaultOpen === false ? 76 : 112 + Math.min(560, lines * 18)
+    const next = makeRenderUnit(message, contentBlock, 'terminal', 'terminal', estimate, { ...data })
     const units = [...cached.units]
     units[index] = next
     this.#incrementalPatches += 1
