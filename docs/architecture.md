@@ -9,7 +9,7 @@ The design target is:
 
 > Normal UI work scales with **changed + hot + visible** state, not total conversation history.
 
-The project is not an Agent loop, persistence server, provider SDK or general plugin framework. Those systems connect through narrow ports and normalize output into the Engine model.
+The Engine is not an Agent planner, persistence server, provider SDK or general plugin framework. Those systems connect through narrow ports and normalize output into the Engine model. The Demo may simulate an Agent loop; the Engine must not contain that script.
 
 ## 1. Ownership and dependency direction
 
@@ -29,10 +29,10 @@ src/
 │   └── workers/                replaceable worker implementation
 └── demo/                       executable scenario application
     ├── session-scenarios.ts    realistic canonical recent-tail scenarios
-    ├── live-run-script.ts      mixed-content live Agent turn script
+    ├── live-run-script.ts      declarative Agent-loop / stress scenario data
+    ├── stream-controller.ts    Demo execution orchestration/timing/accounting
     ├── synthetic.ts            lazy deep-history stress source
     ├── history-adapter.ts      Demo history composition
-    ├── stream-controller.ts    Demo execution timing/accounting
     ├── scenarios.ts            renderer/E2E verification suites
     ├── workspace-runtime.ts    Demo workspace + hot-runtime LRU composition
     ├── components/             workspace / diagnostics / architecture UI
@@ -43,7 +43,7 @@ The dependency law is one-way: **Demo may consume Engine; Engine never consumes 
 
 `src/engine/index.ts` is framework-neutral. Vue-specific integration remains under `engine/vue`, so non-Vue consumers do not inherit browser or Vue dependencies.
 
-The Demo may know that it is demonstrating a release investigation, a multimodal handoff or a stress test. The Engine may not.
+The Demo may know that it is demonstrating an Agent loop, release investigation, multimodal handoff or million-message stress test. The Engine may not.
 
 ## 2. Canonical conversation model
 
@@ -66,8 +66,23 @@ Identity has four useful levels:
 
 - **Message** — one addressable history record;
 - **Turn** — one user-level interaction lifecycle;
-- **Step** — a producer-owned model/request coordinate when available;
+- **Step** — a producer-owned model/tool-loop coordinate when available;
 - **Block** — one stable semantic contribution inside a Message.
+
+A Turn is explicitly **not** assumed to equal one assistant Message or one DOM card. A real Agent runtime may append several canonical records while preserving one `turnId`:
+
+```text
+user request                 turn A / step 0
+assistant stream             turn A / step 1
+assistant tool call          turn A / step 1
+tool result                  turn A / step 1
+assistant stream             turn A / step 2
+assistant tool call          turn A / step 2
+tool result                  turn A / step 2
+assistant final synthesis    turn A / step 3+
+```
+
+The exact provider event sequence is adapter policy. The Engine only preserves the normalized identities and records.
 
 `ContentBlock` is the renderer vocabulary: Markdown, reasoning, code, tool call/result, diff, attachments, audio, HTML and registered extensions.
 
@@ -90,6 +105,8 @@ tool-call.callId == tool-result.callId
 artifact.provenance.toolCallId == producing callId
 ```
 
+`ToolCategory` is a provider-neutral presentation/routing hint (`filesystem`, `search`, `shell`, `image-generation`, `tts`, `asr`, extensions). It does not define Agent orchestration policy.
+
 Do not add a generic cross-event graph until a real durable feature requires several records to assemble into one business object.
 
 ## 3. SessionKernel owns durable session truth
@@ -103,7 +120,9 @@ Do not add a generic cross-event graph until a real durable feature requires sev
 - normalized usage/context accounting;
 - failure metadata and Turn/Step counts.
 
-It does not invent provider output, default reasoning, completion copy, fake cache behavior or Demo scenarios.
+It does not invent provider output, tool sequences, default reasoning, completion copy, fake cache behavior or Demo scenarios.
+
+Turn/Step accounting follows append-ordered canonical transitions, not API-call boundaries. Appending an assistant record, a tool result and another assistant record under the same `turnId` therefore remains one Turn. A new `stepId` increments Step accounting when the producer supplies stable Step coordinates.
 
 Adapters mutate canonical messages through narrow Kernel APIs. Ordered semantic events and coalesced reactive publication remain separate concerns:
 
@@ -113,7 +132,7 @@ semantic mutation
 └─ subscribe(listener)       coalesced summary/workspace refresh
 ```
 
-## 4. Execution port
+## 4. Execution port and multi-Step continuation
 
 The reusable execution controller describes user-facing execution semantics only:
 
@@ -127,7 +146,11 @@ interface ConversationExecutionController {
 }
 ```
 
-Playback rate, pause/resume test controls, synthetic token estimates, scripted Demo output and ingress counters stay outside the Engine.
+An execution adapter may start on one assistant record and later append another assistant record in the same Turn after a tool result. `ConversationSessionKernel.continueExecutionAt(nextAssistantIndex)` moves the already-running execution target without resetting the Turn-level lifecycle/timing. It validates only the generic invariant that the new execution target is an assistant record.
+
+It does **not** decide when to call a tool, which tool to call, how many Steps exist, or what the next model prompt should contain. Those decisions stay in the provider/Agent adapter. The Demo's scripted loop is therefore entirely under `demo/**`.
+
+Playback rate, pause/resume test controls, synthetic token estimates, scripted Demo output and ingress counters also stay outside the Engine.
 
 This keeps the same Engine usable with SSE/WebSocket runtimes, local model loops, remote agents or persisted history.
 
@@ -144,6 +167,7 @@ Important properties:
 - far jumps rebase one bounded window;
 - reasoning and Markdown append paths patch incrementally;
 - settled Markdown prefix units remain stable when the live tail gains another chunk;
+- a structural Message change may legitimately reproject that one changed Message;
 - presentation state is rebuildable from canonical history.
 
 Markdown chunking is semantic rather than line-heuristic: the splitter uses the same `marked` GFM lexer contract as HTML rendering and may split only between top-level parser blocks. Lists, tables, blockquotes and fences remain atomic even with internal blank lines; an oversized atomic block is preferable to changing rendered meaning.
@@ -160,6 +184,8 @@ A million-message conversation is therefore a history-addressing problem, not a 
 | Ephemeral physical | DOM, Virtua measurements, ResizeObserver samples | mounted-adapter lifetime only |
 
 A running SessionKernel is not the same lifetime as a hot `ConversationSessionRuntime`, and neither is the same as a mounted viewport. The Demo intentionally runs more kernels than its three-runtime presentation LRU.
+
+A logical Message may also project to several physical RenderUnits. Semantic navigation targets logical history coordinates; it does not promise that every RenderUnit for a large Message is simultaneously mounted.
 
 ## 7. Semantic viewport vs physical list
 
@@ -205,42 +231,47 @@ RenderUnit -> Vue component   Vue renderer registry
 
 Renderer registries may be instantiated per viewport; products are not forced to mutate one process-global renderer map.
 
+The generic Tool renderer reads canonical `category`, `callId`, status/progress and input/output. It can visually distinguish tool categories without knowing why the Agent chose that tool.
+
 CSS ownership is equally strict:
 
 - `engine/vue/engine.css` — host-scoped shell, viewport and composer geometry;
 - `engine/vue/renderers.css` — host-scoped renderer visuals/containment;
-- `demo/styles/*` — workspace, diagnostics, scenario and architecture-page styling.
+- `demo/styles/*` — workspace, diagnostics and architecture-page styling.
 
 Engine styles never target `html`, `body` or `#app`. Browser tests inject hostile host-global CSS and require Engine geometry and containment to survive.
 
-## 9. Demo: realistic scenario first, verification second
+## 9. Demo: realistic Agent loop first, stress proof separate
 
 The public Demo should look and behave like a plausible Agent workspace. It must not make users operate a test harness to discover the Engine's capabilities.
 
-Preset conversations therefore replace only a small recent tail with realistic canonical tasks while keeping lazy synthetic deep history underneath. Examples include:
-
-- a 1,000,000-message release regression investigation that continues in the background;
-- transport refactoring with reasoning, tool execution, diff and code;
-- a production edit paused on approval;
-- a protocol decision paused on a user question;
-- multimodal image/PDF/audio handoff with ASR correlation;
-- responsive artifact review;
-- recoverable long-context/provider failure.
-
-The default live turn grows through the normal canonical path:
+The default `Agent loop investigation` intentionally demonstrates a single user-level Turn progressing through multiple canonical Steps:
 
 ```text
-reasoning
-→ rich streaming Markdown
-→ tool call/result
-→ diff
-→ code
-→ media artifacts
+Step 1  reasoning + rich streaming Markdown
+        → filesystem tool call/result
+Step 2  new assistant record + rich streaming Markdown
+        → search tool call/result
+Step 3  new assistant record + rich streaming Markdown
+        → shell verification call/result
+Step 4  final synthesis
+        → diff + code + verification artifacts
 ```
 
-The Markdown stream itself includes tables, fenced code, task lists and blockquotes so variable-height rich layout is exercised while the turn is still changing.
+The Demo controller owns the timing, fake tool inputs/results and decision to advance to another Step. Each tool result is canonical history, and the next model Step is appended through the same Kernel path a real runtime adapter would use. No renderer receives a Demo-only node shape.
 
-No renderer receives a Demo-only node shape.
+The Markdown stream deliberately includes GFM tables, task lists, nested lists, blockquotes, fenced code, inline code and repeated growing sections. This exercises parser-aligned chunking, dynamic height measurement and incremental projection while the Turn remains live.
+
+Other preset conversations replace only a small recent tail with realistic canonical tasks while keeping lazy synthetic deep history underneath: transport refactoring, approval/question blockers, multimodal handoff, responsive artifacts and recoverable provider failure.
+
+### Million-message stress is a separate responsibility
+
+`Million-message streaming stress` exists to prove a different Engine property: 1,000,000+ addressable records with bounded hot projection, bounded DOM, exact history navigation and pure streaming-Markdown incremental work. It intentionally does not run the multi-Step tool script.
+
+Separating these scenarios avoids two bad compromises:
+
+- the product Demo does not default to a benchmark/control surface;
+- projection performance measurements are not polluted by expected structural tool/message transitions.
 
 ### Session diagnostics
 
@@ -250,6 +281,7 @@ High-value diagnostics include:
 
 - exact global history navigation and bounded window loading;
 - live producer cadence and pause/resume;
+- active canonical Turn/Step and tool call/category correlation;
 - canonical renderer verification suites;
 - logical vs hot vs RenderUnit vs mounted-DOM scale;
 - running SessionKernels vs hot runtimes;
@@ -264,13 +296,15 @@ Low-value implementation counters such as virtual epochs, renderer counts, indiv
 
 The same full Chromium suite runs against the local production build and the deployed GitHub Pages site. It verifies behavior, not screenshots alone:
 
-- bounded DOM/hot state at 1,000,000+ messages;
-- mixed live rendering and rich Markdown structures;
+- one canonical Turn advancing across multiple model/tool Steps;
+- filesystem/search/shell tool categories with stable call/result IDs;
+- complex GFM continuing to stream between tool phases;
+- separate 1,000,000-message stress with bounded DOM/hot state and incremental Markdown projection;
 - async measurement with no row overlap;
 - far jump, prepend, exact Latest and anchor stability;
 - queue/blockers/failure recovery/background execution;
 - responsive/mobile reflow and composer growth;
-- tool/artifact correlation and HTML sanitization;
+- multimodal tool/artifact correlation and HTML sanitization;
 - hostile host CSS isolation;
 - realistic public workspace plus accessible Session diagnostics.
 
