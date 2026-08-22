@@ -69,7 +69,10 @@ test('pending approval is session-owned and survives switching plus viewport evi
   await expect(page.getByTestId('pending-interaction')).toBeVisible()
   await page.getByTestId('approve-interaction').click()
   await expect(page.getByTestId('pending-interaction')).toHaveCount(0)
-  await expect(page.locator('.run-status')).toContainText('Completed')
+  // Resolving a blocker only clears session interaction state. The execution adapter,
+  // not SessionKernel, decides whether the blocked Turn continues or completes.
+  await expect(page.locator('.run-status')).toContainText('Idle')
+  await expect(page.getByTestId('last-turn-reason')).toHaveText('active')
 
   await send(page, 'continue after approval')
   await expect(page.getByTestId('logical-count')).toHaveText('420,002')
