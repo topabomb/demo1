@@ -161,13 +161,15 @@ describe('engine architecture boundaries', () => {
     expect(nodeSeat).toContain(':renderers="renderers"')
   })
 
-  it('loads demo and engine styles from their owning trees only', () => {
+  it('keeps Demo and Engine CSS ownership compact and explicit', () => {
     const main = readFileSync(join(demoRoot, 'main.ts'), 'utf8')
+    const demoCss = readFileSync(join(demoRoot, 'styles/demo.css'), 'utf8')
     const shellCss = readFileSync(join(engineRoot, 'vue/engine.css'), 'utf8')
     expect(main).toContain("./styles/demo.css")
-    expect(main).toContain("./styles/scenario.css")
+    expect(main).not.toContain('scenario.css')
     expect(main).toContain("../engine/vue/engine.css")
     expect(main).toContain("./styles/architecture.css")
+    expect(demoCss).not.toMatch(/\.session-search|\.scenario-button|\.workspace-context|\.demo-context-(?:chip|copy)|\.sidebar-version|\.session-empty/)
     expect(shellCss).toContain("@import './renderers.css'")
   })
 
