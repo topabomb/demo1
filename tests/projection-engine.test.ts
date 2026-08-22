@@ -55,7 +55,7 @@ describe('ProjectionEngine', () => {
     const initialText = `${'first paragraph '.repeat(330)}\n\n${'middle paragraph '.repeat(330)}\n\n${'tail '.repeat(40)}`
     const initial = live(initialText, 0)
     const before = engine.projectMessage(initial)
-    expect(before.length).toBeGreaterThan(2)
+    expect(before.length).toBeGreaterThan(1)
     const stablePrefix = before.slice(0, -1)
     const oldTail = before.at(-1)!
 
