@@ -1,4 +1,4 @@
-import type { LogicalMessage } from '../model/conversation'
+import type { ContentBlockMap, LogicalMessage } from '../model/conversation'
 
 /** Live execution state. `waiting` is reserved for a pending user interaction. */
 export type SessionStatus = 'idle' | 'working' | 'waiting' | 'interrupted'
@@ -32,6 +32,12 @@ export interface SessionContextStats {
   projectedTokens: number
   contextWindow: number
 }
+
+/**
+ * Current producer-owned work plan for a session. The shape is exactly the same
+ * semantic value rendered by a canonical `plan` block; placement/popovers remain UI concerns.
+ */
+export type WorkPlan = ContentBlockMap['plan']
 
 interface PendingInteractionBase {
   id: string
@@ -73,6 +79,11 @@ export interface ConversationDescriptor {
   context?: SessionContextStats
   turnCount?: number
   stepCount?: number
+  /**
+   * Explicit current work-plan state restored by the producer/host. Historical `plan`
+   * messages remain snapshots and are never scanned to guess this value.
+   */
+  activePlan?: WorkPlan | null
   /** Explicit active assistant record for a rehydrated working session. Never inferred from history order. */
   activeAssistantIndex?: number | null
 }

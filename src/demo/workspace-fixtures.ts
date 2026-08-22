@@ -6,11 +6,17 @@ export interface DemoSessionDescriptor extends ConversationDescriptor {
   age: string
 }
 
+export type ChildDemoScenarioKey = 'child-rendering-review' | 'child-terminal-audit' | 'child-resource-audit'
+
 export interface DemoSessionSeed extends DemoSessionDescriptor {
   seedOffset: number
   liveTail?: boolean
-  scenario?: DemoScenarioKey
+  scenario?: DemoScenarioKey | ChildDemoScenarioKey
   playbackMode?: DemoPlaybackMode
+  /** Demo workspace relationship only; Engine does not own a session tree. */
+  parentSessionId?: string
+  /** Hidden child sessions remain directly addressable without cluttering Recent. */
+  listed?: boolean
 }
 
 const approval: PendingInteraction = {
@@ -36,6 +42,36 @@ const question: PendingInteraction = {
   detail: 'For API 35 clients that cannot refresh managed configuration, should the client fail closed or keep the last accepted configuration?',
 }
 
+const agentInitialPlan = {
+  title: 'Release regression investigation',
+  items: [
+    { id: 'inspect', text: 'Inspect projection and resource boundaries', status: 'in-progress' as const },
+    { id: 'correlate', text: 'Correlate tool and execution identity', status: 'pending' as const },
+    { id: 'verify', text: 'Run the full release gate with terminal evidence', status: 'pending' as const },
+    { id: 'synthesize', text: 'Summarize the smallest rendering-layer patch', status: 'pending' as const },
+  ],
+}
+
+const briefingPlan = {
+  title: 'Executive briefing',
+  items: [
+    { id: 'collect', text: 'Collect current work context and external evidence', status: 'completed' as const },
+    { id: 'cross-check', text: 'Cross-check launch risk and KPI signals', status: 'completed' as const },
+    { id: 'specialists', text: 'Run customer-risk and metrics specialist reviews', status: 'completed' as const },
+    { id: 'deliver', text: 'Produce decision brief and office artifacts', status: 'completed' as const },
+  ],
+}
+
+const followupPlan = {
+  title: 'Meeting follow-up',
+  items: [
+    { id: 'reconcile', text: 'Reconcile transcript, email and launch brief', status: 'completed' as const },
+    { id: 'actions', text: 'Extract owners, dates and unresolved decisions', status: 'completed' as const },
+    { id: 'draft', text: 'Draft follow-up message and review meeting', status: 'completed' as const },
+    { id: 'send', text: 'Send message and schedule review', status: 'blocked' as const },
+  ],
+}
+
 function usage(inputTokens: number, outputTokens: number, cacheReadTokens: number, cacheWriteTokens: number, reasoningTokens = 0) {
   return { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, reasoningTokens }
 }
@@ -44,17 +80,32 @@ function usage(inputTokens: number, outputTokens: number, cacheReadTokens: numbe
 export const RECENT_SESSIONS: readonly DemoSessionSeed[] = [
   {
     id: 'agent-loop', title: 'Agent loop investigation', age: 'now', status: 'working', logicalCount: 84_000,
-    seedOffset: 17, liveTail: true, scenario: 'release-investigation', playbackMode: 'agent-loop',
+    seedOffset: 17, liveTail: true, scenario: 'release-investigation', playbackMode: 'agent-loop', activePlan: agentInitialPlan,
     usage: usage(52_000, 7_900, 218_000, 11_000, 2_400), context: { projectedTokens: 68_200, contextWindow: 128_000 }, turnCount: 3_800, stepCount: 7_600,
   },
   {
+    id: 'child-review-contract', title: 'Review rendering contract', age: 'now', status: 'idle', logicalCount: 8,
+    seedOffset: 811, scenario: 'child-rendering-review', parentSessionId: 'agent-loop', listed: false, lastTurnReason: 'completed',
+    usage: usage(8_200, 1_300, 21_000, 800, 420), context: { projectedTokens: 12_600, contextWindow: 128_000 }, turnCount: 1, stepCount: 3,
+  },
+  {
+    id: 'child-terminal-audit', title: 'Audit terminal projection', age: 'now', status: 'idle', logicalCount: 8,
+    seedOffset: 821, scenario: 'child-terminal-audit', parentSessionId: 'agent-loop', listed: false, lastTurnReason: 'completed',
+    usage: usage(7_600, 1_100, 19_500, 720, 360), context: { projectedTokens: 11_900, contextWindow: 128_000 }, turnCount: 1, stepCount: 3,
+  },
+  {
+    id: 'child-resource-audit', title: 'Audit resource semantics', age: 'now', status: 'idle', logicalCount: 8,
+    seedOffset: 831, scenario: 'child-resource-audit', parentSessionId: 'agent-loop', listed: false, lastTurnReason: 'completed',
+    usage: usage(7_900, 1_180, 20_200, 760, 390), context: { projectedTokens: 12_100, contextWindow: 128_000 }, turnCount: 1, stepCount: 3,
+  },
+  {
     id: 'office-briefing', title: 'Monday executive briefing', age: '3m', status: 'idle', logicalCount: 62_000,
-    seedOffset: 41, scenario: 'executive-briefing', lastTurnReason: 'completed',
+    seedOffset: 41, scenario: 'executive-briefing', lastTurnReason: 'completed', activePlan: briefingPlan,
     usage: usage(47_000, 6_800, 192_000, 9_400, 1_900), context: { projectedTokens: 61_300, contextWindow: 128_000 }, turnCount: 2_900, stepCount: 5_600,
   },
   {
     id: 'office-followup', title: 'Launch meeting follow-up', age: '8m', status: 'waiting', logicalCount: 36_000,
-    seedOffset: 67, scenario: 'meeting-followup', pendingInteraction: meetingFollowupApproval,
+    seedOffset: 67, scenario: 'meeting-followup', pendingInteraction: meetingFollowupApproval, activePlan: followupPlan,
     usage: usage(29_000, 4_300, 116_000, 6_100, 1_100), context: { projectedTokens: 44_800, contextWindow: 128_000 }, turnCount: 1_700, stepCount: 3_200,
   },
   {
