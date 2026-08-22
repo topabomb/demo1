@@ -6,13 +6,14 @@ async function send(page: Page, text: string) { const input = page.getByTestId('
 
 test('Recent separates live execution, blockers and last-turn outcomes', async ({ page }) => {
   await open(page)
+  await expect(page.getByTestId('session-agent-loop')).toContainText('Working')
   await expect(page.getByTestId('session-million')).toContainText('Working')
   await expect(page.getByTestId('session-dsh-transport')).toContainText('Completed')
   await expect(page.getByTestId('session-tool-rendering')).toContainText(/Blocked.*Needs approval/i)
   await expect(page.getByTestId('session-android-protocol')).toContainText(/Blocked.*Needs answer/i)
   await expect(page.getByTestId('session-dynamic-heights')).toContainText('Interrupted')
   await expect(page.getByTestId('session-context-cache')).toContainText(/Failed.*PROVIDER_TIMEOUT/)
-  await expect(page.getByTestId('running-kernels')).toHaveText(/[1-9]/)
+  await expect(page.getByTestId('running-kernels')).toHaveText(/[2-9]/)
   await expect(page.getByTestId('blocked-sessions')).toHaveText('2')
   await expect(page.getByTestId('failed-sessions')).toHaveText('1')
 })
