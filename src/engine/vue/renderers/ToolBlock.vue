@@ -8,6 +8,16 @@ const open = useFoldState(props.unit.id, Boolean(props.unit.payload.defaultOpen)
 const phase = computed(() => String(props.unit.payload.phase ?? 'call'))
 const status = computed(() => String(props.unit.payload.status ?? 'running'))
 const category = computed(() => String(props.unit.payload.category ?? 'generic'))
+const callId = computed(() => String(props.unit.payload.callId ?? ''))
+const categoryGlyph = computed(() => ({
+  filesystem: '▣',
+  search: '⌕',
+  shell: '>_',
+  'image-generation': '◇',
+  tts: '◖',
+  asr: '◗',
+  generic: '⚙',
+}[category.value] ?? '◆'))
 const model = computed(() => typeof props.unit.payload.model === 'string' ? props.unit.payload.model : '')
 const progress = computed(() => {
   const value = Number(props.unit.payload.progress)
@@ -19,12 +29,18 @@ const duration = computed(() => Number(props.unit.payload.durationMs ?? 0))
 </script>
 
 <template>
-  <article class="message-card tool-card" :class="[`tool-${phase}`, `tool-${status}`]" :data-category="category" data-testid="tool-block">
+  <article
+    class="message-card tool-card"
+    :class="[`tool-${phase}`, `tool-${status}`, `tool-category-${category}`]"
+    :data-category="category"
+    :data-call-id="callId"
+    data-testid="tool-block"
+  >
     <button class="tool-summary" type="button" :aria-expanded="open" @click="open = !open">
-      <span class="tool-icon">{{ phase === 'result' ? '↳' : '⚙' }}</span>
+      <span class="tool-icon" :title="category">{{ phase === 'result' ? '↳' : categoryGlyph }}</span>
       <span class="tool-title">
         <strong>{{ phase === 'result' ? 'Tool result' : 'Tool call' }} · {{ unit.payload.name }}</strong>
-        <small>{{ category }}<template v-if="model"> · {{ model }}</template> · {{ unit.payload.callId }} · {{ duration.toLocaleString() }} ms</small>
+        <small><span class="tool-category-label">{{ categoryGlyph }} {{ category }}</span><template v-if="model"> · {{ model }}</template> · {{ callId }} · {{ duration.toLocaleString() }} ms</small>
       </span>
       <span :class="['status', status]"><i />{{ status }}</span>
       <span class="chevron" :class="{ open }">⌄</span>
