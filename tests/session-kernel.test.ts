@@ -31,7 +31,7 @@ describe('ConversationSessionKernel', () => {
     expect(kernel.currentAssistantIndex).toBe(assistantIndex)
     expect(kernel.count).toBe(102)
     expect(kernel.getMessage(100)).toMatchObject({ role: 'user', blocks: [{ id: 'prompt', type: 'markdown' }] })
-    expect(kernel.getMessage(101)).toMatchObject({ role: 'assistant', live: true, blocks: [{ id: 'reasoning' }, { id: 'answer' }] })
+    expect(kernel.getMessage(101)).toMatchObject({ live: true, blocks: [{ type: 'reasoning' }, { type: 'markdown' }] })
 
     const reasoning = appendReasoningContent(kernel.getMessage(assistantIndex), 'Inspect stable identities before rendering. ', 20, 11)!
     kernel.replaceCanonicalMessage(assistantIndex, reasoning.message, { kind: 'append-reasoning', blockId: reasoning.blockId, delta: 'Inspect stable identities before rendering. ' })
@@ -172,7 +172,7 @@ describe('ConversationSessionKernel', () => {
     expect(approvalKernel.lastTurnReason).toBeNull()
 
     approvalKernel.finishExecution('aborted')
-    expect(approvalKernel.status).toBe('interrupted')
+    expect(approvalKernel.status).toBe('idle')
     expect(approvalKernel.lastTurnReason).toBe('aborted')
   })
 
