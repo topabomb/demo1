@@ -31,6 +31,7 @@ import {
   STRESS_REASONING_PUBLISHES,
   stressMarkdownDelta,
   stressReasoningDelta,
+  updateLiveDelegations,
   updateLivePlan,
   updateLiveToolCall,
 } from './live-run-script'
@@ -53,6 +54,7 @@ export class SyntheticStreamController implements ConversationExecutionControlle
   #markdownTicks = 0
   #agentPhase: AgentPlaybackPhase = 'model'
   #planMessageIndex: number | null = null
+  #delegationMessageIndex: number | null = null
   #toolResultIndex: number | null = null
 
   rate = 20
@@ -76,6 +78,7 @@ export class SyntheticStreamController implements ConversationExecutionControlle
       this.#markdownTicks = 0
       this.#agentPhase = 'model'
       this.#toolResultIndex = null
+      this.#delegationMessageIndex = null
       if (this.#mode === 'agent-loop') {
         const current = this.#kernel.currentAssistantIndex
         if (current !== null && parseStepOrdinal(this.#kernel.getMessage(current)) === 1) this.#planMessageIndex = current
@@ -164,6 +167,7 @@ export class SyntheticStreamController implements ConversationExecutionControlle
     const assistantIndex = indexes[1]
     if (assistantIndex === undefined || !this.#kernel.startExecution(assistantIndex)) return false
     this.#planMessageIndex = this.#mode === 'agent-loop' ? assistantIndex : null
+    this.#delegationMessageIndex = null
     this.#toolResultIndex = null
     this.#accountPrompt(prompt)
     return true
@@ -290,6 +294,7 @@ export class SyntheticStreamController implements ConversationExecutionControlle
     const indexes = this.#kernel.appendCanonicalMessages(records)
     const nextAssistant = indexes[indexes.length - 1]
     if (nextAssistant === undefined) throw new Error('agent-loop assistant step missing')
+    if (stepOrdinal + 1 === 3) this.#delegationMessageIndex = nextAssistant
     this.#updatePlan(stepOrdinal + 1)
     this.#kernel.continueExecutionAt(nextAssistant)
     this.#agentPhase = 'model'
@@ -304,6 +309,8 @@ export class SyntheticStreamController implements ConversationExecutionControlle
       if (resultIndex === undefined) throw new Error('terminal result record missing')
       this.#toolResultIndex = resultIndex
     }
+    if (this.#stepPublishes === 3) this.#updateDelegations(1)
+    if (this.#stepPublishes === 6) this.#updateDelegations(2)
     if (this.#toolResultIndex === null) return
     const chunkIndex = this.#stepPublishes - 2
     if (chunkIndex >= 0) {
@@ -321,6 +328,13 @@ export class SyntheticStreamController implements ConversationExecutionControlle
     const current = this.#kernel.getMessage(this.#planMessageIndex)
     const next = updateLivePlan(current, activeStep)
     if (next !== current) this.#kernel.replaceCanonicalMessage(this.#planMessageIndex, next)
+  }
+
+  #updateDelegations(completedBackground: number): void {
+    if (this.#delegationMessageIndex === null) return
+    const current = this.#kernel.getMessage(this.#delegationMessageIndex)
+    const next = updateLiveDelegations(current, completedBackground)
+    if (next !== current) this.#kernel.replaceCanonicalMessage(this.#delegationMessageIndex, next)
   }
 
   #recordPublish(): void {
@@ -358,6 +372,7 @@ export class SyntheticStreamController implements ConversationExecutionControlle
   #completeCurrentTurn(): void {
     this.#stopTimer()
     this.#updatePlan(5)
+    this.#updateDelegations(2)
     const index = this.#kernel.currentAssistantIndex
     if (index !== null) {
       const current = this.#kernel.getMessage(index)
