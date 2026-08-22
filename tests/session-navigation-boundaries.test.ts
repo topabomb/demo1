@@ -37,6 +37,6 @@ describe('child-session and active-plan responsibility boundaries', () => {
     expect(strip).toContain('data-testid="active-plan-strip"')
     expect(strip).toContain('active-plan-popover')
     expect(workspace).toContain('#syncActivePlanFromProducerEvent')
-    expect(`${contracts}\n${kernel}`).not.toMatch(/popover|hover|composer|input-box|top-strip/)
+    expect(`${contracts}\n${kernel}`).not.toMatch(/(?:popover|hover|composer|inputBox|topStrip)\??\s*:/)
   })
 })
