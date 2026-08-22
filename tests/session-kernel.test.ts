@@ -93,14 +93,21 @@ describe('ConversationSessionKernel', () => {
     expect(() => kernel.continueExecutionAt(assistant1!)).toThrow(/not working/)
   })
 
-  it('never infers a restored execution target from the last history record', () => {
+  it('never infers a restored execution target or Turn outcome from live status', () => {
     const history = new SyntheticHistoryAdapter('restore', 12, 5)
     const kernel = new ConversationSessionKernel({ id: 'restore', title: 'Restore', status: 'working', logicalCount: 12 }, history)
     expect(kernel.status).toBe('working')
     expect(kernel.currentAssistantIndex).toBeNull()
+    expect(kernel.lastTurnReason).toBeNull()
+
+    const waiting = new ConversationSessionKernel({
+      id: 'waiting', title: 'Waiting', status: 'waiting', logicalCount: 0,
+      pendingInteraction: { id: 'q0', kind: 'question', title: 'Need input', detail: 'Choose one.' },
+    }, new SyntheticHistoryAdapter('waiting', 0, 1))
+    expect(waiting.status).toBe('waiting')
+    expect(waiting.lastTurnReason).toBeNull()
 
     const tail = history.loadRange(11, 1)[0]!
-    expect(tail.index).toBe(11)
     const explicitHistory = new SyntheticHistoryAdapter('explicit', 1, 1, false, [{
       ...tail,
       id: 'explicit:m-0',
@@ -113,17 +120,30 @@ describe('ConversationSessionKernel', () => {
     expect(explicit.summary.activeAssistantIndex).toBe(0)
   })
 
-  it('keeps interaction payloads typed while leaving every post-resolution outcome to the execution adapter', () => {
-    const questionKernel = new ConversationSessionKernel({
-      id: 'question', title: 'Question', status: 'waiting', logicalCount: 0,
-      pendingInteraction: { id: 'q1', kind: 'question', title: 'Choose behavior', detail: 'Which fallback?' },
-    }, new SyntheticHistoryAdapter('question', 0, 1))
-    expect(() => questionKernel.resolveInteraction({ kind: 'approval', approved: true })).toThrow(/expects question/)
-    questionKernel.resolveInteraction({ kind: 'question', answer: 'Keep the last accepted configuration.' })
-    expect(questionKernel.pendingInteraction).toBeNull()
-    expect(questionKernel.status).toBe('idle')
-    expect(questionKernel.lastTurnReason).toBeNull()
+  it('suspends and resolves typed interactions without settling the Turn implicitly', () => {
+    const kernel = new ConversationSessionKernel({ id: 'interaction', title: 'Interaction', status: 'idle', logicalCount: 0 }, new SyntheticHistoryAdapter('interaction', 0, 1))
+    const assistantIndex = appendTurn(kernel, 'inspect before asking')
+    expect(kernel.startExecution(assistantIndex)).toBe(true)
 
+    kernel.requestInteraction({ id: 'q1', kind: 'question', title: 'Choose behavior', detail: 'Which fallback?' })
+    expect(kernel.status).toBe('waiting')
+    expect(kernel.pendingInteraction?.kind).toBe('question')
+    expect(kernel.currentAssistantIndex).toBeNull()
+    expect(kernel.lastTurnReason).toBeNull()
+    expect(() => kernel.requestInteraction({ id: 'a2', kind: 'approval', title: 'Other', detail: 'Other?' })).toThrow(/already pending/)
+    expect(() => kernel.resolveInteraction({ kind: 'approval', approved: true })).toThrow(/expects question/)
+
+    kernel.resolveInteraction({ kind: 'question', answer: 'Keep the last accepted configuration.' })
+    expect(kernel.pendingInteraction).toBeNull()
+    expect(kernel.status).toBe('idle')
+    expect(kernel.lastTurnReason).toBeNull()
+
+    expect(kernel.startExecution(assistantIndex)).toBe(true)
+    kernel.finishExecution('completed')
+    expect(kernel.lastTurnReason).toBe('completed')
+  })
+
+  it('leaves denial and no-answer outcomes to the execution adapter', () => {
     const skippedQuestion = new ConversationSessionKernel({
       id: 'skip-question', title: 'Skip question', status: 'waiting', logicalCount: 0,
       pendingInteraction: { id: 'q2', kind: 'question', title: 'Optional detail', detail: 'Provide extra context?' },
@@ -139,6 +159,10 @@ describe('ConversationSessionKernel', () => {
     approvalKernel.resolveInteraction({ kind: 'approval', approved: false })
     expect(approvalKernel.status).toBe('idle')
     expect(approvalKernel.lastTurnReason).toBeNull()
+
+    approvalKernel.finishExecution('aborted')
+    expect(approvalKernel.status).toBe('interrupted')
+    expect(approvalKernel.lastTurnReason).toBe('aborted')
   })
 
   it('owns a monotonic message revision for every canonical replacement', () => {
