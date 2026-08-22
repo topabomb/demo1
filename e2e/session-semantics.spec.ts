@@ -29,7 +29,7 @@ test('a failed last turn is resumable and new execution clears the failure surfa
   await expect(page.locator('.run-status')).toContainText('Working')
   await expect(page.getByTestId('last-turn-failure')).toHaveCount(0)
   await expect(page.getByTestId('logical-count')).toHaveText('700,002')
-  await expect(page.getByTestId('last-turn-reason')).toHaveText('active')
+  await expect(page.getByTestId('last-turn-reason')).toHaveText('none')
 })
 
 test('approval and question use distinct session-owned resolution contracts', async ({ page }) => {
@@ -53,6 +53,8 @@ test('approval and question use distinct session-owned resolution contracts', as
   await page.getByTestId('approve-interaction').click()
   await expect(page.getByTestId('pending-interaction')).toHaveCount(0)
   await expect(page.getByTestId('composer-input')).toBeEnabled()
+  await expect(page.locator('.run-status')).toContainText('Idle')
+  await expect(page.getByTestId('last-turn-reason')).toHaveText('none')
 
   await switchTo(page, 'tool-rendering')
   await expect(page.getByTestId('pending-interaction')).toHaveAttribute('data-kind', 'approval')
