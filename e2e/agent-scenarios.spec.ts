@@ -19,6 +19,14 @@ async function jump(page: Page, index: number): Promise<void> {
   await expect.poll(async () => numeric(await page.getByTestId('reader-position').textContent()), { timeout: 15_000 }).toBe(index)
 }
 
+async function streamTicks(page: Page): Promise<number> {
+  return numeric(await page.getByTestId('stream-ticks').textContent())
+}
+
+async function waitForStreamTicks(page: Page, target: number): Promise<void> {
+  await expect.poll(() => streamTicks(page), { timeout: 15_000 }).toBeGreaterThan(target)
+}
+
 async function assertNoRowOverlap(page: Page): Promise<void> {
   await expect.poll(async () => page.getByTestId('scrollport').evaluate(stage => {
     const viewport = stage.getBoundingClientRect()
@@ -50,24 +58,38 @@ test('preset conversations land on realistic canonical content without public fi
 test('default live scenario becomes a heterogeneous Agent turn while rich Markdown is still streaming', async ({ page }) => {
   await openApp(page)
   await expect(page.getByTestId('active-session-id')).toHaveText('million')
-  await page.locator('.control-group select').selectOption('60')
-  await expect.poll(async () => numeric(await page.getByTestId('stream-ticks').textContent()), { timeout: 15_000 }).toBeGreaterThan(70)
 
+  // Freeze the automatically-started Demo run before it can move older RenderUnits
+  // outside the physical viewport. Then verify the scenario as each semantic shape
+  // is introduced; a virtualized engine is not required to mount every unit from one
+  // very tall message at the same instant.
+  await page.getByRole('button', { name: 'Pause' }).click()
   const live = page.locator('[data-message-index="999999"]')
-  const markdown = live.getByTestId('markdown-block')
-  const artifacts = live.getByTestId('attachments-block')
   await expect(live.getByTestId('thinking-block')).toBeVisible()
-  await expect(markdown.last()).toBeVisible()
-  await expect(live.getByTestId('tool-block')).toHaveCount(2)
-  await expect(live.getByTestId('diff-block')).toBeVisible()
-  await expect(live.getByTestId('code-block')).toBeVisible()
-  await expect(artifacts).toBeVisible()
 
+  const start = await streamTicks(page)
+  await page.getByLabel('Stream rate').selectOption('60')
+  await page.getByTestId('stream-start').click()
+
+  await waitForStreamTicks(page, Math.max(start + 8, 30))
+  const markdown = live.getByTestId('markdown-block')
+  await expect(markdown.last()).toBeVisible()
   await expect(markdown.first()).toContainText('Release regression investigation')
   await expect(markdown.locator('table')).toBeVisible()
   await expect(markdown.locator('pre code')).toBeVisible()
   await expect(markdown.locator('input[type="checkbox"]')).toHaveCount(4)
   await expect(markdown.locator('blockquote')).toBeVisible()
+  await expect(live.getByTestId('tool-block')).toHaveCount(1)
+
+  await waitForStreamTicks(page, 38)
+  await expect(live.getByTestId('tool-block')).toHaveCount(2)
+  await waitForStreamTicks(page, 48)
+  await expect(live.getByTestId('diff-block')).toBeVisible()
+  await waitForStreamTicks(page, 60)
+  await expect(live.getByTestId('code-block')).toBeVisible()
+  await waitForStreamTicks(page, 72)
+  const artifacts = live.getByTestId('attachments-block')
+  await expect(artifacts).toBeVisible()
   await expect(artifacts).toContainText('Verification artifacts')
 
   expect(numeric(await page.getByTestId('mounted-rows').textContent())).toBeLessThan(180)
@@ -79,7 +101,7 @@ test('live reasoning can expand during streaming and collapse without corrupting
   await page.getByTestId('new-session').click()
   await expect(page.getByTestId('active-session-id')).toHaveText('new-1')
 
-  await page.locator('.control-group select').selectOption('5')
+  await page.getByLabel('Stream rate').selectOption('5')
   const composer = page.getByTestId('composer-input')
   await composer.fill('Reason carefully about a variable-height Agent response, then answer in Markdown.')
   await page.locator('.send-button').click()
@@ -93,9 +115,9 @@ test('live reasoning can expand during streaming and collapse without corrupting
   await expect(thinking.locator('.thinking-body')).toBeVisible()
   const firstLength = (await thinking.locator('.thinking-body').textContent())?.length ?? 0
   const openHeightBefore = await thinking.evaluate(element => element.getBoundingClientRect().height)
-  const ticksBefore = numeric(await page.getByTestId('stream-ticks').textContent())
+  const ticksBefore = await streamTicks(page)
 
-  await expect.poll(async () => numeric(await page.getByTestId('stream-ticks').textContent()), { timeout: 12_000 }).toBeGreaterThan(ticksBefore + 7)
+  await expect.poll(() => streamTicks(page), { timeout: 12_000 }).toBeGreaterThan(ticksBefore + 7)
   await expect.poll(async () => (await thinking.locator('.thinking-body').textContent())?.length ?? 0, { timeout: 12_000 }).toBeGreaterThan(firstLength)
   const openHeightAfter = await thinking.evaluate(element => element.getBoundingClientRect().height)
   expect(openHeightAfter).toBeGreaterThanOrEqual(openHeightBefore)
