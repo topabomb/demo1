@@ -64,7 +64,7 @@ test('default Demo proves coding-workbench rendering semantics through one real 
   const seeded = page.locator('[data-message-index="83999"]')
   const initialPlan = seeded.getByTestId('plan-block')
   await expect(initialPlan).toBeVisible({ timeout: 15_000 })
-  await expect(initialPlan.locator('[data-plan-status="in-progress"]')).toContainText('Inspect the projection and resource boundaries')
+  await expect(initialPlan.locator('[data-plan-status="in-progress"]')).toContainText('Inspect projection and resource boundaries')
   await expect(initialPlan.locator('[data-plan-status="pending"]')).toHaveCount(3)
 
   await page.getByRole('button', { name: 'Pause' }).click()
