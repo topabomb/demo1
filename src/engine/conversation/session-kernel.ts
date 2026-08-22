@@ -169,15 +169,10 @@ export class ConversationSessionKernel {
       const index = this.count
       indexes.push(index)
 
-      // Canonical history is append-ordered. Count Turn/Step transitions, not
-      // append calls: one Agent Turn may append several assistant/tool records
-      // over time while keeping the same turnId/stepId.
       if (entry.turnId !== previousTurnId) this.#turnCount += 1
       if (entry.stepId) {
         if (entry.stepId !== previousStepId) this.#stepCount += 1
       } else {
-        // Producers without stable step coordinates retain the conservative
-        // historical behavior of one step per appended message.
         this.#stepCount += 1
       }
 
@@ -198,7 +193,6 @@ export class ConversationSessionKernel {
     return indexes
   }
 
-  /** Replace normalized content while preserving producer-owned message identity. */
   replaceCanonicalMessage(index: number, message: LogicalMessage, contentPatch?: SessionKernelContentPatch): void {
     const current = this.getMessage(index)
     if (
@@ -209,16 +203,12 @@ export class ConversationSessionKernel {
       message.role !== current.role
     ) throw new Error(`canonical identity changed for message ${index}`)
 
-    // Message revision is Kernel-owned mutation identity. Providers may supply a
-    // newer revision, but a replacement can never reuse the currently committed
-    // revision because presentation caches key their rebuildable work by it.
     const revision = Math.max((current.revision ?? 0) + 1, message.revision ?? 0)
     this.#writeMessage(index, { ...message, revision, blocks: cloneBlocks(message.blocks) })
     if (contentPatch) this.#recordFirstOutput()
     this.#emit({ kind: 'content', messageIndex: index, contentPatch })
   }
 
-  /** Begin provider/runtime execution after the adapter has appended any new canonical records. */
   startExecution(currentAssistantIndex: number | null = null): boolean {
     if (this.#pendingInteraction) return false
     if (currentAssistantIndex !== null) this.#assertAssistantMessage(currentAssistantIndex)
@@ -232,7 +222,6 @@ export class ConversationSessionKernel {
     return true
   }
 
-  /** Move an already-running execution to the next assistant record without resetting Turn timing. */
   continueExecutionAt(currentAssistantIndex: number): void {
     if (this.#status !== 'working') throw new Error('cannot continue an execution that is not working')
     this.#assertAssistantMessage(currentAssistantIndex)
@@ -241,10 +230,9 @@ export class ConversationSessionKernel {
     this.#emit({ kind: 'status', messageIndex: currentAssistantIndex })
   }
 
-  /** Suspend a working execution on a typed user interaction without settling the Turn. */
   requestInteraction(interaction: PendingInteraction): void {
-    if (this.#status !== 'working') throw new Error('cannot request an interaction when execution is not working')
     if (this.#pendingInteraction) throw new Error(`interaction ${this.#pendingInteraction.id} is already pending`)
+    if (this.#status !== 'working') throw new Error('cannot request an interaction when execution is not working')
     const index = this.#currentAssistantIndex
     this.#pendingInteraction = { ...interaction }
     this.#status = 'waiting'
@@ -257,7 +245,6 @@ export class ConversationSessionKernel {
     this.#emit({ kind: 'interaction', messageIndex: index ?? undefined })
   }
 
-  /** Finish a Turn explicitly without inventing any content. */
   finishExecution(reason: TurnEndReasonKind, failure: LlmFailure | null = null): void {
     const index = this.#currentAssistantIndex
     this.#status = reason === 'aborted' || reason === 'interrupted' ? 'interrupted' : 'idle'
@@ -270,7 +257,6 @@ export class ConversationSessionKernel {
     this.#emit({ kind: 'status', messageIndex: index ?? undefined })
   }
 
-  /** Store provider-normalized accounting; the Engine never estimates billing/cache semantics. */
   setAccounting(usage: Partial<TokenUsage>, context: SessionContextStats = this.#context): void {
     this.#usage = normalizeTokenUsage(usage)
     this.#context = {
@@ -300,11 +286,6 @@ export class ConversationSessionKernel {
     this.#emit({ kind: 'queue' })
   }
 
-  /**
-   * Validate and clear a session blocker only. The execution adapter that received
-   * the resolution owns whether approval/denial/answer/skip resumes work, changes
-   * strategy or terminates the Turn.
-   */
   resolveInteraction(resolution: InteractionResolution): void {
     const pending = this.#pendingInteraction
     if (!pending) return
