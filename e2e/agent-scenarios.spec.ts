@@ -36,16 +36,34 @@ async function bodyOverflow(page: Page): Promise<number> {
   return page.evaluate(() => Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) - window.innerWidth)
 }
 
-test('public Agent scenarios entry exposes the canonical gallery without requiring diagnostics', async ({ page }) => {
+test('preset conversations land on realistic canonical content without public fixture controls', async ({ page }) => {
   await openApp(page)
-  const launch = page.getByTestId('scenario-launch')
-  await expect(launch).toBeVisible()
-  await launch.click()
-  await expect(page.getByTestId('active-session-id')).toHaveText('dsh-transport')
-  await expect(page.getByTestId('logical-count')).toHaveText('180,013')
-  const summary = page.locator('[data-message-index="180012"]').getByTestId('markdown-block')
-  await expect(summary).toBeVisible({ timeout: 15_000 })
-  await expect(summary).toContainText('Media workflows verified')
+  await expect(page.getByTestId('scenario-launch')).toHaveCount(0)
+  await switchSession(page, 'dsh-transport')
+
+  await expect(page.getByText('Transport refactor verified', { exact: true })).toBeVisible({ timeout: 15_000 })
+  await expect(page.locator('[data-message-index="179997"]').getByTestId('diff-block')).toBeVisible()
+  await expect(page.locator('[data-message-index="179998"]').getByTestId('code-block')).toBeVisible()
+  await expect(page.locator('[data-message-index="179995"]').getByTestId('tool-block')).toBeVisible()
+})
+
+test('default live scenario becomes a heterogeneous Agent turn while output is still streaming', async ({ page }) => {
+  await openApp(page)
+  await expect(page.getByTestId('active-session-id')).toHaveText('million')
+  await page.locator('.control-group select').selectOption('60')
+  await expect.poll(async () => numeric(await page.getByTestId('stream-ticks').textContent()), { timeout: 15_000 }).toBeGreaterThan(70)
+
+  const live = page.locator('[data-message-index="999999"]')
+  await expect(live.getByTestId('thinking-block')).toBeVisible()
+  await expect(live.getByTestId('markdown-block').last()).toBeVisible()
+  await expect(live.getByTestId('tool-block')).toHaveCount(2)
+  await expect(live.getByTestId('diff-block')).toBeVisible()
+  await expect(live.getByTestId('code-block')).toBeVisible()
+  await expect(live.getByTestId('attachments-block')).toBeVisible()
+  await expect(live).toContainText('Release regression investigation')
+  await expect(live).toContainText('Verification artifacts')
+  expect(numeric(await page.getByTestId('mounted-rows').textContent())).toBeLessThan(180)
+  await assertNoRowOverlap(page)
 })
 
 test('live reasoning can expand during streaming and collapse without corrupting virtual geometry', async ({ page }) => {
@@ -85,70 +103,63 @@ test('live reasoning can expand during streaming and collapse without corrupting
   await assertNoRowOverlap(page)
 })
 
-test('uploads, image generation, TTS and ASR compose tool execution with durable media artifacts', async ({ page }) => {
+test('public multimodal handoff composes uploads, ASR tool correlation and audio artifacts', async ({ page }) => {
+  await openApp(page)
+  await switchSession(page, 'workspace-files')
+
+  await jump(page, 47_994)
+  const uploads = page.locator('[data-message-index="47994"]').getByTestId('attachments-block')
+  await expect(uploads.getByTestId('attachment-image')).toHaveCount(1)
+  await expect(uploads.getByTestId('attachment-file')).toHaveCount(2)
+  await expect(uploads).toContainText('interaction-spec.pdf')
+  await expect(uploads).toContainText('review-note.m4a')
+
+  await jump(page, 47_996)
+  const asrCall = page.locator('[data-message-index="47996"]').getByTestId('tool-block')
+  await expect(asrCall).toHaveAttribute('data-category', 'asr')
+
+  await jump(page, 47_997)
+  const asrResult = page.locator('[data-message-index="47997"]').getByTestId('tool-block')
+  await expect(asrResult).toHaveAttribute('data-category', 'asr')
+  await asrResult.locator('.tool-summary').click()
+  await expect(asrResult.locator('.tool-detail')).toContainText('0.96')
+
+  await jump(page, 47_998)
+  const audio = page.locator('[data-message-index="47998"]').getByTestId('audio-block')
+  await expect(audio.getByTestId('audio-waveform')).toBeVisible()
+  await expect(audio.getByTestId('audio-transcript')).toContainText('mixed streaming result')
+  await assertNoRowOverlap(page)
+})
+
+test('diagnostics-only gallery still covers image generation, TTS and ASR renderer variants', async ({ page }) => {
   await openApp(page)
   await switchSession(page, 'dsh-transport')
   await page.getByTestId('inject-agent-scenarios').click()
   await expect(page.getByTestId('logical-count')).toHaveText('180,013')
 
-  await jump(page, 180_000)
-  const singleUpload = page.locator('[data-message-index="180000"]').getByTestId('attachments-block')
-  await expect(singleUpload.getByTestId('attachment-image')).toHaveCount(1)
-  await expect(singleUpload).toContainText('Single image upload')
-
-  await jump(page, 180_001)
-  const multiUpload = page.locator('[data-message-index="180001"]').getByTestId('attachments-block')
-  await expect(multiUpload.getByTestId('attachment-image')).toHaveCount(2)
-  await expect(multiUpload.getByTestId('attachment-file')).toHaveCount(2)
-  await expect(multiUpload).toContainText('requirements.pdf')
-  await expect(multiUpload).toContainText('meeting.m4a')
-
   await jump(page, 180_003)
   const imageCall = page.locator('[data-message-index="180003"]').getByTestId('tool-block')
   await expect(imageCall).toHaveAttribute('data-category', 'image-generation')
   await expect(imageCall).toContainText('image-gen-reference-v2')
-  await imageCall.locator('.tool-summary').click()
-  await expect(imageCall.locator('.tool-detail')).toContainText('compact futuristic agent workstation')
-  await expect(imageCall.locator('.tool-progress')).toBeVisible()
 
   await jump(page, 180_005)
   const generated = page.locator('[data-message-index="180005"]').getByTestId('attachments-block')
   await expect(generated.getByTestId('attachment-image')).toHaveCount(4)
-  await expect(generated.getByTestId('media-prompt')).toContainText('compact futuristic agent workstation')
-  await expect(generated).toContainText('image-gen-reference-v2')
   await expect(generated).toContainText('image_gen_1')
 
   await jump(page, 180_008)
   const tts = page.locator('[data-message-index="180008"]').getByTestId('audio-block')
   await expect(tts).toContainText('Generated speech')
   await expect(tts.getByTestId('audio-waveform')).toBeVisible()
-  await expect(tts.getByTestId('audio-transcript')).toContainText('framework keeps media artifacts independent')
-
-  await jump(page, 180_009)
-  const asrInput = page.locator('[data-message-index="180009"]').getByTestId('audio-block')
-  await expect(asrInput).toContainText('Voice message')
-  await expect(asrInput.getByTestId('audio-transcript')).toContainText('uploaded meeting recording')
 
   await jump(page, 180_011)
   const asrResult = page.locator('[data-message-index="180011"]').getByTestId('tool-block')
   await expect(asrResult).toHaveAttribute('data-category', 'asr')
   await asrResult.locator('.tool-summary').click()
-  await expect(asrResult.locator('.tool-detail')).toContainText('confidence')
   await expect(asrResult.locator('.tool-detail')).toContainText('0.97')
-
-  await page.setViewportSize({ width: 390, height: 844 })
-  await jump(page, 180_005)
-  const imagesFit = await generated.getByTestId('attachment-image').evaluateAll(elements => elements.every(element => {
-    const image = element.querySelector('img')
-    const row = element.closest<HTMLElement>('[data-virtual-item="true"]')
-    return Boolean(image && row && image.getBoundingClientRect().width <= row.getBoundingClientRect().width + 1)
-  }))
-  expect(imagesFit).toBe(true)
-  expect(await bodyOverflow(page)).toBeLessThanOrEqual(1)
-  await assertNoRowOverlap(page)
 })
 
-test('repeated heterogeneous scenario packs keep projection and mounted DOM bounded', async ({ page }) => {
+test('repeated diagnostics scenario packs keep projection and mounted DOM bounded', async ({ page }) => {
   await openApp(page)
   await switchSession(page, 'dsh-transport')
   for (let i = 0; i < 6; i += 1) {

@@ -14,10 +14,10 @@ async function jump(page: Page, index: number) {
 test('many asynchronous SessionKernels outlive the 3-hot viewport LRU', async ({ page }) => {
   await open(page)
   for (const [id, prompt] of [
-    ['dsh-transport', 'continue DSH transport analysis'],
+    ['dsh-transport', 'continue the transport refactor'],
     ['event-normalization', 'normalize the next provider event'],
-    ['workspace-files', 'inspect workspace files'],
-    ['dynamic-heights', 'resume the interrupted layout investigation'],
+    ['workspace-files', 'continue the multimodal handoff'],
+    ['dynamic-heights', 'resume the responsive artifact review'],
   ] as const) {
     await switchTo(page, id)
     await send(page, prompt)
@@ -62,7 +62,7 @@ test('a historical conversation can be resumed, stopped, resumed again, evicted 
 test('pending approval is session-owned and survives switching plus viewport eviction', async ({ page }) => {
   await open(page)
   await switchTo(page, 'tool-rendering')
-  await expect(page.getByTestId('pending-interaction')).toContainText('Approve workspace edit')
+  await expect(page.getByTestId('pending-interaction')).toContainText('Approve production config edit')
 
   for (const id of ['dsh-transport', 'event-normalization', 'workspace-files', 'dynamic-heights']) await switchTo(page, id)
   await switchTo(page, 'tool-rendering')
@@ -79,7 +79,7 @@ test('pending approval is session-owned and survives switching plus viewport evi
 test('working sessions queue follow-ups independently of the mounted viewport', async ({ page }) => {
   await open(page)
   await expect(page.locator('.run-status')).toContainText('Working')
-  await send(page, 'follow up after the current million-message run')
+  await send(page, 'follow up after the current release investigation')
   await expect(page.getByTestId('queue-banner')).toContainText('1 follow-up')
   await expect(page.getByTestId('queued-prompts')).toHaveText('1')
 
@@ -89,8 +89,11 @@ test('working sessions queue follow-ups independently of the mounted viewport', 
   await expect(page.getByTestId('queue-banner')).toContainText('1 follow-up')
 })
 
-test('New session is a real empty resumable conversation and session search is functional', async ({ page }) => {
+test('New session is a real empty resumable conversation and the public sidebar stays scenario-focused', async ({ page }) => {
   await open(page)
+  await expect(page.getByTestId('session-search')).toHaveCount(0)
+  await expect(page.getByTestId('scenario-launch')).toHaveCount(0)
+
   await page.getByTestId('new-session').click()
   await expect(page.getByTestId('active-session-id')).toHaveText('new-1')
   await expect(page.getByTestId('empty-conversation')).toBeVisible()
@@ -98,7 +101,6 @@ test('New session is a real empty resumable conversation and session search is f
   await expect(page.getByTestId('logical-count')).toHaveText('2')
   await expect(page.locator('[data-message-index="0"]')).toContainText('implement a fresh agent task')
 
-  await page.getByTestId('session-search').fill('New agent session')
-  await expect(page.getByTestId('session-new-1')).toBeVisible()
-  await expect(page.getByTestId('session-dsh-transport')).toHaveCount(0)
+  await switchTo(page, 'dsh-transport')
+  await expect(page.getByText('Transport refactor verified', { exact: true })).toBeVisible({ timeout: 15_000 })
 })

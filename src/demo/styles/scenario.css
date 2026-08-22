@@ -1,0 +1,30 @@
+/* Public scenario-workspace refinements. Engine geometry remains owned by engine.css. */
+.session-sidebar {
+  grid-template-rows:auto auto auto minmax(0,1fr) auto;
+}
+.primary-actions {
+  grid-template-columns:minmax(0,1fr);
+  margin-top:4px;
+  margin-bottom:7px;
+}
+.new-session {
+  text-align:left;
+}
+.session-section-label {
+  padding-top:7px;
+}
+.session-row {
+  min-height:58px;
+}
+.session-copy small {
+  line-height:1.35;
+}
+.sidebar-footer {
+  min-height:38px;
+}
+
+@media (max-width:760px) {
+  .session-sidebar {
+    grid-template-rows:auto auto auto minmax(0,1fr) auto;
+  }
+}

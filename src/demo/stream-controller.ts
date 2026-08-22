@@ -8,11 +8,16 @@ import {
   replaceMarkdownContent,
   settleReasoning,
 } from '../engine/model/message-mutations'
+import {
+  applyLiveScenarioMilestone,
+  LIVE_REASONING_PUBLISHES,
+  liveAnswerDelta,
+  liveReasoningDelta,
+} from './live-run-script'
 
-const MAX_RUN_PUBLISHES = 1800
-const REASONING_PUBLISHES = 18
+const MAX_RUN_PUBLISHES = 600
 
-/** Demo-only playback driver. Synthetic content, token estimates, rate controls and counters live here. */
+/** Demo-only playback driver. Synthetic timing/accounting and scripted scenario output never enter Engine policy. */
 export class SyntheticStreamController implements ConversationExecutionController {
   #kernel: ConversationSessionKernel
   #timer: ReturnType<typeof setInterval> | null = null
@@ -116,9 +121,8 @@ export class SyntheticStreamController implements ConversationExecutionControlle
 
   #ingest(): void {
     this.ingressTicks += 1
-    this.#pendingDelta += this.#runPublishes < REASONING_PUBLISHES
-      ? syntheticReasoningDelta(this.ingressTicks)
-      : syntheticAnswerDelta(this.ingressTicks)
+    if (this.#runPublishes < LIVE_REASONING_PUBLISHES) this.#pendingDelta += liveReasoningDelta(this.ingressTicks)
+    else this.#pendingDelta = 'answer-ready'
     if (this.#framePending) return
     this.#framePending = true
     scheduleFrame(() => { this.#framePending = false; this.#publish() })
@@ -127,10 +131,17 @@ export class SyntheticStreamController implements ConversationExecutionControlle
   #publish(): void {
     const index = this.#kernel.currentAssistantIndex
     if (!this.#pendingDelta || index === null) return
-    const delta = this.#pendingDelta
+
+    const milestone = applyLiveScenarioMilestone(this.#kernel.getMessage(index), this.#runPublishes)
+    if (milestone) this.#kernel.replaceCanonicalMessage(index, milestone)
+
+    const reasoningPhase = this.#runPublishes < LIVE_REASONING_PUBLISHES
+    const delta = reasoningPhase
+      ? this.#pendingDelta
+      : liveAnswerDelta(this.#runPublishes - LIVE_REASONING_PUBLISHES)
     this.#pendingDelta = ''
 
-    if (this.#runPublishes < REASONING_PUBLISHES) {
+    if (reasoningPhase) {
       const current = this.#kernel.getMessage(index)
       const reasoningTokens = estimateTokens(reasoningText(current)) + estimateTokens(delta)
       const patched = appendReasoningContent(current, delta, this.#runPublishes * Math.max(16, Math.round(1000 / this.rate)), reasoningTokens)
@@ -203,35 +214,11 @@ export class SyntheticStreamController implements ConversationExecutionControlle
 }
 
 function reasoningText(message: LogicalMessage): string {
-  const block = message.blocks.find(entry => entry.type === 'reasoning')
-  return block?.type === 'reasoning' ? block.data.text : ''
+  const contentBlock = message.blocks.find(entry => entry.type === 'reasoning')
+  return contentBlock?.type === 'reasoning' ? contentBlock.data.text : ''
 }
 
 function estimateTokens(text: string): number { return Math.max(1, Math.ceil(text.length / 4)) }
-
-function syntheticReasoningDelta(tick: number): string {
-  const phrases = [
-    'Inspect the session facts before choosing a presentation action. ',
-    'Preserve Turn, Step and Block identity while the reasoning text grows. ',
-    'Keep this stream independent from the physical viewport and current fold state. ',
-    'Apply every semantic delta but coalesce framework publication where possible. ',
-  ]
-  const phrase = phrases[tick % phrases.length]!
-  return tick % 5 === 0 ? `\n\n${phrase}` : phrase
-}
-
-function syntheticAnswerDelta(tick: number): string {
-  const phrases = [
-    'I inspected the active workspace state and preserved stable semantic identity.',
-    'The agent can keep running even when its viewport has been evicted from the hot LRU.',
-    'Tool and reasoning output remain structured presentation nodes rather than backend-specific components.',
-    'Streaming deltas are coalesced before publication so framework work stays bounded.',
-    'The next verification step checks restore, queue, and interaction state across session switches.',
-  ]
-  const phrase = phrases[tick % phrases.length]!
-  if (tick % 13 === 0) return `\n\n### Progress ${Math.floor(tick / 13) + 1}\n\n${phrase} `
-  return `${phrase} `
-}
 
 function scheduleFrame(callback: () => void): void {
   if (typeof requestAnimationFrame === 'function') requestAnimationFrame(callback)

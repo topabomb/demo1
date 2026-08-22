@@ -1,6 +1,6 @@
 # Agent Conversation Framework Lab
 
-A reusable Agent conversation **Engine + executable Demo/template** for very long heterogeneous histories, resumable background sessions, streaming content and dynamic UI layout.
+A reusable Agent conversation **Engine + realistic executable Demo** for very long heterogeneous histories, resumable background sessions, streaming content and dynamic UI layout.
 
 - Live demo: https://topabomb.github.io/demo1/
 - Architecture view: https://topabomb.github.io/demo1/#architecture
@@ -22,11 +22,13 @@ src/
 │   ├── viewport/            semantic reader / Latest / anchor policy
 │   ├── runtime/             bounded hot-session composition
 │   └── vue/                 Vue/Virtua reference adapter + renderers
-└── demo/                    executable proof and product example
-    ├── synthetic.ts         lazy large-history source
-    ├── scenarios.ts         canonical Agent scenario fixtures
-    ├── stream-controller.ts synthetic provider/execution behavior
-    └── components/          workspace + diagnostics UI
+└── demo/                    executable product scenario + verification fixtures
+    ├── session-scenarios.ts realistic canonical tails for public conversations
+    ├── live-run-script.ts   mixed-content streaming scenario
+    ├── synthetic.ts         lazy deep-history source for stress coverage
+    ├── scenarios.ts         diagnostics/E2E compatibility gallery
+    ├── stream-controller.ts synthetic provider/execution timing
+    └── components/          workspace + optional diagnostics UI
 ```
 
 `engine/**` never imports `demo/**`. Architecture tests enforce that direction.
@@ -47,26 +49,37 @@ Semantic viewport runtime
 Vue/Virtua physical adapter + renderer registry
 ```
 
-The Engine owns normalized conversation/session facts. It does not assume a provider, generate synthetic reasoning/answers, estimate billing usage, or hard-code product controls. Those policies belong to adapters such as the Demo's `stream-controller.ts`.
+The Engine owns normalized conversation/session facts. It does not assume a provider, generate demo reasoning/answers, estimate billing usage, or hard-code product controls. Those policies belong to adapters such as the Demo's `stream-controller.ts`.
 
 The UI also separates semantic state from physical layout: reader position, exact `Latest`, anchors and follow intent are Engine/runtime concepts; DOM measurements and Virtua state are physical-adapter concerns.
 
-## What the Demo proves
+## What the public Demo proves
 
-The Demo exercises the normal Engine path for:
+The default page is intentionally a **realistic Agent workspace**, not an architecture control panel. Its preset conversations land on concrete recent tasks while retaining large lazy histories underneath:
+
+- a 1,000,000-message release investigation that keeps running while history is browsed;
+- live reasoning followed by rich Markdown while tool call/result, diff, code and image artifacts enter the same active turn;
+- transport/code refactoring with tool correlation and patches;
+- a production edit blocked on approval;
+- a user-question blocker that survives session switching;
+- multimodal upload/ASR/audio handoff;
+- responsive image/HTML/table artifacts;
+- resumable provider failure and long-context history.
+
+New session, queue/stop/resume, session switching, exact Latest/follow behavior and background execution use the same Engine path as the seeded scenarios.
+
+Synthetic deep history remains a Demo-only storage substitute so the same scenarios also prove:
 
 - 1,000,000+ addressable messages with bounded hot projection and DOM;
-- streaming reasoning and Markdown with variable height;
-- image/file/audio uploads, single and multiple;
-- generic tool call/result rendering with stable `callId` correlation;
-- image generation plus generated artifacts/provenance;
-- TTS/ASR;
-- code, diff, HTML and broad Markdown forms;
-- queue, approval/question blockers, failure/resume and background execution;
-- far jump, prepend, exact Latest/follow behavior and hot-runtime eviction;
-- responsive layout, composer resize and hostile host CSS.
+- far jump and prepend with semantic anchor preservation;
+- hot-runtime eviction while SessionKernels keep working;
+- responsive layout and variable-height composer behavior.
 
-Demo fixtures are canonical messages; there is no renderer-only shortcut.
+Demo scenario tails are canonical messages; there is no renderer-only shortcut.
+
+### Diagnostics
+
+Performance counters, fixture injection, arbitrary global jumps and stress controls are verification tools rather than product affordances. They are hidden from the normal public workspace and can be enabled explicitly with `?diagnostics=1`; Playwright also enables them through `navigator.webdriver`.
 
 ## Extension rule
 
@@ -84,7 +97,7 @@ Do not introduce a generic plugin graph or cross-event node engine until a real 
 
 - `src/engine/vue/engine.css` — Engine shell, viewport and composer geometry;
 - `src/engine/vue/renderers.css` — renderer visuals and containment;
-- `src/demo/styles/*` — host page, workspace, diagnostics and architecture-page styling.
+- `src/demo/styles/*` — host workspace, scenario chrome, diagnostics and architecture-page styling.
 
 Both Engine stylesheets are rooted at `[data-conversation-engine].conversation-shell`; only Demo styles may reset `html`, `body` or `#app`.
 

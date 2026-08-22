@@ -5,6 +5,7 @@ import { BatchedNotifier, type Unsubscribe } from '../engine/core/notifier'
 import { ConversationSessionRuntime } from '../engine/runtime/session-runtime'
 import type { SessionViewMemory } from '../engine/viewport/state'
 import { SyntheticHistoryAdapter } from './history-adapter'
+import { createScenarioTail } from './session-scenarios'
 import { SyntheticStreamController } from './stream-controller'
 import {
   newSessionSeed,
@@ -15,7 +16,10 @@ import {
 
 export const HOT_SESSION_LIMIT = 3
 
-/** Demo composition only. The reusable engine owns a SessionKernel/SessionRuntime; this shell seeds fake sessions and product list metadata. */
+/**
+ * Demo composition only. Realistic scenario tails, fake ages and synthetic playback
+ * stay here; reusable Kernel/Runtime behavior remains under engine/**.
+ */
 export class DemoWorkspaceRuntime {
   #kernels = new Map<string, ConversationSessionKernel>()
   #executions = new Map<string, SyntheticStreamController>()
@@ -124,7 +128,10 @@ export class DemoWorkspaceRuntime {
   }
 
   #register(descriptor: DemoSessionSeed, prepend = false): void {
-    const adapter = new SyntheticHistoryAdapter(descriptor.id, descriptor.logicalCount, descriptor.seedOffset, descriptor.liveTail === true)
+    const tail = descriptor.scenario
+      ? createScenarioTail(descriptor.id, descriptor.logicalCount, descriptor.scenario)
+      : []
+    const adapter = new SyntheticHistoryAdapter(descriptor.id, descriptor.logicalCount, descriptor.seedOffset, descriptor.liveTail === true, tail)
     const kernel = new ConversationSessionKernel(descriptor, adapter)
     this.#kernels.set(descriptor.id, kernel)
     this.#ages.set(descriptor.id, descriptor.age)

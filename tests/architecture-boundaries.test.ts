@@ -96,21 +96,31 @@ describe('engine architecture boundaries', () => {
     expect(runtime).not.toMatch(/\b(?:mountedRows|jumpInput)\b/)
 
     const demoStream = readFileSync(join(demoRoot, 'stream-controller.ts'), 'utf8')
+    const liveScript = readFileSync(join(demoRoot, 'live-run-script.ts'), 'utf8')
     expect(demoStream).toMatch(/\brate\s*=\s*20/)
     expect(demoStream).toMatch(/\bingressTicks\s*=\s*0/)
     expect(demoStream).toMatch(/\bpublishTicks\s*=\s*0/)
     expect(demoStream).toContain('estimateTokens')
+    expect(liveScript).toContain('applyLiveScenarioMilestone')
+    expect(liveScript).toContain("'tool-call'")
+    expect(liveScript).toContain("'diff'")
+    expect(liveScript).toContain("'attachments'")
   })
 
-  it('keeps product chrome and physical telemetry outside the reusable viewport', () => {
+  it('keeps the public workspace scenario-focused while diagnostics remain explicitly non-product', () => {
     const workspace = readFileSync(join(demoRoot, 'components/AgentWorkspace.vue'), 'utf8')
     const viewport = readFileSync(join(engineRoot, 'vue/ConversationViewport.vue'), 'utf8')
 
     expect(workspace).toContain("./DemoDiagnosticsPanel.vue")
     expect(workspace).toContain("from '../../engine/vue'")
     expect(workspace).not.toContain('../../engine/vue/ConversationViewport.vue')
+    expect(workspace).not.toContain('data-testid="session-search"')
+    expect(workspace).not.toContain('data-testid="scenario-launch"')
+    expect(workspace).not.toContain('Synthetic playback')
+    expect(workspace).not.toContain('canonical blocks · bounded projection')
+    expect(workspace).toContain('navigator.webdriver')
+    expect(workspace).toContain("has('diagnostics')")
     expect(workspace).not.toContain('data-testid="metrics"')
-    expect(workspace).toContain('#header-context')
     expect(workspace).toContain('#header-actions')
     expect(workspace).not.toContain('data-conversation-engine=')
     expect(viewport).toContain('data-conversation-engine="vue"')
@@ -119,6 +129,19 @@ describe('engine architecture boundaries', () => {
     expect(viewport).not.toContain('function pinMeasuredEnd')
     expect(viewport).toContain("emit('viewportMetrics'")
     expect(viewport).not.toMatch(/Synthetic Agent|Reasoning · balanced|Search conversation|title="Attach"|>Agent ▾<|>Model ▾</)
+  })
+
+  it('keeps realistic public scenario tails as canonical Demo history, not renderer shortcuts', () => {
+    const scenarios = readFileSync(join(demoRoot, 'session-scenarios.ts'), 'utf8')
+    const adapter = readFileSync(join(demoRoot, 'history-adapter.ts'), 'utf8')
+    expect(scenarios).toContain("block('request', 'markdown'")
+    expect(scenarios).toContain("'tool-call'")
+    expect(scenarios).toContain("'tool-result'")
+    expect(scenarios).toContain("'code'")
+    expect(scenarios).toContain("'diff'")
+    expect(scenarios).toContain("'attachments'")
+    expect(adapter).toContain('ReadonlyMap<number, LogicalMessage>')
+    expect(adapter).toContain('this.#source.getRange')
   })
 
   it('supports per-viewport renderer customization without requiring global registry mutation', () => {
@@ -138,6 +161,7 @@ describe('engine architecture boundaries', () => {
     const main = readFileSync(join(demoRoot, 'main.ts'), 'utf8')
     const shellCss = readFileSync(join(engineRoot, 'vue/engine.css'), 'utf8')
     expect(main).toContain("./styles/demo.css")
+    expect(main).toContain("./styles/scenario.css")
     expect(main).toContain("../engine/vue/engine.css")
     expect(main).toContain("./styles/architecture.css")
     expect(shellCss).toContain("@import './renderers.css'")

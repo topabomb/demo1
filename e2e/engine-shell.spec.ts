@@ -1,12 +1,15 @@
 import { expect, test } from '@playwright/test'
 
-test('engine shell exposes real controls and demo-owned chrome without fake affordances', async ({ page }) => {
+test('engine shell exposes a realistic workspace surface without test-only public affordances', async ({ page }) => {
   await page.goto('./')
   await expect(page.getByTestId('active-session-id')).toBeVisible()
-  await expect(page.getByText('Synthetic playback', { exact: true })).toBeVisible()
-  await expect(page.getByTestId('diagnostics-open')).toBeVisible()
+  await expect(page.getByText('Release regression investigation', { exact: true }).first()).toBeVisible()
   await expect(page.getByTestId('composer-input')).toBeVisible()
+  await expect(page.getByTestId('new-session')).toBeVisible()
 
+  await expect(page.getByText('Synthetic playback', { exact: true })).toHaveCount(0)
+  await expect(page.getByTestId('session-search')).toHaveCount(0)
+  await expect(page.getByTestId('scenario-launch')).toHaveCount(0)
   await expect(page.locator('[title="Search conversation"]')).toHaveCount(0)
   await expect(page.locator('[title="Attach"]')).toHaveCount(0)
   await expect(page.locator('.model-chip')).toHaveCount(0)
