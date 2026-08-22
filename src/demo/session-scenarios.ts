@@ -1,4 +1,5 @@
 import { block, type AppendCanonicalMessage, type LogicalMessage, type ResourceRef } from '../engine/model/conversation'
+import { executiveBriefingScenario, meetingFollowupScenario } from './office-scenarios'
 
 export type DemoScenarioKey =
   | 'release-investigation'
@@ -9,6 +10,8 @@ export type DemoScenarioKey =
   | 'multimodal-handoff'
   | 'android-rollout'
   | 'context-recovery'
+  | 'executive-briefing'
+  | 'meeting-followup'
 
 const fileRef = (id: string, uri: string, label = uri): ResourceRef => ({ id, kind: 'file', uri, label })
 
@@ -50,6 +53,8 @@ function scenarioEntries(scope: string, scenario: DemoScenarioKey): readonly App
     case 'multimodal-handoff': return multimodalHandoff(scope)
     case 'android-rollout': return androidRollout(scope)
     case 'context-recovery': return contextRecovery(scope)
+    case 'executive-briefing': return executiveBriefingScenario(scope)
+    case 'meeting-followup': return meetingFollowupScenario(scope)
   }
 }
 
