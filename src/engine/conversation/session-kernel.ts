@@ -65,6 +65,9 @@ export class ConversationSessionKernel {
     this.history = history
     this.#status = descriptor.status
     this.#pendingInteraction = descriptor.pendingInteraction ?? null
+    if ((this.#status === 'waiting') !== (this.#pendingInteraction !== null)) {
+      throw new Error('waiting session state requires exactly one pending interaction')
+    }
     this.#lastTurnReason = descriptor.lastTurnReason ?? null
     this.#lastFailure = descriptor.lastFailure ?? null
     this.#usage = normalizeTokenUsage(descriptor.usage)
@@ -238,8 +241,9 @@ export class ConversationSessionKernel {
     this.#emit({ kind: 'status', messageIndex: currentAssistantIndex })
   }
 
-  /** Suspend live execution on a typed user interaction without settling the Turn. */
+  /** Suspend a working execution on a typed user interaction without settling the Turn. */
   requestInteraction(interaction: PendingInteraction): void {
+    if (this.#status !== 'working') throw new Error('cannot request an interaction when execution is not working')
     if (this.#pendingInteraction) throw new Error(`interaction ${this.#pendingInteraction.id} is already pending`)
     const index = this.#currentAssistantIndex
     this.#pendingInteraction = { ...interaction }
