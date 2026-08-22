@@ -100,10 +100,14 @@ describe('engine architecture boundaries', () => {
     const runtime = readFileSync(join(engineRoot, 'runtime/session-runtime.ts'), 'utf8')
     const demoStream = readFileSync(join(demoRoot, 'stream-controller.ts'), 'utf8')
     const workspace = readFileSync(join(demoRoot, 'workspace-runtime.ts'), 'utf8')
+    const turnReasonDeclaration = contracts.slice(
+      contracts.indexOf('export type TurnEndReasonKind'),
+      contracts.indexOf('export interface LlmFailure'),
+    )
 
     expect(contracts).toContain("| { kind: 'question'; answer: string | null }")
     expect(contracts).toContain('activeAssistantIndex?: number | null')
-    expect(contracts).not.toMatch(/TurnEndReasonKind[\s\S]*\| 'blocked'/)
+    expect(turnReasonDeclaration).not.toContain("'blocked'")
     expect(kernel).toContain('descriptor.activeAssistantIndex')
     expect(kernel).not.toMatch(/(?:history|backend)\.count\s*-\s*1/)
     expect(kernel).toContain('requestInteraction(interaction: PendingInteraction)')
