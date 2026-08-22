@@ -84,29 +84,43 @@ describe('engine architecture boundaries', () => {
     expect(source).toContain('PlanItem')
     expect(source).toContain('ToolPresentationIntent')
     expect(source).toContain('AgentRunRef')
+    expect(source).toContain('AgentRunMode')
     expect(source).not.toMatch(/ConversationBackend|ConversationHistoryAdapter/)
     expect(source).not.toMatch(/SessionUiSnapshot|ShiftPlan|WINDOW_MESSAGES|SHIFT_MESSAGES/)
     expect(source).not.toContain('PresentationSurface')
   })
 
-  it('keeps workbench rendering semantics layout-, style- and policy-agnostic', () => {
+  it('keeps workbench rendering semantics layout-, style- and orchestration-agnostic', () => {
     const model = readFileSync(join(engineRoot, 'model/conversation.ts'), 'utf8')
     const renderUnit = readFileSync(join(engineRoot, 'presentation/render-unit.ts'), 'utf8')
     const projector = readFileSync(join(engineRoot, 'presentation/projector-registry.ts'), 'utf8')
     const combined = `${model}\n${renderUnit}`
 
-    expect(model).toContain('export interface ResourceRef')
-    expect(model).toContain("kind: 'file' | 'url' | 'artifact'")
+    expect(model).toContain("export type ResourceKind = 'file' | 'url' | 'artifact'")
+    expect(model).toContain('kind: ResourceKind')
+    expect(model).toContain("export type AgentRunMode = 'foreground' | 'background'")
+    expect(model).toContain("export type AgentRunStatus = 'queued' | 'running' | 'waiting' | 'completed' | 'failed' | 'interrupted'")
+    expect(model).toContain("delegation: { title?: string; runs: readonly AgentRunRef[] }")
     expect(model).toContain("| { kind: 'terminal'; command?: string; cwd?: ResourceRef }")
     expect(model).toContain("plan: { title?: string; items: readonly PlanItem[] }")
-    expect(model).toContain("'agent-run': AgentRunRef")
     expect(model).toContain("terminal: { callId?: string")
     expect(model).toContain('diff: { resource: ResourceRef;')
     expect(model).not.toMatch(/diff:\s*\{[^}]*file:/s)
+    expect(model).not.toMatch(/run_in_background|maxParallel|worktree|permissionMode|spawnChild|scheduleAgent/)
     expect(combined).not.toMatch(/PresentationSurface|panelPlacement|panelSide|sidebar|drawer|cssClass|className|color:/)
     expect(projector).toContain(".register('plan'")
     expect(projector).toContain(".register('terminal'")
-    expect(projector).toContain(".register('agent-run'")
+    expect(projector).toContain(".register('delegation'")
+    expect(projector).not.toContain(".register('agent-run'")
+  })
+
+  it('keeps child traces separate while exposing stable parent-facing run references', () => {
+    const model = readFileSync(join(engineRoot, 'model/conversation.ts'), 'utf8')
+    const projector = readFileSync(join(engineRoot, 'presentation/projector-registry.ts'), 'utf8')
+    expect(model).toContain('childSessionId?: string')
+    expect(model).toContain('Child trace remains in the child session')
+    expect(model).not.toMatch(/messages:\s*readonly LogicalMessage\[\]|childMessages|childHistory/)
+    expect(projector).toContain("'delegation', 'delegation'")
   })
 
   it('keeps terminal streaming incremental without turning Engine into a process manager', () => {
@@ -158,7 +172,7 @@ describe('engine architecture boundaries', () => {
     expect(workspace).toContain('activeAssistantIndex: descriptor.logicalCount - 1')
   })
 
-  it('keeps synthetic playback, Agent-loop, plan timing and delegated-run policy in Demo', () => {
+  it('keeps synthetic playback, Agent-loop, child timing and delegation lifecycle in Demo', () => {
     const demoStream = readFileSync(join(demoRoot, 'stream-controller.ts'), 'utf8')
     const liveScript = readFileSync(join(demoRoot, 'live-run-script.ts'), 'utf8')
     expect(demoStream).toMatch(/\brate\s*=\s*20/)
@@ -168,7 +182,11 @@ describe('engine architecture boundaries', () => {
     expect(demoStream).toContain("DemoPlaybackMode = 'standard' | 'stress' | 'agent-loop'")
     expect(demoStream).toContain('continueExecutionAt')
     expect(demoStream).toContain('#updatePlan')
+    expect(demoStream).toContain('#updateDelegations')
     expect(liveScript).toContain('review-rendering-contract')
+    expect(liveScript).toContain("mode: 'foreground'")
+    expect(liveScript).toContain("mode: 'background'")
+    expect(liveScript).toContain('childSessionId')
     expect(liveScript).toContain('terminalChunks')
     expect(liveScript).toContain("category: 'filesystem'")
     expect(liveScript).toContain("category: 'search'")
@@ -224,7 +242,8 @@ describe('engine architecture boundaries', () => {
     expect(registry).toContain('clone(): RendererRegistry')
     expect(registry).toContain("['plan', PlanBlock]")
     expect(registry).toContain("['terminal', TerminalBlock]")
-    expect(registry).toContain("['agent-run', AgentRunBlock]")
+    expect(registry).toContain("['delegation', DelegationBlock]")
+    expect(registry).not.toContain('AgentRunBlock')
     expect(viewport).toContain('renderers?: RendererResolver')
   })
 
@@ -274,6 +293,7 @@ describe('engine architecture boundaries', () => {
     expect(page).toContain('docs/architecture.md')
     expect(page).toContain('Agent Workbench Rendering Engine')
     expect(page).toContain('Semantic renderability is Engine responsibility')
+    expect(page).toContain('delegated child')
     expect(page).toContain('no core PresentationSurface')
     expect(page).toContain('package publishing disabled')
     expect(page).not.toContain('Private Vite application')
