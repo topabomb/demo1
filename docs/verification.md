@@ -24,8 +24,8 @@ Automated tests must protect these boundaries:
 - framework-neutral Engine layers do not depend on Vue/DOM/physical layout;
 - `src/engine/index.ts` excludes Vue/Demo implementation and tuning telemetry;
 - `src/engine/vue/index.ts` remains instance-oriented rather than exposing process-global renderer mutation;
-- external adapters own provider decoding, Agent/tool orchestration, delegated-Agent scheduling, permission policy, persistence, retries and async IO;
-- Demo owns workspace/LRU, playback timing, realistic scripted output, fake delegated runs and diagnostics;
+- external adapters own provider decoding, Agent/tool/child orchestration, child concurrency/provider selection, permission policy, persistence, retries and async IO;
+- Demo owns workspace/LRU, playback timing, realistic scripted output, scripted child lifecycles and diagnostics;
 - no core `PresentationSurface`, panel, sidebar, tab, drawer or editor-routing contract is introduced without a proven reusable multi-surface requirement;
 - canonical or RenderUnit contracts contain no CSS class, color, width, panel placement or host open action.
 
@@ -37,10 +37,14 @@ Automated tests must protect these boundaries:
 - `ToolCategory` describes capability while `ToolPresentationIntent` independently describes renderer-neutral interpretation;
 - presentation intent remains limited to generic/resources/changes/terminal semantics and contains no physical placement;
 - tool call/result remain separate records correlated through producer-owned `callId`;
-- AgentRunRef is renderable producer-reported evidence only; Engine has no spawn/schedule/cancel Agent operation;
+- one canonical `delegation` block contains one or more stable `AgentRunRef`s rather than separate singular/plural concepts;
+- `AgentRunMode` is exactly parent-facing `foreground | background` observation and is never a scheduling command;
+- each delegated run has its own status, stable `runId` and optional `childSessionId`; child status never redefines parent `SessionStatus` or `lastTurnReason`;
+- parent delegation state never recursively embeds child `LogicalMessage[]`, child tool traces or nested child history;
+- child scheduling, concurrency, provider/worktree choice, permission, resume/interrupt and child-session navigation remain outside Engine;
 - terminal output is first-class canonical content rather than repeated opaque tool JSON;
 - append-only terminal output emits `append-terminal` and `ProjectionEngine.appendTerminalDelta(...)` updates one stable terminal RenderUnit while unrelated siblings retain identity;
-- terminal process lifecycle remains execution-adapter policy.
+- terminal process lifecycle remains execution-adapter policy; Demo abort evidence must settle the terminal as `interrupted` with exit code `130`, never success.
 
 ### Existing session/runtime invariants
 
@@ -69,7 +73,10 @@ The browser must prove the default public scenario, not a hidden fixture:
 - the seeded first assistant Step visibly contains a Plan with one active and later completed items;
 - filesystem/search tools expose stable `callId`, capability category, `resources` presentation intent and ResourceRef labels;
 - Plan progress changes independently from actual model/tool Step coordinates;
-- Step 3 renders a delegated reviewer AgentRunRef without invoking any Engine-side Agent action;
+- Step 3 renders one `delegation` batch containing a completed foreground reviewer and two independently addressable background reviewers still running;
+- each delegated run exposes stable `runId`, `mode`, `status` and child-session address without rendering child trace recursively;
+- the parent advances into shell/terminal work while the background children are still represented independently;
+- the two background child statuses later settle to completed without redefining parent Turn/Session state;
 - shell verification exposes `terminal` presentation intent;
 - a standalone role:tool result streams a dedicated Terminal block through multiple deltas;
 - terminal output contains unit/build/Chromium evidence and settles with explicit status/exit code;
@@ -89,7 +96,7 @@ The suite also covers:
 - failure/resume and background execution while viewports are switched/evicted;
 - image/file/audio attachments, generated images, TTS/ASR, code, diff and sanitized HTML;
 - far jump, prepend, exact Latest/follow and session restore;
-- desktop/mobile reflow and variable-height content including expanded reasoning/terminal rows;
+- desktop/mobile reflow and variable-height content including expanded reasoning/terminal/delegation rows;
 - hostile host CSS without breaking reference adapter containment;
 - a focused public workspace with one-click Demo-owned Session diagnostics and no fake search/model/attachment/product controls.
 
@@ -113,11 +120,11 @@ These are verification bounds for the reference implementation, not framework-ne
 
 ## Public API checks
 
-Architecture tests fail if the neutral entry exposes implementation details such as `SessionUiSnapshot`, `ShiftPlan`, `WINDOW_MESSAGES` or `SHIFT_MESSAGES`, or if workbench semantics acquire panel/layout/style fields.
+Architecture tests fail if the neutral entry exposes implementation details such as `SessionUiSnapshot`, `ShiftPlan`, `WINDOW_MESSAGES` or `SHIFT_MESSAGES`, or if workbench semantics acquire panel/layout/style/orchestration fields.
 
-Architecture tests also assert the presence of the stable semantic additions (`ResourceRef`, PlanItem, ToolPresentationIntent, AgentRunRef and terminal append support) and the absence of a speculative `PresentationSurface` core API.
+Architecture tests also assert the stable semantic additions (`ResourceRef`, PlanItem, ToolPresentationIntent, AgentRunMode/AgentRunRef, canonical `delegation` and terminal append support), the absence of the superseded singular `agent-run` block, and the absence of a speculative `PresentationSurface` core API.
 
-The Vue API remains an optional reference adapter. Plan/Terminal/AgentRun components and `workbench-renderers.css` may define physical presentation but cannot change canonical semantics. Every Engine Vue stylesheet must remain rooted at `[data-conversation-engine].conversation-shell` and must not reset `html`, `body` or `#app`.
+The Vue API remains an optional reference adapter. Plan/Terminal/Delegation components and `workbench-renderers.css` may define physical presentation but cannot change canonical semantics. Every Engine Vue stylesheet must remain rooted at `[data-conversation-engine].conversation-shell` and must not reset `html`, `body` or `#app`.
 
 The repository verifies source-level reuse; its package manifest disables npm publication. Package distribution requires a separate library-build/export-map/consumer-smoke-test decision.
 
