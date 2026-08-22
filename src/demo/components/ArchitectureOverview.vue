@@ -141,7 +141,7 @@ Child traces remain in child sessions.</pre></div>
     </section>
 
     <section id="efficiency" class="architecture-section">
-      <header class="section-heading"><span>05 · Hot-path budgets</span><h2>Current task and child navigation do not change the scaling law</h2><p>WorkPlan updates are direct session state; delegation updates touch one parent block; neither scans total history or embeds a nested child conversation tree.</p></header>
+      <header class="section-heading"><span>05 · Hot-path budgets</span><h2>Rich workbench output does not change the scaling law</h2><p>Current WorkPlan updates are direct session state; delegation updates touch one parent block; neither scans total history or embeds a nested child conversation tree.</p></header>
       <div class="scenario-table"><div v-for="row in hotPaths" :key="row[0]" class="scenario-row"><strong>{{ row[0] }}<small style="display:block;margin-top:4px;opacity:.65">{{ row[1] }}</small></strong><span>{{ row[2] }}</span></div></div>
     </section>
 
