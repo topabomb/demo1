@@ -17,6 +17,9 @@ type DemoNavigationTarget =
   | 'agent-final'
   | 'office-briefing'
   | 'office-followup'
+  | 'lifecycle-clarify'
+  | 'lifecycle-fallback'
+  | 'lifecycle-steer'
 
 const props = defineProps<{
   runtime: ConversationSessionRuntime
@@ -111,8 +114,11 @@ function pauseStream(): void { props.stream.pause() }
         <button class="secondary" data-testid="demo-agent-final" @click="emit('demoNavigate', 'agent-final')">Final</button>
         <button data-testid="demo-office-briefing" @click="emit('demoNavigate', 'office-briefing')">Executive briefing</button>
         <button data-testid="demo-office-followup" @click="emit('demoNavigate', 'office-followup')">Meeting approval</button>
+        <button data-testid="demo-lifecycle-clarify" @click="emit('demoNavigate', 'lifecycle-clarify')">Clarify / answer</button>
+        <button data-testid="demo-lifecycle-fallback" @click="emit('demoNavigate', 'lifecycle-fallback')">Failure fallback</button>
+        <button data-testid="demo-lifecycle-steer" @click="emit('demoNavigate', 'lifecycle-steer')">Interrupt / steer</button>
       </div>
-      <small class="control-note">Demo-only shortcuts make the canonical evidence easy to inspect. They switch/jump sessions but do not add navigation, workflow or connector policy to the Engine.</small>
+      <small class="control-note">Demo-only shortcuts make canonical lifecycle evidence easy to inspect. They switch/jump sessions but do not add navigation, retry/fallback, workflow or connector policy to the Engine.</small>
     </div>
 
     <div class="control-group">
@@ -202,7 +208,7 @@ function pauseStream(): void { props.stream.pause() }
 
     <div class="architecture-note">
       <strong>What this panel proves</strong>
-      <span>Engine state stays decoupled from Demo playback controls: large logical history remains separate from hot projection and mounted DOM, while canonical Turn/Step/tool identity, delegated child runs, background SessionKernels, queue/blockers and exact reader state remain observable.</span>
+      <span>Engine state stays decoupled from Demo playback/recovery controls: large logical history remains separate from hot projection and mounted DOM, while canonical Turn/Step/tool identity, delegated child runs, background SessionKernels, queue/blockers and exact reader state remain observable.</span>
     </div>
   </aside>
 </template>

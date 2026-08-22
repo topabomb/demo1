@@ -1,4 +1,5 @@
 import type { ConversationDescriptor, PendingInteraction } from '../engine/conversation/contracts'
+import type { LifecycleScenarioKey } from './lifecycle-scenarios'
 import type { DemoScenarioKey } from './session-scenarios'
 import type { DemoPlaybackMode } from './stream-controller'
 
@@ -11,7 +12,7 @@ export type ChildDemoScenarioKey = 'child-rendering-review' | 'child-terminal-au
 export interface DemoSessionSeed extends DemoSessionDescriptor {
   seedOffset: number
   liveTail?: boolean
-  scenario?: DemoScenarioKey | ChildDemoScenarioKey
+  scenario?: DemoScenarioKey | ChildDemoScenarioKey | LifecycleScenarioKey
   playbackMode?: DemoPlaybackMode
   /** Demo workspace relationship only; Engine does not own a session tree. */
   parentSessionId?: string
@@ -72,6 +73,24 @@ const followupPlan = {
   ],
 }
 
+const resiliencePlan = {
+  title: 'Launch-risk synthesis',
+  items: [
+    { id: 'fanout', text: 'Run customer, metrics and policy specialist checks', status: 'completed' as const },
+    { id: 'recover', text: 'Recover any missing evidence through an allowed fallback', status: 'completed' as const },
+    { id: 'synthesize', text: 'Produce a decision brief with explicit confidence', status: 'completed' as const },
+  ],
+}
+
+const steeringPlan = {
+  title: 'Read-only migration review',
+  items: [
+    { id: 'inspect', text: 'Inspect migration configuration without writes', status: 'completed' as const },
+    { id: 'impact', text: 'Summarize affected targets and rollback boundary', status: 'completed' as const },
+    { id: 'recommend', text: 'Recommend the smallest reversible future change', status: 'completed' as const },
+  ],
+}
+
 function usage(inputTokens: number, outputTokens: number, cacheReadTokens: number, cacheWriteTokens: number, reasoningTokens = 0) {
   return { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, reasoningTokens }
 }
@@ -109,7 +128,17 @@ export const RECENT_SESSIONS: readonly DemoSessionSeed[] = [
     usage: usage(29_000, 4_300, 116_000, 6_100, 1_100), context: { projectedTokens: 44_800, contextWindow: 128_000 }, turnCount: 1_700, stepCount: 3_200,
   },
   {
-    id: 'million', title: 'Million-message streaming stress', age: '12m', status: 'working', logicalCount: 1_000_000,
+    id: 'resilience-fallback', title: 'Launch risk fallback', age: '14m', status: 'idle', logicalCount: 44_000,
+    seedOffset: 73, scenario: 'partial-failure-recovery', lastTurnReason: 'completed', activePlan: resiliencePlan,
+    usage: usage(38_000, 5_200, 141_000, 7_400, 1_500), context: { projectedTokens: 51_600, contextWindow: 128_000 }, turnCount: 2_100, stepCount: 4_000,
+  },
+  {
+    id: 'steered-migration', title: 'Interrupted migration steering', age: '18m', status: 'idle', logicalCount: 28_000,
+    seedOffset: 79, scenario: 'steered-interruption', lastTurnReason: 'completed', activePlan: steeringPlan,
+    usage: usage(25_000, 3_900, 97_000, 4_900, 980), context: { projectedTokens: 39_200, contextWindow: 128_000 }, turnCount: 1_400, stepCount: 2_900,
+  },
+  {
+    id: 'million', title: 'Million-message streaming stress', age: '22m', status: 'working', logicalCount: 1_000_000,
     seedOffset: 0, liveTail: true, scenario: 'release-investigation', playbackMode: 'stress',
     usage: usage(184_000, 12_600, 936_000, 31_000, 3_900), context: { projectedTokens: 103_400, contextWindow: 128_000 }, turnCount: 42_100, stepCount: 81_900,
   },

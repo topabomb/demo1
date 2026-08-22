@@ -1,16 +1,16 @@
 <script setup lang="ts">
 const ownership = [
-  ['External adapters', 'Provider · Agent runtime · connectors · persistence', 'Own protocol decoding, model/tool/delegated-child orchestration, enterprise connector auth, real mail/calendar/document actions, permission policy, retries, durable persistence and async IO. Normalize history plus explicit current session state into Engine contracts.'],
-  ['Framework-neutral Engine', 'src/engine core', 'Own canonical history semantics, explicit renderable session truth such as current WorkPlan, synchronous hot reads, bounded projection and semantic viewport policy. No layout, styling, session-tree navigation, connector or product orchestration.'],
-  ['Demo host', 'src/demo/**', 'Own multi-session composition, parent/child navigation, scripted coding/office/child tasks, fake sources/actions, synthetic playback/history, diagnostics shortcuts and this architecture page.'],
+  ['External adapters', 'Provider · Agent runtime · connectors · persistence', 'Own protocol decoding, model/tool/delegated-child orchestration, enterprise connector auth, real mail/calendar/document actions, permission policy, retries/backoff/fallback choice, durable persistence and async IO. Normalize history plus explicit current session state into Engine contracts.'],
+  ['Framework-neutral Engine', 'src/engine core', 'Own canonical history semantics, explicit renderable session truth such as current WorkPlan, synchronous hot reads, bounded projection and semantic viewport policy. No layout, styling, session-tree navigation, connector or recovery-policy orchestration.'],
+  ['Demo host', 'src/demo/**', 'Own multi-session composition, parent/child navigation, scripted coding/office/lifecycle/child tasks, fake sources/actions, synthetic playback/history, diagnostics shortcuts and this architecture page.'],
 ]
 
 const contracts = [
   ['01', 'Canonical identity', 'Message · Turn · Step · Block · callId', 'Stable producer coordinates survive remounts and virtualization. DOM adjacency is never business identity.'],
-  ['02', 'Workbench semantics', 'ResourceRef · Plan · Tool intent · Terminal · Delegation', 'Describe resources, history snapshots, streams and delegated child evidence without defining editor actions, panels, scheduling, connectors or provider policy.'],
+  ['02', 'Workbench semantics', 'ResourceRef · Plan · Tool intent · Terminal · Delegation', 'Describe resources, history snapshots, streams and delegated child evidence without defining editor actions, panels, scheduling, connectors, retry or fallback policy.'],
   ['03', 'Current work state', 'WorkPlan = canonical Plan shape', 'SessionKernel stores an explicit producer-owned current WorkPlan. It never scans latest history or DOM to infer which Plan is current.'],
   ['04', 'Delegated child refs', 'AgentRunRef · foreground/background · childSessionId', 'Parent keeps stable child identity/status/summary. Detailed child trace stays in an independently addressable conversation session.'],
-  ['05', 'SessionKernel', 'runtime session truth', 'Execution state, current WorkPlan, blockers, queue, explicit outcomes and accounting. Workspace topology and external side effects remain outside.'],
+  ['05', 'SessionKernel', 'runtime session truth', 'Execution state, current WorkPlan, blockers, queue, explicit outcomes and accounting. Workspace topology, fallback policy and external side effects remain outside.'],
   ['06', 'History source', 'sync hot-read boundary', 'Async database/network/connector fetch and cache fill stop before ConversationHistorySource.'],
   ['07', 'Projection', 'bounded rebuildable presentation', 'Hot canonical content becomes stable RenderUnits. Markdown, reasoning and terminal append paths update incrementally.'],
   ['08', 'Semantic viewport', 'reader · Latest · anchor · follow', 'Conversation position remains semantic while current-plan disclosure, child navigation and rich rows change physical composition.'],
@@ -23,9 +23,11 @@ const distinctions = [
   ['Tool category ≠ presentation intent', 'Capability such as filesystem/search/shell/productivity is independent from generic/resources/changes/terminal interpretation.'],
   ['ResourceRef ≠ host action', 'File/URL/artifact identity does not say whether the host opens an editor, browser, mail app, document or nothing.'],
   ['Delegation ≠ subagent runtime', 'Engine renders producer-reported run identity, mode and status; it never schedules, resumes, stops or selects a child Agent.'],
-  ['Child status ≠ parent status', 'A background child may still be running while its parent advances or settles; child completion never implies parent completion.'],
+  ['Child status ≠ parent status', 'A child may fail or remain running while its parent advances or completes; child state never determines parent outcome.'],
   ['Child reference ≠ child trace', 'Parent history keeps runId/childSessionId/summary only. Child messages/tools/nested delegation remain in the child session.'],
   ['Child address ≠ session tree', 'childSessionId is a semantic address. Parent/child topology, visibility, activation and return navigation are Host/Demo state.'],
+  ['Failure evidence ≠ retry/fallback policy', 'Failed tool/child evidence is renderable truth. Retry budget, backoff, fallback source and acceptable confidence belong to runtime/host policy.'],
+  ['Interrupted Turn ≠ continuation policy', 'Interrupted terminal/Turn evidence remains history. A later user instruction may retry, branch or start a new Turn without Engine choosing that policy.'],
   ['Approval ≠ external side effect', 'PendingApproval is session state. Sending mail, creating meetings or editing enterprise documents remains external-adapter work.'],
   ['Semantic content ≠ layout surface', 'There is intentionally no core PresentationSurface, composer-strip placement, panel, sidebar, tab or preview-placement contract.'],
 ]
@@ -49,6 +51,9 @@ const demoEvidence = [
   ['Delegated child lifecycle', 'Stable runId/mode/status/childSessionId are rendered independently. Parent history does not duplicate child reasoning/tool traces.'],
   ['Executive briefing', 'Synthetic mail/calendar/doc/web ResourceRefs → source-bearing tool evidence → parallel specialists → decision brief → DOCX/PPTX/XLSX artifacts.'],
   ['Meeting follow-up approval', 'Transcript/mail/doc evidence → owners and dates → draft → blocked send/schedule WorkPlan/Plan item → generic session PendingApproval. No fake connector side effect.'],
+  ['Clarify and continue', 'Typed PendingQuestion → user answer → blocker clears → same session can start another Turn. Engine does not decide how that answer changes provider execution.'],
+  ['Partial failure recovery', 'One background specialist failed while two completed → Demo/runtime uses a cached-source fallback → parent completes with WorkPlan 3/3 and an explicit evidence-confidence gap.'],
+  ['Interrupt and steer', 'Earlier terminal remains interrupted with exit 130 → user changes direction in a separate Turn → read-only Plan/tools/report complete without rewriting old evidence.'],
   ['Diagnostics shortcuts', 'Restart / Plan / Delegation / Terminal / Final / office scenario buttons are Demo-owned jumps into canonical evidence, not Engine navigation APIs.'],
   ['Million-message stress', 'Dedicated 1M scenario proves bounded projection/cache/DOM independently from workbench structural transitions.'],
 ]
@@ -57,6 +62,7 @@ const nonGoals = [
   'Project / repository / worktree lifecycle',
   'Agent/model routing or delegated-child scheduling/concurrency',
   'child provider selection, permissions, resume / interrupt / disposal',
+  'retry budgets, backoff, fallback-source selection or automatic recovery policy',
   'parent/child workspace tree, breadcrumbs, activation or return navigation',
   'Gmail / Outlook / Calendar / Drive / Teams / SharePoint connector and auth contracts',
   'mail sending, meeting creation or enterprise document editing',
@@ -92,20 +98,20 @@ const invariants = [
       <div class="hero-copy">
         <span class="architecture-kicker">layout-agnostic conversation + session semantics · executable host proof</span>
         <h1>Render a real Agent workbench without turning the Engine into <em>the workbench product.</em></h1>
-        <p>The core records replayable history and explicit renderable session state. Provider execution, delegated child scheduling, child-session navigation, enterprise connectors, external actions, permission policy and workspace layout remain outside it; Vue is an optional physical reference adapter.</p>
+        <p>The core records replayable history and explicit renderable session state. Provider execution, recovery policy, delegated child scheduling, child-session navigation, enterprise connectors, external actions, permission policy and workspace layout remain outside it; Vue is an optional physical reference adapter.</p>
         <div class="hero-actions"><a class="primary-link" href="#lab">Exercise the demo</a><a class="secondary-link" href="https://github.com/topabomb/demo1/blob/main/docs/architecture.md">Read architecture contract</a></div>
       </div>
-      <div class="hero-proof"><span>Normal UI work</span><strong>O(changed + hot + visible)</strong><p>One million records stay addressable while current session state updates directly and only hot semantic history plus visible physical rows do work.</p><div><b>Plan-synced</b><b>Child-addressable</b><b>Resource-aware</b><b>Layout-agnostic</b></div></div>
+      <div class="hero-proof"><span>Normal UI work</span><strong>O(changed + hot + visible)</strong><p>One million records stay addressable while current session state updates directly and only hot semantic history plus visible physical rows do work.</p><div><b>Plan-synced</b><b>Child-addressable</b><b>Recovery-neutral</b><b>Layout-agnostic</b></div></div>
     </section>
 
     <section id="ownership" class="architecture-section">
-      <header class="section-heading"><span>01 · Ownership</span><h2>External runtime → semantic Engine ← Demo host</h2><p>The reusable core has one-way dependencies and deliberately knows less than the applications, workspace router and connectors around it.</p></header>
+      <header class="section-heading"><span>01 · Ownership</span><h2>External runtime → semantic Engine ← Demo host</h2><p>The reusable core has one-way dependencies and deliberately knows less than the applications, workspace router and recovery policy around it.</p></header>
       <div class="invariant-grid state-grid"><article v-for="entry in ownership" :key="entry[0]"><strong>{{ entry[0] }}</strong><span>{{ entry[1] }}</span><p>{{ entry[2] }}</p></article></div>
       <div class="workspace-band"><span>Core rule</span><strong>Semantic renderability is Engine responsibility · product layout and workspace navigation are not</strong><p>`src/engine/**` never imports Demo. Framework-neutral layers never import Vue/DOM.</p></div>
     </section>
 
     <section id="contracts" class="architecture-section">
-      <header class="section-heading"><span>02 · Rendering contracts</span><h2>A compact set of concepts that survive across Agent clients</h2><p>Current task state and child addressability are explicit semantics; composer placement and session-tree navigation stay outside the neutral core.</p></header>
+      <header class="section-heading"><span>02 · Rendering contracts</span><h2>A compact set of concepts that survive across Agent clients</h2><p>Current task state, child addressability and failure/interruption evidence are explicit semantics; recovery decisions and session-tree navigation stay outside the neutral core.</p></header>
       <div class="layer-stack">
         <article v-for="layer in contracts" :key="layer[0]" class="layer-card">
           <div class="layer-number">{{ layer[0] }}</div>
@@ -135,18 +141,19 @@ ProjectionEngine       optional session chrome
        semantic viewport / Vue adapter
 
 childSessionId = address only
-Demo/Host owns parent↔child navigation
+failed/interrupted = evidence only
+Demo/Host owns navigation + recovery policy
 Child traces remain in child sessions.</pre></div>
       </div>
     </section>
 
     <section id="efficiency" class="architecture-section">
-      <header class="section-heading"><span>05 · Hot-path budgets</span><h2>Rich workbench output does not change the scaling law</h2><p>Current WorkPlan updates are direct session state; delegation updates touch one parent block; neither scans total history or embeds a nested child conversation tree.</p></header>
+      <header class="section-heading"><span>05 · Hot-path budgets</span><h2>Rich workbench output does not change the scaling law</h2><p>Current WorkPlan updates are direct session state; delegation updates touch one parent block; failure and interruption remain ordinary canonical/session facts rather than nested workflow engines.</p></header>
       <div class="scenario-table"><div v-for="row in hotPaths" :key="row[0]" class="scenario-row"><strong>{{ row[0] }}<small style="display:block;margin-top:4px;opacity:.65">{{ row[1] }}</small></strong><span>{{ row[2] }}</span></div></div>
     </section>
 
     <section id="evidence" class="architecture-section">
-      <header class="section-heading"><span>06 · Executable evidence</span><h2>The Demo proves state synchronization and real child conversations</h2><p>Every child transcript is an independent normal conversation session. Current task chrome reads explicit session WorkPlan; it never scrapes a Plan card from the viewport.</p></header>
+      <header class="section-heading"><span>06 · Executable evidence</span><h2>The Demo proves state synchronization, real child conversations and resilient lifecycle transitions</h2><p>Current task chrome reads explicit session WorkPlan; child traces remain independent sessions; retry/fallback/steering policy remains Demo/external-runtime responsibility.</p></header>
       <div class="scenario-table"><div v-for="row in demoEvidence" :key="row[0]" class="scenario-row"><strong>{{ row[0] }}</strong><span>{{ row[1] }}</span></div></div>
       <div class="invariant-grid"><article v-for="entry in invariants" :key="entry[1]"><strong>{{ entry[0] }}</strong><span>{{ entry[1] }}</span></article></div>
     </section>
