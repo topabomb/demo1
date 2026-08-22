@@ -167,7 +167,6 @@ async function jumpToLatest(): Promise<void> {
       const previousEpoch = uiState.value.virtualEpoch
       const previousHandle = listRef.value
       props.runtime.jump(last)
-      props.runtime.refreshProjection()
       if (!await navigation.waitForJumpEpoch(previousEpoch, previousHandle, last, revision)) return
     } else {
       props.runtime.refreshProjection()
@@ -184,11 +183,17 @@ async function jumpToLatest(): Promise<void> {
 }
 
 function abortRun(): void { props.execution.abort() }
-function resolveApproval(approved: boolean): void { props.execution.resolveInteraction({ kind: 'approval', approved }) }
+function resolveApproval(approved: boolean): void {
+  const pending = uiState.value.pendingInteraction
+  if (!pending || pending.kind !== 'approval') return
+  props.execution.resolveInteraction({ interactionId: pending.id, kind: 'approval', approved })
+}
 function resolveQuestion(answer: string | null): void {
+  const pending = uiState.value.pendingInteraction
+  if (!pending || pending.kind !== 'question') return
   const normalized = answer === null ? null : answer.trim()
   if (normalized !== null && !normalized) return
-  props.execution.resolveInteraction({ kind: 'question', answer: normalized })
+  props.execution.resolveInteraction({ interactionId: pending.id, kind: 'question', answer: normalized })
   interactionAnswer.value = ''
 }
 
@@ -350,7 +355,14 @@ defineExpose({ captureSnapshot, jumpToMessage, jumpToLatest, shiftBackward, shif
     </div>
 
     <footer ref="composerShellRef" class="composer-shell" data-testid="composer-shell">
-      <div v-if="uiState.pendingInteraction" class="pending-interaction" data-testid="pending-interaction" :data-kind="uiState.pendingInteraction.kind">
+      <div
+        v-if="uiState.pendingInteraction"
+        class="pending-interaction"
+        data-testid="pending-interaction"
+        :data-kind="uiState.pendingInteraction.kind"
+        :data-interaction-id="uiState.pendingInteraction.id"
+        :data-call-id="uiState.pendingInteraction.kind === 'approval' ? (uiState.pendingInteraction.callId ?? '') : ''"
+      >
         <div class="pending-icon">!</div>
         <div class="pending-copy"><strong>{{ uiState.pendingInteraction.title }}</strong><p>{{ uiState.pendingInteraction.detail }}</p></div>
         <template v-if="uiState.pendingInteraction.kind === 'approval'">

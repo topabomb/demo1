@@ -6,7 +6,7 @@ import { useFoldState } from './fold-state'
 const props = defineProps<{ unit: RenderUnit }>()
 const open = useFoldState(props.unit.id, Boolean(props.unit.payload.defaultOpen))
 const phase = computed(() => String(props.unit.payload.phase ?? 'call'))
-const status = computed(() => String(props.unit.payload.status ?? 'running'))
+const status = computed(() => typeof props.unit.payload.status === 'string' ? props.unit.payload.status : '')
 const category = computed(() => String(props.unit.payload.category ?? 'generic'))
 const callId = computed(() => String(props.unit.payload.callId ?? ''))
 const presentation = computed(() => {
@@ -29,7 +29,7 @@ const progress = computed(() => {
 })
 const input = computed(() => JSON.stringify(props.unit.payload.input ?? {}, null, 2))
 const output = computed(() => JSON.stringify(props.unit.payload.output ?? {}, null, 2))
-const duration = computed(() => Number(props.unit.payload.durationMs ?? 0))
+const duration = computed(() => typeof props.unit.payload.durationMs === 'number' ? props.unit.payload.durationMs : null)
 const resources = computed(() => Array.isArray(props.unit.payload.resources)
   ? props.unit.payload.resources as Array<{ id?: unknown; label?: unknown; uri?: unknown }>
   : [])
@@ -38,19 +38,20 @@ const resources = computed(() => Array.isArray(props.unit.payload.resources)
 <template>
   <article
     class="message-card tool-card"
-    :class="[`tool-${phase}`, `tool-${status}`, `tool-category-${category}`]"
+    :class="[`tool-${phase}`, status ? `tool-${status}` : '', `tool-category-${category}`]"
     :data-category="category"
     :data-presentation-kind="presentation"
     :data-call-id="callId"
+    :data-status="status || undefined"
     data-testid="tool-block"
   >
     <button class="tool-summary" type="button" :aria-expanded="open" @click="open = !open">
       <span class="tool-icon" :title="category">{{ phase === 'result' ? '↳' : categoryGlyph }}</span>
       <span class="tool-title">
         <strong>{{ phase === 'result' ? 'Tool result' : 'Tool call' }} · {{ unit.payload.name }}</strong>
-        <small><span class="tool-category-label">{{ categoryGlyph }} {{ category }}</span> · {{ presentation }}<template v-if="model"> · {{ model }}</template> · {{ callId }} · {{ duration.toLocaleString() }} ms</small>
+        <small><span class="tool-category-label">{{ categoryGlyph }} {{ category }}</span> · {{ presentation }}<template v-if="model"> · {{ model }}</template> · {{ callId }}<template v-if="duration !== null"> · {{ duration.toLocaleString() }} ms</template></small>
       </span>
-      <span :class="['status', status]"><i />{{ status }}</span>
+      <span v-if="status" :class="['status', status]"><i />{{ status }}</span>
       <span class="chevron" :class="{ open }">⌄</span>
     </button>
 

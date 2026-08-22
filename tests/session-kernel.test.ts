@@ -27,9 +27,11 @@ describe('ConversationSessionKernel', () => {
     const kernel = new ConversationSessionKernel(descriptor, new SyntheticHistoryAdapter('resume', 100, 9))
     const assistantIndex = appendTurn(kernel, 'continue this task')
     expect(kernel.startExecution(assistantIndex)).toBe(true)
+    expect(kernel.startExecution(assistantIndex)).toBe(false)
+    expect(kernel.currentAssistantIndex).toBe(assistantIndex)
     expect(kernel.count).toBe(102)
     expect(kernel.getMessage(100)).toMatchObject({ role: 'user', blocks: [{ id: 'prompt', type: 'markdown' }] })
-    expect(kernel.getMessage(101)).toMatchObject({ role: 'assistant', live: true, blocks: [{ id: 'reasoning' }, { id: 'answer' }] })
+    expect(kernel.getMessage(101)).toMatchObject({ live: true, blocks: [{ type: 'reasoning' }, { type: 'markdown' }] })
 
     const reasoning = appendReasoningContent(kernel.getMessage(assistantIndex), 'Inspect stable identities before rendering. ', 20, 11)!
     kernel.replaceCanonicalMessage(assistantIndex, reasoning.message, { kind: 'append-reasoning', blockId: reasoning.blockId, delta: 'Inspect stable identities before rendering. ' })
@@ -120,7 +122,7 @@ describe('ConversationSessionKernel', () => {
     expect(explicit.summary.activeAssistantIndex).toBe(0)
   })
 
-  it('suspends and resolves typed interactions without settling the Turn implicitly', () => {
+  it('correlates typed interaction resolutions by exact blocker identity without settling the Turn implicitly', () => {
     const kernel = new ConversationSessionKernel({ id: 'interaction', title: 'Interaction', status: 'idle', logicalCount: 0 }, new SyntheticHistoryAdapter('interaction', 0, 1))
     const assistantIndex = appendTurn(kernel, 'inspect before asking')
     expect(kernel.startExecution(assistantIndex)).toBe(true)
@@ -131,9 +133,17 @@ describe('ConversationSessionKernel', () => {
     expect(kernel.currentAssistantIndex).toBeNull()
     expect(kernel.lastTurnReason).toBeNull()
     expect(() => kernel.requestInteraction({ id: 'a2', kind: 'approval', title: 'Other', detail: 'Other?' })).toThrow(/already pending/)
-    expect(() => kernel.resolveInteraction({ kind: 'approval', approved: true })).toThrow(/expects question/)
+    expect(() => kernel.resolveInteraction({ interactionId: 'stale-q', kind: 'question', answer: 'old answer' })).toThrow(/stale/)
+    expect(() => kernel.resolveInteraction({ interactionId: 'q1', kind: 'approval', approved: true })).toThrow(/expects question/)
+    expect(() => kernel.finishExecution('completed')).toThrow(/cannot finish execution/)
 
-    kernel.resolveInteraction({ kind: 'question', answer: 'Keep the last accepted configuration.' })
+    const exposed = kernel.pendingInteraction
+    expect(exposed).not.toBe(kernel.pendingInteraction)
+    if (exposed) exposed.title = 'tampered outside the kernel'
+    expect(kernel.pendingInteraction?.title).toBe('Choose behavior')
+    expect(kernel.summary.pendingInteraction).not.toBe(kernel.pendingInteraction)
+
+    kernel.resolveInteraction({ interactionId: 'q1', kind: 'question', answer: 'Keep the last accepted configuration.' })
     expect(kernel.pendingInteraction).toBeNull()
     expect(kernel.status).toBe('idle')
     expect(kernel.lastTurnReason).toBeNull()
@@ -148,20 +158,21 @@ describe('ConversationSessionKernel', () => {
       id: 'skip-question', title: 'Skip question', status: 'waiting', logicalCount: 0,
       pendingInteraction: { id: 'q2', kind: 'question', title: 'Optional detail', detail: 'Provide extra context?' },
     }, new SyntheticHistoryAdapter('skip-question', 0, 1))
-    skippedQuestion.resolveInteraction({ kind: 'question', answer: null })
+    skippedQuestion.resolveInteraction({ interactionId: 'q2', kind: 'question', answer: null })
     expect(skippedQuestion.status).toBe('idle')
     expect(skippedQuestion.lastTurnReason).toBeNull()
 
     const approvalKernel = new ConversationSessionKernel({
       id: 'approval', title: 'Approval', status: 'waiting', logicalCount: 0,
-      pendingInteraction: { id: 'a1', kind: 'approval', title: 'Edit config', detail: 'Apply patch?', toolName: 'edit_file' },
+      pendingInteraction: { id: 'a1', kind: 'approval', title: 'Edit config', detail: 'Apply patch?', toolName: 'edit_file', callId: 'call-edit-1' },
     }, new SyntheticHistoryAdapter('approval', 0, 1))
-    approvalKernel.resolveInteraction({ kind: 'approval', approved: false })
+    expect(approvalKernel.pendingInteraction).toMatchObject({ id: 'a1', callId: 'call-edit-1' })
+    approvalKernel.resolveInteraction({ interactionId: 'a1', kind: 'approval', approved: false })
     expect(approvalKernel.status).toBe('idle')
     expect(approvalKernel.lastTurnReason).toBeNull()
 
     approvalKernel.finishExecution('aborted')
-    expect(approvalKernel.status).toBe('interrupted')
+    expect(approvalKernel.status).toBe('idle')
     expect(approvalKernel.lastTurnReason).toBe('aborted')
   })
 

@@ -107,6 +107,11 @@ test('default Demo proves coding-workbench rendering semantics through one real 
   await expect(background).toHaveCount(2)
   await expect(delegation.locator('[data-mode="background"][data-status="running"]')).toHaveCount(2)
 
+  // Re-pin the semantic tail before streaming the terminal phase. The earlier
+  // historical jumps intentionally disable tail-following; incremental projection is
+  // only expected for content that remains inside the bounded hot window.
+  await page.getByTestId('jump-latest').click()
+  await expect(page.getByTestId('jump-latest')).toHaveCount(0)
   const incrementalBeforeTerminal = numeric(await page.getByTestId('projection-incremental').textContent())
   await page.getByTestId('stream-start').click()
   await expect.poll(() => logicalCount(page), { timeout: 15_000 }).toBeGreaterThanOrEqual(84_009)
@@ -126,7 +131,7 @@ test('default Demo proves coding-workbench rendering semantics through one real 
   await expect(terminal).toContainText('Chromium suite passed')
   await expect(terminal).toContainText('success')
   await expect(terminal).toContainText('exit 0')
-  expect(numeric(await page.getByTestId('projection-incremental').textContent())).toBeGreaterThan(incrementalBeforeTerminal)
+  await expect.poll(async () => numeric(await page.getByTestId('projection-incremental').textContent()), { timeout: 15_000 }).toBeGreaterThan(incrementalBeforeTerminal)
 
   // Parent execution has advanced through shell while the two background children
   // independently reached terminal state in the earlier delegation block.

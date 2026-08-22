@@ -120,8 +120,8 @@ function configApproval(scope: string): AppendCanonicalMessage[] {
     { turnId: turn, stepId: step, role: 'user', blocks: [block('request', 'markdown', { markdown: 'Raise the production worker limit from 8 to 12, but do not apply the workspace edit until I approve the exact diff.' })] },
     { turnId: turn, stepId: step, role: 'assistant', blocks: [block('reasoning', 'reasoning', { text: 'The edit changes production concurrency. Prepare the exact diff and stop at the approval boundary.', tokenCount: 24, durationMs: 620, defaultOpen: false, status: 'complete' })] },
     { turnId: turn, stepId: step, role: 'assistant', blocks: [block('patch', 'diff', { resource: config, lines: [' export const runtimeConfig = {', '-  maxWorkers: 8,', '+  maxWorkers: 12,', '   queuePolicy: \'bounded\',', ' }'], defaultOpen: true })] },
-    { turnId: turn, stepId: step, role: 'assistant', blocks: [block('edit', 'tool-call', { name: 'edit_file', callId: 'config-edit-approval', category: 'filesystem', presentation: { kind: 'changes', resources: [config] }, resources: [config], status: 'running', input: { path: config.uri, patch: 'maxWorkers: 8 -> 12' }, durationMs: 0, defaultOpen: false })] },
-    { turnId: turn, stepId: step, role: 'assistant', blocks: [block('waiting', 'markdown', { markdown: 'The patch is ready. Execution is paused at the workspace approval boundary; browsing another conversation will not discard this pending request.' })] },
+    { turnId: turn, stepId: step, role: 'assistant', blocks: [block('edit', 'tool-call', { name: 'edit_file', callId: 'config-edit-approval', category: 'filesystem', presentation: { kind: 'changes', resources: [config] }, resources: [config], input: { path: config.uri, patch: 'maxWorkers: 8 -> 12', requiresApproval: true }, defaultOpen: false })] },
+    { turnId: turn, stepId: step, role: 'assistant', blocks: [block('waiting', 'markdown', { markdown: 'The patch is ready but the tool has not executed. The session is paused at the workspace approval boundary; browsing another conversation will not discard this pending request.' })] },
   ]
 }
 

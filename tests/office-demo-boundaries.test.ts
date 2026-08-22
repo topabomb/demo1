@@ -23,7 +23,9 @@ describe('office Demo responsibility boundary', () => {
     expect(demo).toContain("'attachments'")
     expect(demo).toContain('ResourceRef')
     expect(demo).toContain('external side effects remain producer/host responsibilities')
-    expect(demo).toContain('actual mail/calendar side effect belongs to the external adapter')
+    expect(demo).toContain('external adapter owns the actual side effect and any provider continuation')
+    expect(demo).toContain("callId: 'meeting-followup-approval'")
+    expect(demo).not.toMatch(/callId: 'meeting-followup-approval'[^\n]*status: 'running'/)
   })
 
   it('keeps scenario navigation and replay controls entirely in Demo', () => {

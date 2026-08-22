@@ -105,11 +105,11 @@ export function createDefaultContentProjectors(): ContentProjectorRegistry {
     })
     .register('tool-call', ({ message, block: contentBlock }) => {
       const data = contentBlock.data as Record<string, unknown>
-      return [makeRenderUnit(message, contentBlock, 'tool-call', 'tool', 76, { ...data, phase: 'call', status: data.status ?? 'running' })]
+      return [makeRenderUnit(message, contentBlock, 'tool-call', 'tool', 76, { ...data, phase: 'call' })]
     })
     .register('tool-result', ({ message, block: contentBlock }) => {
       const data = contentBlock.data as Record<string, unknown>
-      return [makeRenderUnit(message, contentBlock, 'tool-result', 'tool', 76, { ...data, phase: 'result', status: data.status ?? 'success' })]
+      return [makeRenderUnit(message, contentBlock, 'tool-result', 'tool', 76, { ...data, phase: 'result' })]
     })
     .register('terminal', ({ message, block: contentBlock }) => {
       const data = contentBlock.data as { output: string; command?: string; callId?: string; cwd?: ResourceRef; status?: string; exitCode?: number; durationMs?: number; defaultOpen?: boolean }

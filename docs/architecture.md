@@ -1,48 +1,70 @@
 # Agent Workbench Rendering Engine Architecture
 
-`demo1` is an executable reference for **front-end conversation/session rendering infrastructure** shared by long-running coding, research and office Agent workbenches. It separates three responsibilities:
+`demo1` is an executable reference for **front-end conversation/session rendering infrastructure** shared by long-running coding, research and office Agents.
 
-1. **External adapters** — provider protocol, Agent/model/tool/child orchestration, enterprise connectors/authentication, permission policy, real external side effects, durable persistence, async IO and recovery policy.
-2. **Framework-neutral Engine core (`src/engine/**`, excluding Vue)** — canonical history semantics, explicit renderable session truth, bounded projection and semantic viewport policy.
-3. **Demo host (`src/demo/**`)** — multi-session product composition/navigation, realistic scripted coding/office/lifecycle tasks and child transcripts, synthetic histories/playback, diagnostics and the public architecture page.
+The core rule is not “keep Engine as small as possible”. It is:
 
-The performance target is:
+> **Put stable, cross-product renderable semantics and their consistency rules in Engine; keep provider execution, product workflow policy and physical UI composition outside it.**
 
-> Normal UI work scales with **changed + hot + visible** state, not total history.
+Normal UI work should scale with **changed + hot + visible** state, not total history.
 
-The Engine is intentionally smaller than a workbench product. It is not an Agent runtime, connector SDK, workflow scheduler, office automation layer, editor integration, permission system, child-Agent scheduler, recovery-policy engine, session-tree router or layout framework.
-
-## 1. Dependency and ownership law
+## 1. Ownership law
 
 ```text
 Provider / Agent runtime / connectors / persistence / network
-        │ normalize + cache + explicit session state
+        │ normalize history + explicit session truth
         ▼
-┌──────────────────────────────────────┐
-│ Framework-neutral Engine core        │
-│ history semantics · SessionKernel    │
-│ projection · semantic viewport       │
-└──────────────────────────────────────┘
+Framework-neutral Engine (`src/engine/**`, excluding Vue)
+  canonical identity/history
+  SessionKernel current truth + invariants
+  bounded projection
+  semantic viewport policy
         │
-        ├── optional Vue adapter/renderers
+        ├── optional Vue reference adapter (`src/engine/vue/**`)
         │
         ▲ consume
-┌──────────────────────────────────────┐
-│ Demo host                            │
-│ workspace/navigation · scenarios     │
-│ playback · stress · diagnostics      │
-└──────────────────────────────────────┘
+Demo host (`src/demo/**`)
+  workspace/session routing
+  realistic scripted scenarios
+  fake runtime/actions/sources
+  synthetic playback/stress/diagnostics
 ```
 
-`src/engine/**` never imports `src/demo/**`. Framework-neutral modules do not depend on Vue, DOM, Virtua or CSS. `src/engine/vue/**` is an optional physical adapter and cannot define canonical/session identity.
+### Engine owns
 
-External adapters own SSE/WebSocket/provider decoding, model/tool loops, delegated-child scheduling/concurrency, model/provider selection, app authentication, mail/calendar/document connectors, actual external writes, retries/backoff, fallback choice, durable persistence, async fetch/cache fill and provider-specific accounting.
+- Message / Turn / Step / Block identity;
+- tool `callId`, `ResourceRef`, `AgentRunRef`;
+- canonical replayable content;
+- explicit current `WorkPlan`;
+- session execution status, typed pending interactions and exact interaction identity;
+- explicit Turn outcome/failure/accounting;
+- producer-reported tool/terminal/child execution facts;
+- bounded projection and semantic reader/Latest/anchor/follow state.
 
-The Demo owns Recent metadata, active-session routing, parent/child workspace relationships, hot-runtime LRU, fake 1M history, playback timing, scripted source/tool/child evidence, fake office actions, lifecycle/recovery scenarios, diagnostics shortcuts and browser performance counters.
+These are reusable facts a renderer must preserve correctly across providers and products.
 
-## 2. Identity and state layers
+### External runtime owns
 
-Provider/runtime events normalize into stable history records:
+- provider protocol and model/tool loops;
+- actual tool/process/external side-effect execution;
+- post-approval/post-answer continuation;
+- retries, retryability, backoff, fallback choice and confidence policy;
+- child scheduling/concurrency/provider selection;
+- connector authentication and permissions;
+- async network/DB IO and durable persistence.
+
+### Demo/Host owns
+
+- multi-session workspace composition and Recent metadata;
+- parent/child navigation topology;
+- scenario selection and fake execution;
+- synthetic large history/playback;
+- diagnostics shortcuts and performance counters;
+- product layout and the public architecture view.
+
+`src/engine/**` never imports Demo. Framework-neutral layers never depend on Vue/DOM/Virtua/CSS. `src/engine/vue/**` is a replaceable physical adapter.
+
+## 2. Identity layers must remain distinct
 
 ```ts
 interface LogicalMessage {
@@ -57,42 +79,23 @@ interface LogicalMessage {
 }
 ```
 
-Identity levels are distinct:
+- **Message** — globally addressable history record.
+- **Turn** — user-level interaction lifecycle.
+- **Step** — actual producer/model/tool execution coordinate.
+- **Block** — stable semantic content inside a Message.
+- **callId** — producer-owned tool call/result identity.
+- **ResourceRef** — host-neutral file/URL/artifact identity.
+- **AgentRunRef** — parent-facing delegated-child identity/status.
+- **interaction id** — identity of one current session blocker.
+- **Session state** — explicit current truth, never inferred from viewport/history position.
 
-- **Message** — globally addressable history record;
-- **Turn** — one user-level interaction lifecycle;
-- **Step** — actual producer-owned model/tool execution coordinate;
-- **Block** — stable semantic content inside a Message;
-- **callId** — producer-owned tool call/result correlation;
-- **ResourceRef** — stable host-neutral file/URL/artifact identity;
-- **AgentRunRef** — stable parent-facing delegated-child identity/status reference;
-- **Session state** — current status/blocker/queue/accounting/current WorkPlan, explicitly supplied rather than inferred from history position.
+DOM adjacency, connector name, virtual-row order, panel placement and “latest unfinished card” are never business identity.
 
-DOM adjacency, virtual-row order, renderer type, connector name, “latest unfinished row”, and panel placement are never business identity.
+## 3. Replayable history vs current session truth
 
-## 3. Stable semantic primitives
+### Plan snapshot ≠ current WorkPlan
 
-### 3.1 ResourceRef: identity, not navigation or connector policy
-
-```ts
-interface ResourceRef {
-  id: string
-  kind: 'file' | 'url' | 'artifact'
-  uri: string
-  label?: string
-  range?: ResourceRange
-}
-```
-
-A ResourceRef answers **what resource and where**. It does not say whether the host opens VS Code, a browser, Gmail, Outlook, Drive, a drawer or nothing. Security, authentication and routing remain host/external-adapter concerns.
-
-### 3.2 Historical Plan snapshot, execution Step and current WorkPlan are distinct
-
-`PlanItem` reports intended/progress work through `pending | in-progress | completed | blocked | cancelled`. `stepId` reports execution that actually happened. One Plan item may span many Steps; execution can diverge from a Plan.
-
-A canonical `plan` block is a **replayable historical snapshot**. It answers “what plan did the producer publish at this point in the conversation?” It is not automatically authoritative current session state.
-
-The Engine therefore also exposes:
+A canonical `plan` block is replayable history. `stepId` says what execution actually happened. `ConversationDescriptor.activePlan` is explicit current work state:
 
 ```ts
 type WorkPlan = ContentBlockMap['plan']
@@ -102,18 +105,68 @@ interface ConversationDescriptor {
 }
 ```
 
-This does **not** introduce a second todo model: `WorkPlan` aliases the exact same Plan block data shape. `ConversationSessionKernel.setActivePlan(...)` is an explicit producer/session mutation. The Kernel never searches latest history, mounted rows or DOM to infer it.
+`WorkPlan` deliberately aliases the canonical Plan shape rather than creating a second task model. `SessionKernel` never scans latest history or DOM to infer it.
 
-A real adapter may normalize one provider event into both:
+### Pending interaction is current truth
 
-1. a canonical `plan` snapshot for replay/history; and
-2. the same value as current `activePlan` for session chrome.
+Questions/approvals are not inferred from text cards. A waiting session has exactly one typed `PendingInteraction`.
 
-The Demo does exactly this from producer mutation events, not from viewport state. This prevents the common failure mode where the chat shows one plan while the status area guesses another state from child/runtime activity.
+```ts
+interface PendingApproval {
+  id: string
+  kind: 'approval'
+  title: string
+  detail: string
+  toolName?: string
+  callId?: string
+}
 
-### 3.3 Tool category is not presentation intent
+type InteractionResolution =
+  | { interactionId: string; kind: 'approval'; approved: boolean }
+  | { interactionId: string; kind: 'question'; answer: string | null }
+```
 
-`ToolCategory` names a capability family (`filesystem`, `search`, `shell`, `productivity`, or another producer-defined category). `ToolPresentationIntent` is a renderer-neutral interpretation:
+`interactionId` identifies the blocker. Tool `callId` identifies a canonical tool call. They are different identities; `PendingApproval.callId` only correlates them when one approval concerns one exact call.
+
+This distinction prevents a delayed response to an older approval/question from clearing a newer same-kind blocker.
+
+## 4. Approval boundary: proposed call ≠ execution
+
+A common flow is:
+
+```text
+canonical proposed tool call (callId)
+        │
+        ├── no execution status yet
+        │
+        ▼
+PendingApproval { id, callId? }
+        │
+        ▼
+InteractionResolution { interactionId, decision }
+        │ Engine validates/clears blocker
+        ▼
+outcome-neutral idle
+        │
+        └── external runtime chooses execute / reject / resume / new Turn
+```
+
+The Engine owns correlation and session-state consistency because they are generic rendering semantics. It does **not** interpret an approval as a side effect.
+
+A tool `status`, `progress`, `durationMs` or result is producer-reported execution truth. If the producer has not executed a proposed action, status may be absent. Projection and reference renderers must not convert absence into `running` or `success`.
+
+This yields the following hard invariants:
+
+- `status:'waiting'` iff one `pendingInteraction` exists;
+- resolution must match the exact current interaction id and kind;
+- `finishExecution(...)` cannot settle a session while a blocker remains;
+- `startExecution(...)` cannot reset an already-working execution;
+- Engine getters/summaries do not expose mutable references to internal blocker/failure state;
+- resolving an interaction clears generic blocker state only; provider continuation is external policy.
+
+## 5. Tool semantics: capability, presentation and execution are separate
+
+`ToolCategory` describes capability; `ToolPresentationIntent` describes renderer-neutral interpretation:
 
 ```ts
 type ToolPresentationIntent =
@@ -123,222 +176,88 @@ type ToolPresentationIntent =
   | { kind: 'terminal'; command?: string; cwd?: ResourceRef }
 ```
 
-Presentation intent never contains panel/side/width/color/component IDs, connector routing, host actions or permission rules. Tool call/result stay separate canonical records linked by `callId`.
+Presentation intent contains no panel/width/color/component/connector/permission behavior.
 
-### 3.4 Terminal is a streaming primitive
+Tool call/result remain separate canonical records correlated by `callId`. Top-level tool `resources` are semantic evidence exposed to the renderer; any ResourceRefs repeated inside presentation intent must refer to the same identities and never create a parallel resource identity system. A future cleanup may reduce this duplication, but it does not justify connector-specific resource types.
 
-A terminal block carries command, cwd ResourceRef, output, status, exit code and duration. Append-only output emits `{ kind: 'append-terminal', blockId, delta }`; `ProjectionEngine.appendTerminalDelta(...)` replaces only the stable terminal RenderUnit.
+## 6. Terminal and delegated children
 
-Starting, killing, retrying or attaching to a process remains execution-adapter policy.
+Terminal is a first-class streaming primitive. Append-only output patches one stable RenderUnit. Process start/kill/retry/attach remains runtime policy.
 
-### 3.5 Delegated children: stable refs, independent traces
+A plural `delegation` block carries one or more `AgentRunRef`s:
 
 ```ts
 type AgentRunMode = 'foreground' | 'background'
 type AgentRunStatus = 'queued' | 'running' | 'waiting' | 'completed' | 'failed' | 'interrupted'
-
-interface AgentRunRef {
-  runId: string
-  title: string
-  agent?: string
-  mode: AgentRunMode
-  status: AgentRunStatus
-  childSessionId?: string
-  summary?: string
-}
 ```
 
-One plural `delegation` block covers one synchronous child, one detached child, several parallel children, or a mixed batch. `mode` is a producer-reported relationship to parent flow, not a scheduling instruction.
+`mode` is parent-facing observation, never a scheduling command. `childSessionId` is a semantic address, not a core session tree. Child traces stay in independent conversation sessions.
 
-`childSessionId` is a stable semantic address only. Parent history does **not** recursively embed child `LogicalMessage[]`; child reasoning/tools/nested delegations remain in the independent child session/thread. Child status never redefines parent SessionStatus or Turn outcome.
+A failed child is renderable evidence, not a parent outcome or retry instruction. Siblings and parent may continue if the runtime chooses that policy.
 
-A failed child is likewise only a child-run fact. It does not imply “retry”, “abort parent” or “parent failed”. Those consequences belong to the Agent runtime. This allows one parent Turn to finish successfully after an explicit fallback while preserving the failed child as honest evidence.
+## 7. SessionKernel is truth storage, not workflow execution
 
-The Engine never starts, resumes, interrupts, disposes, retries, routes models for, assigns permissions to, or navigates to a child.
+`ConversationSessionKernel` owns normalized history access, appended/overridden messages, live status, active assistant coordinate, current WorkPlan, queue, typed blockers, foreground/unread attention, last settled Turn outcome/failure, accounting and Turn/Step counters.
 
-### 3.6 Child-session tree/navigation is Host state
+It does not own:
 
-A real workbench still needs to open those child conversations. That does not require a core session-tree abstraction.
+- retry/fallback/resume policy;
+- what a user answer means to the model;
+- actual approved tool execution;
+- office/mail/calendar semantics;
+- workspace navigation or child orchestration.
 
-The Demo keeps:
+`SessionStatus`, `activePlan` and `lastTurnReason` are independent facts. `idle` means no current execution, not “completed”; a failure/interruption remains explicit historical/session evidence and does not dictate the next Turn.
 
-```text
-childSessionId in parent AgentRunRef       Engine semantic address
-                    │
-                    ▼
-DemoWorkspaceRuntime.hasSession(id)
-DemoWorkspaceRuntime.parentSessionId(id)   Host relationship/navigation state
-                    │
-                    ▼
-activate child session / return parent     Host action
-```
+## 8. Resource and layout boundaries
 
-The child transcripts are normal independent `ConversationSessionKernel` / `ConversationSessionRuntime` instances. They are directly addressable but can be omitted from the normal Recent list. The parent never copies their messages.
+`ResourceRef` answers **what/where**, not **how to open**. Security, connector auth and editor/browser/app routing stay outside Engine.
 
-This preserves two independent responsibilities:
-
-- **Engine:** child reference remains stable and renderer-neutral;
-- **Host:** workspace topology, visibility, breadcrumbs, activation and return navigation.
-
-## 4. Deliberate non-abstraction: no core PresentationSurface
-
-There is intentionally **no core PresentationSurface** for conversation, changes, artifacts, preview, composer status, left/right panels, tabs or drawers.
-
-A host may derive layout from canonical/session semantics. Encoding placement in core would couple reusable state to one product shell.
+There is intentionally **no core `PresentationSurface`**. Conversation/changes/artifacts/preview/composer/sidebars/tabs/drawers are product surfaces derived by hosts.
 
 **Semantic renderability is Engine responsibility; application layout and style are not.**
 
-## 5. SessionKernel is runtime truth, not workflow execution
+## 9. History, projection and viewport scaling
 
-`ConversationSessionKernel` owns normalized history access, appended/overridden messages, current live status, explicit active assistant coordinate, explicit current WorkPlan, queue, typed blockers, foreground/unread attention, last settled Turn outcome/failure, accounting and Turn/Step counters.
+`ConversationHistorySource` is a synchronous hot-read contract. Async fetch/prefetch/cache fill happens outside Engine before exposing a local range.
 
-`SessionStatus`, `activePlan`, and `lastTurnReason` are independent facts:
+The reference runtime keeps a bounded hot history segment (~2,048 messages) and keyed RenderUnits. Neighbor shifts project only incoming slices; far jumps rebase one bounded window. Markdown/reasoning/terminal deltas patch stable units incrementally.
 
-- `idle` means no execution is running, not “completed”;
-- `waiting` exists iff one `pendingInteraction` exists;
-- `activePlan` is current producer-owned work state and may exist in working, waiting or idle sessions;
-- outcomes are written only by explicit `finishExecution(...)`;
-- restored working sessions use explicit `activeAssistantIndex`, never inferred history order;
-- restored current work uses explicit `activePlan`, never inferred from the newest Plan block.
+Semantic reader/Latest/anchor/follow state is independent of DOM measurement. Vue/Virtua owns physical measurement, ResizeObserver and responsive convergence.
 
-Approval/question blockers are typed session facts. `requestInteraction(...)` moves working→waiting; `resolveInteraction(...)` validates and clears the blocker and returns to outcome-neutral idle. It does **not** interpret “approved” as “send email”, “answer” as “resume this exact provider request”, or either resolution as a workflow transition. The external execution adapter owns that consequence.
+## 10. Executable Demo mapping
 
-Likewise, an interrupted terminal or Turn and a failed tool/child are explicit evidence. Engine state does not encode retry count, retryability, backoff, fallback source, whether the parent should abort, or whether a later user instruction resumes/branches/starts a new Turn.
+All scenarios use normal canonical/session/projector/renderer paths:
 
-## 6. Optional Vue adapter: current-task strip is presentation, not semantics
+- **Coding Agent:** resources/tools → mixed foreground/background delegation → streaming terminal → diff/code/artifacts.
+- **Executive briefing:** mail/calendar/docs/web ResourceRefs → evidence tools → specialist delegation → DOCX/PPTX/XLSX.
+- **Meeting follow-up:** sources/draft → blocked Plan/WorkPlan → proposed productivity call **without execution status** → PendingApproval correlated to that callId.
+- **Production config approval:** exact diff → proposed `edit_file` call without execution status → PendingApproval.
+- **Clarify → continue:** PendingQuestion → exact InteractionResolution → subsequent execution may start.
+- **Partial child failure:** failed child remains evidence; Demo/runtime selects a cached fallback and parent completes.
+- **Interrupt → steer:** interrupted terminal/Turn stays history; later user direction becomes a separate Turn.
+- **Million-message stress:** 1M+ addressable records with bounded hot/cache/DOM work.
 
-`src/engine/vue/**` demonstrates physical Vue/Virtua integration. It is not part of the framework-neutral model.
+The Demo proves these combinations; it is not the source of Engine architecture.
 
-`ActivePlanStrip` accepts `WorkPlan | null` and demonstrates a common UI:
-
-```text
-☷  current in-progress/blocked/pending item      2/4  ⌃
-                hover / click
-                     ↓
-           full Plan item list + statuses
-```
-
-The current-item selection is a **pure projection of explicit `activePlan`**, not a history lookup. Its location above the composer, use of `<details>`, hover disclosure, typography and sizing are optional Vue adapter choices. A host may render the same WorkPlan in a status bar, side panel or nowhere.
-
-Built-in reference renderers still include Markdown, reasoning, code, diff, tool, media, Plan, Terminal and Delegation. The active strip is session chrome rather than a new canonical ContentBlock.
-
-## 7. Office/knowledge-work Demo mapping
-
-Current enterprise Agent products commonly combine work-context retrieval, research, plans/progress, artifact generation, meeting/email follow-up and approval before actions. `demo1` demonstrates those **rendering consequences** without importing product/runtime policy.
-
-### Executive briefing
-
-```text
-mail + calendar + documents + web ResourceRefs
-→ source-bearing tool call/result
-→ WorkPlan + historical Plan snapshot
-→ foreground synthesis + background specialists
-→ decision-oriented Markdown
-→ DOCX / PPTX / XLSX artifacts
-```
-
-### Meeting follow-up
-
-```text
-meeting transcript + mail thread + brief ResourceRefs
-→ context tool result
-→ WorkPlan + historical Plan snapshot
-→ staged productivity call
-→ blocked Plan item + PendingApproval
-```
-
-Approve/Deny clears the generic blocker. A real adapter decides whether to send mail or create a calendar event.
-
-Connector schemas/auth, recipient resolution, document APIs, scheduled workflows and app-specific confirmation policy remain outside core.
-
-### Agent lifecycle / resilience mapping
-
-The lifecycle scenarios deliberately reuse existing Engine facts rather than adding “workflow state” types.
-
-**Clarification** uses `PendingQuestion` + `InteractionResolution`. Answering clears the blocker; the runtime decides how to incorporate the answer and when to start/continue execution.
-
-**Partial delegated failure** uses ordinary `AgentRunStatus:'failed'`, completed sibling runs, normal fallback tool evidence and a completed parent session/WorkPlan. The Demo chooses a cached source after a CRM failure. The Engine does not know that this is a “fallback”, does not evaluate source freshness and does not decide whether parent success is acceptable.
-
-**Interrupt + steer** keeps the first terminal as `interrupted` with exit code `130`, then records the user’s changed direction as a different Turn with its own Plan/tools/result. Old evidence is not rewritten and current state does not infer a continuation policy from the previous Turn.
-
-The critical distinctions are therefore:
-
-- **failure evidence ≠ retry/fallback policy**;
-- **child failure ≠ parent failure**;
-- **pending question resolution ≠ provider continuation policy**;
-- **interrupted Turn ≠ future Turn policy**.
-
-No `RetryPolicy`, `FallbackPolicy`, `ResumePolicy` or scenario-specific state belongs in the framework-neutral Engine.
-
-## 8. History, projection and bounded work
-
-`ConversationHistorySource` is a synchronous globally addressable hot-read contract. Async DB/API/connector access sits outside it:
-
-```text
-remote API / connector
-  ↓ async fetch/prefetch
-host/provider cache
-  ↓ synchronous local range
-ConversationHistorySource
-  ↓
-SessionKernel / ConversationSessionRuntime
-```
-
-`ConversationSessionRuntime` keeps a bounded hot segment (~2,048 messages in the reference implementation) and keyed RenderUnits. Neighbor shifts project only incoming slices; far jumps rebase one hot window.
-
-High-frequency paths remain explicit: reasoning, Markdown and terminal deltas patch changed stable units. Delegation status changes reproject one parent block. `activePlan` is independent session state and does not require scanning/reprojecting total history.
-
-## 9. Semantic viewport vs physical rendering
-
-Application position is semantic: committed reader, exact messages-after, committed RenderUnit anchor/offset, follow-tail intent and visual-bottom observation.
-
-The physical adapter owns DOM measurement, ResizeObserver, virtualizer convergence and responsive reflow. Plan disclosure, active-plan popover, terminal growth, delegation changes, office artifacts and media may change physical height without redefining reader/Turn/Step identity.
-
-## 10. Demo is executable proof, not architecture source of truth
-
-The coding-Agent scenario demonstrates:
-
-```text
-explicit current WorkPlan + Plan snapshot
-→ resource-aware tools
-→ foreground/background child refs
-→ parent continues streaming terminal
-→ child statuses settle
-→ click child ref and inspect independent child transcript
-→ return to parent
-→ final diff/code/artifacts
-→ current WorkPlan + historical Plan both complete
-```
-
-The office scenarios add executive briefing and meeting follow-up/approval. Lifecycle scenarios add typed clarification followed by continued execution, partial child failure with an explicit host/runtime fallback, and a user-interrupted Turn followed by a newly steered Turn. The million-message scenario remains a pure projection/viewport stress proof.
-
-Diagnostics are Demo-owned observability. Their shortcuts switch/jump to existing evidence; they do not define Engine replay/navigation/scenario APIs.
-
-## 11. Public API policy
-
-`src/engine/index.ts` exports framework-neutral semantics and core composition objects, including `WorkPlan`. It intentionally excludes Vue/Demo implementation, `parentSessionId`, session-tree navigation, recovery policies, office-provider concepts and runtime tuning telemetry.
-
-`src/engine/vue/index.ts` exports optional physical composition including `ActivePlanStrip`. This does not make composer placement part of the neutral API.
-
-The repository is a Vite Demo/Pages application with package publishing disabled. The Engine is source-level reusable/extraction-ready; package distribution remains separate.
-
-## 12. Explicit Engine non-goals
+## 11. Explicit Engine non-goals
 
 Do not add these merely because Agent products use them:
 
-- project/repository/worktree lifecycle;
-- Agent/model routing or child scheduling/concurrency;
-- child provider selection, permissions, resume/interrupt/disposal;
-- retry budgets, backoff, fallback-source selection or automatic recovery policy;
-- parent/child workspace tree, breadcrumbs, activation or return navigation;
-- enterprise connector/auth protocols;
-- mail/calendar/document external action execution;
+- Agent/model/provider routing or child scheduling;
+- retry budget, retryability, backoff, fallback-source/confidence or automatic recovery policy;
+- post-approval/post-answer provider continuation;
+- project/worktree/process/background-job lifecycle;
+- enterprise connector/auth and permission policy;
+- real mail/calendar/document/tool side effects;
 - scheduled/recurring workflow orchestration;
-- permission/allowlist evaluation;
-- MCP/skills registry;
-- process/background-job manager;
+- parent/child workspace topology/navigation;
 - editor/resource opening behavior;
-- composer/status-strip placement or interaction design;
-- Changes/Artifacts/Preview panel layout;
-- sidebar/tab/drawer/workspace navigation;
-- durable cloud sync or provider retry policy.
+- panel/sidebar/tab/drawer/preview/composer placement;
+- durable cloud sync or async persistence.
+
+## 12. Public API policy
+
+`src/engine/index.ts` exports framework-neutral semantics/core composition only. `src/engine/vue/index.ts` exports optional physical reference components. Demo/session-tree/workflow/recovery policy and tuning telemetry stay out of the neutral public entry.
+
+The repository is a Vite/Pages application with package publishing disabled; source extraction/reuse is supported, npm distribution is a separate concern.

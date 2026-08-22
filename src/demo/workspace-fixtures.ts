@@ -26,6 +26,7 @@ const approval: PendingInteraction = {
   title: 'Approve production config edit',
   detail: 'The agent prepared an exact change to src/runtime/config.ts and is waiting before applying it. This blocker belongs to the session and survives navigation or viewport eviction.',
   toolName: 'edit_file',
+  callId: 'config-edit-approval',
 }
 
 const meetingFollowupApproval: PendingInteraction = {
@@ -34,6 +35,7 @@ const meetingFollowupApproval: PendingInteraction = {
   title: 'Approve follow-up and Friday review',
   detail: 'The agent has staged the exact follow-up message and 30-minute Friday review. Approving lets the external productivity adapter perform the send/schedule action; denying leaves both untouched.',
   toolName: 'send_meeting_followup',
+  callId: 'meeting-followup-approval',
 }
 
 const question: PendingInteraction = {
@@ -158,7 +160,7 @@ export const RECENT_SESSIONS: readonly DemoSessionSeed[] = [
     usage: usage(34_000, 5_900, 149_000, 7_100, 1_300), context: { projectedTokens: 52_400, contextWindow: 128_000 }, turnCount: 4_300, stepCount: 8_700,
   },
   {
-    id: 'dynamic-heights', title: 'Responsive artifact review', age: '4h', status: 'interrupted', logicalCount: 260_000,
+    id: 'dynamic-heights', title: 'Responsive artifact review', age: '4h', status: 'idle', logicalCount: 260_000,
     seedOffset: 401, scenario: 'responsive-artifacts', lastTurnReason: 'interrupted',
     usage: usage(78_000, 10_700, 321_000, 11_800, 2_000), context: { projectedTokens: 86_900, contextWindow: 128_000 }, turnCount: 11_800, stepCount: 22_700,
   },
