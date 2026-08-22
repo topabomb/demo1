@@ -1,4 +1,4 @@
-import type { ContentBlock, LogicalMessage, ResourceRef } from '../model/conversation'
+import type { AgentRunRef, ContentBlock, LogicalMessage, ResourceRef } from '../model/conversation'
 import type { RenderKind, RenderUnit } from './render-unit'
 import { splitMarkdown } from './markdown-chunks'
 
@@ -117,9 +117,11 @@ export function createDefaultContentProjectors(): ContentProjectorRegistry {
       const estimate = data.defaultOpen === false ? 76 : 112 + Math.min(560, lines * 18)
       return [makeRenderUnit(message, contentBlock, 'terminal', 'terminal', estimate, { ...data })]
     })
-    .register('agent-run', ({ message, block: contentBlock }) => {
-      const data = contentBlock.data as Record<string, unknown>
-      return [makeRenderUnit(message, contentBlock, 'agent-run', 'agent-run', 92, data)]
+    .register('delegation', ({ message, block: contentBlock }) => {
+      const data = contentBlock.data as { title?: string; runs: readonly AgentRunRef[] }
+      const runs = data.runs ?? []
+      const estimate = 76 + Math.min(500, runs.length * 58 + runs.filter(run => run.summary).length * 34)
+      return [makeRenderUnit(message, contentBlock, 'delegation', 'delegation', estimate, { title: data.title, runs })]
     })
     .register('diff', ({ message, block: contentBlock }) => {
       const data = contentBlock.data as { resource: ResourceRef; lines: readonly string[]; defaultOpen?: boolean }
