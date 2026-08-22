@@ -22,7 +22,8 @@ describe('office Demo responsibility boundary', () => {
     expect(demo).toContain("'delegation'")
     expect(demo).toContain("'attachments'")
     expect(demo).toContain('ResourceRef')
-    expect(demo).toContain('external productivity adapter')
+    expect(demo).toContain('external side effects remain producer/host responsibilities')
+    expect(demo).toContain('actual mail/calendar side effect belongs to the external adapter')
   })
 
   it('keeps scenario navigation and replay controls entirely in Demo', () => {
