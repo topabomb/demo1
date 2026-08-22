@@ -50,10 +50,9 @@ test('delegation opens a real child conversation and Host navigation returns to 
   await completeAgentDemo(page)
   await page.getByTestId('demo-agent-delegation').click()
 
-  const childRun = page.getByTestId('delegation-run').filter({ has: page.locator('[data-child-session-id="child-review-contract"]') })
-  const directChildRun = page.locator('[data-testid="delegation-run"][data-child-session-id="child-review-contract"]')
-  await expect(directChildRun).toBeVisible()
-  await directChildRun.click()
+  const childRun = page.locator('[data-testid="delegation-run"][data-child-session-id="child-review-contract"]')
+  await expect(childRun).toBeVisible()
+  await childRun.click()
 
   await expect(page.getByTestId('active-session-id')).toHaveText('child-review-contract')
   await expect(page.locator('.conversation-title')).toContainText('Review rendering contract')
@@ -65,5 +64,5 @@ test('delegation opens a real child conversation and Host navigation returns to 
   await page.getByTestId('parent-session-link').click()
   await expect(page.getByTestId('active-session-id')).toHaveText('agent-loop')
   await expect(page.getByTestId('delegation-block')).toBeVisible()
-  await expect(childRun).toHaveCount(0)
+  await expect(childRun).toBeVisible()
 })
