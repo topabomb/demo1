@@ -33,7 +33,7 @@ export class DemoWorkspaceRuntime {
   #notifier = new BatchedNotifier()
   #clock = 0
   #newCounter = 0
-  #activeSessionId = 'million'
+  #activeSessionId = 'agent-loop'
 
   constructor() {
     for (const descriptor of RECENT_SESSIONS) this.#register(descriptor)
@@ -135,7 +135,7 @@ export class DemoWorkspaceRuntime {
     const kernel = new ConversationSessionKernel(descriptor, adapter)
     this.#kernels.set(descriptor.id, kernel)
     this.#ages.set(descriptor.id, descriptor.age)
-    this.#executions.set(descriptor.id, new SyntheticStreamController(kernel))
+    this.#executions.set(descriptor.id, new SyntheticStreamController(kernel, descriptor.playbackMode ?? 'standard'))
     this.#snapshots.set(descriptor.id, defaultSnapshot(descriptor))
     if (prepend) this.#order.unshift(descriptor.id); else this.#order.push(descriptor.id)
     this.#summarySignatures.set(descriptor.id, summarySignature(kernel.summary))
