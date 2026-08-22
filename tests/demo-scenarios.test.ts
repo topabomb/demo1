@@ -10,6 +10,7 @@ import {
   createLiveToolResult,
   liveToolForStep,
   settleLiveTerminal,
+  updateLiveDelegations,
   updateLiveToolCall,
 } from '../src/demo/live-run-script'
 import { createScenarioTail } from '../src/demo/session-scenarios'
@@ -80,13 +81,33 @@ describe('public Demo scenarios', () => {
     expect(next).toMatchObject({ turnId: assistant.turnId, stepId: `${assistant.turnId}:step-2`, role: 'assistant', live: true })
   })
 
-  it('keeps Plan separate from execution Step and AgentRun as a render-only delegated reference', () => {
+  it('keeps Plan separate from Step and represents sync plus parallel async children in one delegation block', () => {
     const first = createLiveAssistantStep('demo:turn', 1)
-    const third = createLiveAssistantStep('demo:turn', 3)
+    let third: LogicalMessage = {
+      id: 'demo:m-12', index: 12, ...createLiveAssistantStep('demo:turn', 3),
+    }
     const plan = first.blocks.find(contentBlock => contentBlock.type === 'plan')
-    const delegated = third.blocks.find(contentBlock => contentBlock.type === 'agent-run')
+    const delegation = third.blocks.find(contentBlock => contentBlock.type === 'delegation')
     expect(plan?.type === 'plan' ? plan.data.items.map(item => item.status) : null).toEqual(['in-progress', 'pending', 'pending', 'pending'])
-    expect(delegated?.type === 'agent-run' ? delegated.data : null).toMatchObject({ runId: 'review-rendering-contract', status: 'completed', agent: 'reviewer' })
+    expect(delegation?.type === 'delegation' ? delegation.data.runs.map(run => [run.mode, run.status]) : null).toEqual([
+      ['foreground', 'completed'],
+      ['background', 'running'],
+      ['background', 'running'],
+    ])
+    expect(delegation?.type === 'delegation' ? delegation.data.runs.map(run => run.childSessionId) : null).toEqual([
+      'child-review-contract', 'child-terminal-audit', 'child-resource-audit',
+    ])
+    third = updateLiveDelegations(third, 1)
+    expect(third.blocks.find(contentBlock => contentBlock.type === 'delegation')?.data).toMatchObject({
+      runs: [
+        { runId: 'review-rendering-contract', status: 'completed' },
+        { runId: 'audit-terminal-projection', status: 'completed' },
+        { runId: 'audit-resource-semantics', status: 'running' },
+      ],
+    })
+    third = updateLiveDelegations(third, 2)
+    const settled = third.blocks.find(contentBlock => contentBlock.type === 'delegation')
+    expect(settled?.type === 'delegation' ? settled.data.runs.every(run => run.status === 'completed') : false).toBe(true)
     expect(first.stepId).toBe('demo:turn:step-1')
     expect(third.stepId).toBe('demo:turn:step-3')
   })
@@ -132,6 +153,7 @@ describe('public Demo scenarios', () => {
     expect(source).toContain('- [x]')
     expect(source).toContain('A resource can identify')
     expect(source).toContain('Plan items describe intended work')
+    expect(source).toContain('child runs remain references')
 
     let final = liveMessage(4)
     final = addFinalEvidence(final, 'diff')
