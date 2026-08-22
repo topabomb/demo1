@@ -34,13 +34,15 @@ describe('public Demo scenarios', () => {
     expect([...kinds]).toEqual(expect.arrayContaining(['tool-call', 'tool-result', 'diff', 'code', 'markdown']))
   })
 
-  it('keeps the seeded Agent-loop assistant live at the real global tail', () => {
+  it('keeps the seeded Agent-loop assistant live at the real global tail with visible plan intent', () => {
     const tail = createScenarioTail('agent-loop', 84_000, 'release-investigation')
     const live = tail.at(-1)!
     expect(live.index).toBe(83_999)
     expect(live.live).toBe(true)
     expect(live.stepId).toMatch(/:step-1$/)
-    expect(live.blocks.map(contentBlock => contentBlock.type)).toEqual(['reasoning', 'markdown'])
+    expect(live.blocks.map(contentBlock => contentBlock.type)).toEqual(['plan', 'reasoning', 'markdown'])
+    const plan = live.blocks.find(contentBlock => contentBlock.type === 'plan')
+    expect(plan?.type === 'plan' ? plan.data.items[0]?.status : null).toBe('in-progress')
   })
 
   it('overlays only the realistic tail while older stress history stays lazy', () => {
@@ -84,9 +86,7 @@ describe('public Demo scenarios', () => {
     const plan = first.blocks.find(contentBlock => contentBlock.type === 'plan')
     const delegated = third.blocks.find(contentBlock => contentBlock.type === 'agent-run')
     expect(plan?.type === 'plan' ? plan.data.items.map(item => item.status) : null).toEqual(['in-progress', 'pending', 'pending', 'pending'])
-    expect(delegated?.type === 'agent-run' ? delegated.data : null).toMatchObject({
-      runId: 'review-rendering-contract', status: 'completed', agent: 'reviewer',
-    })
+    expect(delegated?.type === 'agent-run' ? delegated.data : null).toMatchObject({ runId: 'review-rendering-contract', status: 'completed', agent: 'reviewer' })
     expect(first.stepId).toBe('demo:turn:step-1')
     expect(third.stepId).toBe('demo:turn:step-3')
   })
@@ -101,9 +101,8 @@ describe('public Demo scenarios', () => {
     const appended = appendLiveTerminal(result, spec, 0)!
     result = appended.message
     expect(appended.delta).toContain('$ pnpm test')
-    expect(result.blocks.find(contentBlock => contentBlock.type === 'terminal')?.type === 'terminal'
-      ? result.blocks.find(contentBlock => contentBlock.type === 'terminal')!.data.output
-      : '').toContain('RUN')
+    const streamingTerminal = result.blocks.find(contentBlock => contentBlock.type === 'terminal')
+    expect(streamingTerminal?.type === 'terminal' ? streamingTerminal.data.output : '').toContain('RUN')
     const settled = settleLiveTerminal(result, spec)
     const terminal = settled.blocks.find(contentBlock => contentBlock.type === 'terminal')
     expect(terminal?.type === 'terminal' ? terminal.data.status : null).toBe('success')
@@ -111,9 +110,7 @@ describe('public Demo scenarios', () => {
   })
 
   it('streams complex GFM and adds resource-aware final evidence as canonical blocks', () => {
-    const source = [1, 2, 3, 4]
-      .flatMap(step => Array.from({ length: 10 }, (_, index) => agentMarkdownDelta(step, index)))
-      .join('')
+    const source = [1, 2, 3, 4].flatMap(step => Array.from({ length: 10 }, (_, index) => agentMarkdownDelta(step, index))).join('')
     expect(source).toContain('| Semantic layer | Owns | Must not own |')
     expect(source).toContain('```ts')
     expect(source).toContain('```text')
