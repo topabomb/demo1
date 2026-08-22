@@ -6,6 +6,7 @@ import { ConversationSessionRuntime } from '../engine/runtime/session-runtime'
 import type { SessionViewMemory } from '../engine/viewport/state'
 import { createChildScenarioTail } from './child-scenarios'
 import { SyntheticHistoryAdapter } from './history-adapter'
+import { createLifecycleScenarioTail, isLifecycleScenario } from './lifecycle-scenarios'
 import { createScenarioTail, type DemoScenarioKey } from './session-scenarios'
 import { SyntheticStreamController } from './stream-controller'
 import {
@@ -142,9 +143,11 @@ export class DemoWorkspaceRuntime {
   #register(descriptor: DemoSessionSeed, prepend = false): void {
     const tail = descriptor.parentSessionId
       ? createChildScenarioTail(descriptor.id, descriptor.logicalCount)
-      : descriptor.scenario
-        ? createScenarioTail(descriptor.id, descriptor.logicalCount, descriptor.scenario as DemoScenarioKey)
-        : []
+      : descriptor.scenario && isLifecycleScenario(descriptor.scenario)
+        ? createLifecycleScenarioTail(descriptor.id, descriptor.logicalCount, descriptor.scenario)
+        : descriptor.scenario
+          ? createScenarioTail(descriptor.id, descriptor.logicalCount, descriptor.scenario as DemoScenarioKey)
+          : []
     const history = new SyntheticHistoryAdapter(descriptor.id, descriptor.logicalCount, descriptor.seedOffset, descriptor.liveTail === true, tail)
     const kernelDescriptor: ConversationDescriptor = descriptor.status === 'working' && descriptor.liveTail && descriptor.logicalCount > 0
       ? { ...descriptor, activeAssistantIndex: descriptor.logicalCount - 1 }
