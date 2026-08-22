@@ -7,7 +7,7 @@ const ownership = [
 
 const contracts = [
   ['01', 'Canonical model', 'LogicalMessage + ContentBlock[]', 'Provider-neutral Message / Turn / Step / Block identity. Tool correlation uses callId; artifacts use explicit provenance.'],
-  ['02', 'SessionKernel', 'runtime session truth', 'Messages, execution state, blockers, queue, outcomes and normalized accounting. It never guesses provider output or an execution target.'],
+  ['02', 'SessionKernel', 'runtime session truth', 'Messages, live execution state, blockers, queue, explicit Turn outcomes and normalized accounting. Idle never implies Completed, and the Kernel never guesses provider policy.'],
   ['03', 'History source', 'sync hot read boundary', 'ConversationHistorySource is globally addressable and synchronous. Async database/network fetch and caching remain outside the hot rendering path.'],
   ['04', 'Projection runtime', 'rebuildable presentation', 'A bounded hot message window becomes stable RenderUnits. Incremental Markdown/reasoning work touches changed hot content only.'],
   ['05', 'Semantic viewport', 'interaction state', 'Reader, exact Latest, follow intent and anchor are semantic coordinates; DOM measurement cannot redefine them.'],
@@ -15,7 +15,7 @@ const contracts = [
 ]
 
 const stateClasses = [
-  ['Session truth', 'history mutations · execution/blockers · queue · outcomes · usage/context', 'Engine runtime state. Persistence is an external adapter concern; queued prompt payloads are not implicitly durable.'],
+  ['Session truth', 'history mutations · execution/blockers · queue · explicit outcomes · usage/context', 'Engine runtime state. Persistence is an external adapter concern; queued prompt payloads are not implicitly durable.'],
   ['Host/workspace state', 'session list · relative ages · active session · hot-runtime LRU · product routing', 'Owned by the application host. The Demo supplies one example; Engine has no WorkspaceKernel.'],
   ['Rebuildable presentation', 'hot window · projection cache · keyed RenderUnits · height estimates', 'Bounded and disposable. Reconstruct from session/history state.'],
   ['Ephemeral physical', 'Virtua measurements · ResizeObserver · mounted DOM · local renderer caches', 'Mounted lifetime only. Safe to discard and recreate.'],
@@ -25,7 +25,7 @@ const agentLoop = [
   ['Turn', 'One user-level interaction lifecycle. Several assistant/tool history records may share the same turnId.'],
   ['Step', 'Producer-owned model/tool-loop coordinate. Engine preserves stepId but does not decide when another Step occurs.'],
   ['Tool call/result', 'Separate canonical records linked by callId. DOM adjacency is never business identity.'],
-  ['Blocker response', 'Approval resolves with approved:boolean; question resolves with an actual answer string or explicit skip.'],
+  ['Blocker response', 'Approval carries approved:boolean; question carries answer:string|null. Kernel clears the blocker; the execution adapter owns continuation and the resulting Turn outcome.'],
   ['Restore', 'A working session may provide activeAssistantIndex explicitly. Engine never assumes the last history record is the active execution target.'],
 ]
 
@@ -42,7 +42,7 @@ const demoEvidence = [
   ['Agent loop investigation', 'One Turn moves through filesystem, search and shell tool phases with separate canonical tool call/result records and rich streaming GFM.'],
   ['Million-message stress', 'Dedicated 1M history scenario proves bounded projection/DOM independently of Agent-loop structural transitions.'],
   ['Session diagnostics', 'Demo-owned controls expose playback plus Engine evidence: logical/hot/DOM scale, projection work, reader state, accounting and browser performance.'],
-  ['Blockers & recovery', 'Approval, typed question answer, failure/resume, queue and off-screen execution survive session switching and hot-runtime eviction.'],
+  ['Blockers & recovery', 'Approval, question blockers with user-entered answers, failure/resume, queue and off-screen execution survive session switching and hot-runtime eviction.'],
   ['Renderer coverage', 'Markdown, reasoning, code, diff, tools, attachments, audio, HTML and responsive containment use the canonical projector/renderer path.'],
 ]
 
@@ -135,7 +135,7 @@ DemoWorkspaceRuntime = host example, not Engine</pre></div>
 
     <section class="architecture-section">
       <header class="section-heading"><span>08 · Distribution honesty</span><h2>Reusable source boundary today; packaging is a separate release concern</h2></header>
-      <div class="workspace-band"><span>Current repository</span><strong>Private Vite application + source-level Engine API</strong><p>The architecture is reusable and extraction-ready, but this repository does not claim a published npm package. A library build/export map should be added only when distribution itself becomes a requirement.</p></div>
+      <div class="workspace-band"><span>Current repository</span><strong>Vite Demo application · package publishing disabled</strong><p>`package.json` uses `private: true` to disable package publication; it does not describe GitHub repository visibility. The Engine is source-level reusable and extraction-ready, but this repository does not claim a published npm package.</p></div>
     </section>
   </main>
 </template>
