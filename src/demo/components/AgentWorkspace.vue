@@ -11,7 +11,7 @@ import {
 import { createAgentScenarioPack, createMarkdownGalleryTurn, createMixedDemoTurns } from '../scenarios'
 import type { DemoSessionDescriptor } from '../workspace-fixtures'
 import { useWorkspaceRuntime } from '../vue/use-workspace-runtime'
-import { ConversationViewport } from '../../engine/vue'
+import { ActivePlanStrip, ConversationViewport } from '../../engine/vue'
 import DemoDiagnosticsPanel from './DemoDiagnosticsPanel.vue'
 
 interface ViewportHandle {
@@ -55,6 +55,12 @@ const runningSessionCount = computed(() => { void workspaceRevision.value; retur
 const blockedSessionCount = computed(() => { void workspaceRevision.value; return workspace.blockedSessionCount })
 const failedSessionCount = computed(() => { void workspaceRevision.value; return workspace.failedSessionCount })
 const canInjectFixtures = computed(() => activeUiState.value.sessionStatus !== 'working' && !activeUiState.value.pendingInteraction)
+const activePlan = computed(() => { void activeUiState.value.eventRevision; return activeSession.value.kernel.activePlan })
+const activeParentSessionId = computed(() => workspace.parentSessionId(activeSession.value.id))
+const activeParentTitle = computed(() => {
+  const id = activeParentSessionId.value
+  return id ? workspace.kernelFor(id).title : ''
+})
 
 function switchSession(id: string): void {
   if (id !== activeSession.value.id) {
@@ -82,6 +88,28 @@ function indicatorDetail(descriptor: DemoSessionDescriptor): string {
   if (state === 'failed') return descriptor.lastFailure?.code ?? 'Failed'
   if (descriptor.queuedPrompts) return `${descriptor.queuedPrompts} queued`
   return `${descriptor.logicalCount.toLocaleString()} messages`
+}
+
+async function openChildSession(childSessionId: string): Promise<void> {
+  if (!workspace.hasSession(childSessionId)) return
+  switchSession(childSessionId)
+  await nextTick()
+  await viewportRef.value?.jumpToLatest()
+}
+
+function onConversationClick(event: MouseEvent): void {
+  const target = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-child-session-id]') : null
+  const childSessionId = target?.dataset.childSessionId
+  if (!childSessionId || childSessionId === activeSession.value.id) return
+  void openChildSession(childSessionId)
+}
+
+async function returnToParent(): Promise<void> {
+  const parent = activeParentSessionId.value
+  if (!parent) return
+  switchSession(parent)
+  await nextTick()
+  await viewportRef.value?.jumpToLatest()
 }
 
 async function navigateDemo(target: DemoNavigationTarget): Promise<void> {
@@ -186,8 +214,19 @@ async function injectAgentScenarios(): Promise<void> {
       :runtime="activeSession"
       :execution="activeExecution"
       :ui-state="activeUiState"
+      @click.capture="onConversationClick"
       @viewport-metrics="mountedRows = $event.mountedRows"
     >
+      <template #header-context>
+        <button
+          v-if="activeParentSessionId"
+          class="demo-parent-session"
+          data-testid="parent-session-link"
+          type="button"
+          :title="`Return to ${activeParentTitle}`"
+          @click.stop="returnToParent"
+        >← Parent · {{ activeParentTitle }}</button>
+      </template>
       <template #header-actions>
         <button class="demo-header-action" data-testid="diagnostics-open" type="button" :aria-pressed="diagnosticsOpen" title="Session diagnostics" aria-label="Session diagnostics" @click="diagnosticsOpen = !diagnosticsOpen">◫</button>
       </template>
@@ -197,6 +236,9 @@ async function injectAgentScenarios(): Promise<void> {
           <span>Reader <strong data-testid="reader-position">#{{ uiState.reader.toLocaleString() }}</strong></span>
           <span data-testid="mounted-label">{{ visibleRows }} DOM rows</span><span v-if="uiState.activeMessageId" data-testid="follow-state">{{ followLabel }}</span>
         </div>
+      </template>
+      <template #composer-tools>
+        <ActivePlanStrip :plan="activePlan" />
       </template>
     </ConversationViewport>
 
