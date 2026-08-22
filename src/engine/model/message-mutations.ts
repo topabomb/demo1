@@ -38,6 +38,35 @@ export function appendMarkdownContent(message: LogicalMessage, delta: string): {
   return { blockId: current.id, message: { ...message, blocks, revision: (message.revision ?? 0) + 1, live: true } }
 }
 
+/** Append-only terminal fast path. Tool execution policy remains outside the Engine. */
+export function appendTerminalOutput(message: LogicalMessage, blockId: string, delta: string, durationMs?: number): { message: LogicalMessage; blockId: string } | null {
+  const blocks = cloneBlocks(message.blocks)
+  const targetIndex = blocks.findIndex(entry => entry.id === blockId && entry.type === 'terminal')
+  if (targetIndex < 0) return null
+  const current = blocks[targetIndex] as ContentBlock<'terminal'>
+  blocks[targetIndex] = block(current.id, 'terminal', {
+    ...current.data,
+    output: `${current.data.output}${delta}`,
+    ...(durationMs === undefined ? {} : { durationMs }),
+    status: 'running',
+  }, (current.revision ?? 0) + 1)
+  return { blockId: current.id, message: { ...message, blocks, revision: (message.revision ?? 0) + 1, live: true } }
+}
+
+export function settleTerminal(message: LogicalMessage, blockId: string, status: 'success' | 'error' | 'interrupted', exitCode?: number, durationMs?: number): LogicalMessage {
+  const blocks = cloneBlocks(message.blocks)
+  const targetIndex = blocks.findIndex(entry => entry.id === blockId && entry.type === 'terminal')
+  if (targetIndex < 0) return message
+  const current = blocks[targetIndex] as ContentBlock<'terminal'>
+  blocks[targetIndex] = block(current.id, 'terminal', {
+    ...current.data,
+    status,
+    ...(exitCode === undefined ? {} : { exitCode }),
+    ...(durationMs === undefined ? {} : { durationMs }),
+  }, (current.revision ?? 0) + 1)
+  return { ...message, blocks, revision: (message.revision ?? 0) + 1 }
+}
+
 export function replaceMarkdownContent(message: LogicalMessage, markdown: string, live: boolean): LogicalMessage {
   const blocks = cloneBlocks(message.blocks)
   let targetIndex = -1
