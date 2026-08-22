@@ -3,7 +3,6 @@ import {
   billedInputTokens,
   cacheHitPercent,
   contextOccupancyPercent,
-  defaultTurnReason,
   deriveSessionIndicator,
 } from '../src/engine/conversation/session-semantics'
 import type { ConversationDescriptor, TokenUsage } from '../src/engine/conversation/contracts'
@@ -13,21 +12,14 @@ function descriptor(overrides: Partial<ConversationDescriptor>): ConversationDes
 }
 
 describe('session semantics', () => {
-  it('separates live execution from the most recent settled turn outcome', () => {
+  it('separates live execution from the most recent explicitly settled Turn outcome', () => {
     expect(deriveSessionIndicator(descriptor({ status: 'working', lastTurnReason: 'error' }))).toBe('working')
     expect(deriveSessionIndicator(descriptor({ status: 'idle', lastTurnReason: 'error' }))).toBe('failed')
     expect(deriveSessionIndicator(descriptor({ status: 'idle', lastTurnReason: 'completed' }))).toBe('completed')
-    expect(deriveSessionIndicator(descriptor({ status: 'waiting', lastTurnReason: 'blocked' }))).toBe('blocked')
-    expect(deriveSessionIndicator(descriptor({ status: 'interrupted', lastTurnReason: 'aborted' }))).toBe('interrupted')
+    expect(deriveSessionIndicator(descriptor({ status: 'waiting', lastTurnReason: null }))).toBe('blocked')
+    expect(deriveSessionIndicator(descriptor({ status: 'interrupted', lastTurnReason: null }))).toBe('interrupted')
     expect(deriveSessionIndicator(descriptor({ status: 'idle', lastTurnReason: 'max-tokens' }))).toBe('max-tokens')
     expect(deriveSessionIndicator(descriptor({ status: 'idle', lastTurnReason: null }))).toBe('idle')
-  })
-
-  it('never invents a completed Turn merely because execution is idle', () => {
-    expect(defaultTurnReason('idle')).toBeNull()
-    expect(defaultTurnReason('working')).toBeNull()
-    expect(defaultTurnReason('waiting')).toBe('blocked')
-    expect(defaultTurnReason('interrupted')).toBe('interrupted')
   })
 
   it('uses disjoint DSH-style prompt buckets for cache accounting', () => {
