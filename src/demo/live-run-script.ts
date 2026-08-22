@@ -74,10 +74,10 @@ const TOOL_STEPS: Readonly<Record<number, LiveToolSpec>> = {
     terminalChunks: [
       '$ pnpm test\n\n RUN  v4.1.10 /workspace/demo1\n',
       ' ✓ architecture boundaries\n ✓ projection engine\n ✓ session runtime\n',
-      '\n Test Files  14 passed\n Tests       78 passed\n\n$ pnpm build\n',
+      '\n Unit and architecture suites passed\n\n$ pnpm build\n',
       'vue-tsc --noEmit && vite build\n✓ built production bundle\n\n$ pnpm test:e2e\n',
       'Running Chromium workbench + stress scenarios\n······························\n',
-      '29 passed\n',
+      'Chromium suite passed\n',
     ],
   },
 }
@@ -123,7 +123,9 @@ const STEP_MARKDOWN: Readonly<Record<number, readonly string[]>> = {
   ],
 }
 
-export function liveToolForStep(stepOrdinal: number): LiveToolSpec | null { return TOOL_STEPS[stepOrdinal] ?? null }
+export function liveToolForStep(stepOrdinal: number): LiveToolSpec | null {
+  return TOOL_STEPS[stepOrdinal] ?? null
+}
 
 export function parseStepOrdinal(message: LogicalMessage): number {
   const match = message.stepId?.match(/:step-(\d+)$/)
@@ -244,15 +246,17 @@ export function createLiveToolResult(message: LogicalMessage, spec: LiveToolSpec
     durationMs: runningTerminal ? 0 : 480,
     defaultOpen: false,
   })]
-  if (runningTerminal) blocks.push(block(`terminal-${spec.callId}`, 'terminal', {
-    callId: spec.callId,
-    command: spec.presentation.kind === 'terminal' ? spec.presentation.command : spec.name,
-    cwd: spec.presentation.kind === 'terminal' ? spec.presentation.cwd : undefined,
-    output: '',
-    status: 'running',
-    durationMs: 0,
-    defaultOpen: true,
-  }))
+  if (runningTerminal) {
+    blocks.push(block(`terminal-${spec.callId}`, 'terminal', {
+      callId: spec.callId,
+      command: spec.presentation.kind === 'terminal' ? spec.presentation.command : spec.name,
+      cwd: spec.presentation.kind === 'terminal' ? spec.presentation.cwd : undefined,
+      output: '',
+      status: 'running',
+      durationMs: 0,
+      defaultOpen: true,
+    }))
+  }
   return { turnId: message.turnId, stepId: message.stepId, role: 'tool', live: runningTerminal, blocks }
 }
 
@@ -265,8 +269,10 @@ export function appendLiveTerminal(message: LogicalMessage, spec: LiveToolSpec, 
 }
 
 export function settleLiveTerminal(message: LogicalMessage, spec: LiveToolSpec): LogicalMessage {
+  const exitCode = Number(spec.output.exitCode ?? 0)
+  const terminalStatus = exitCode === 130 ? 'interrupted' : exitCode === 0 ? 'success' : 'error'
   const terminalId = `terminal-${spec.callId}`
-  let next = settleTerminal(message, terminalId, 'success', Number(spec.output.exitCode ?? 0), 1_320)
+  let next = settleTerminal(message, terminalId, terminalStatus, exitCode, 1_320)
   const resultId = `live-tool-result-${spec.callId}`
   const blocks = [...next.blocks]
   const resultIndex = blocks.findIndex(entry => entry.id === resultId && entry.type === 'tool-result')
@@ -278,7 +284,7 @@ export function settleLiveTerminal(message: LogicalMessage, spec: LiveToolSpec):
       presentation: spec.presentation,
       resources: spec.resources,
       model: spec.model,
-      status: 'success',
+      status: terminalStatus === 'success' ? 'success' : 'error',
       progress: 100,
       output: spec.output,
       durationMs: 1_320,
@@ -291,14 +297,18 @@ export function settleLiveTerminal(message: LogicalMessage, spec: LiveToolSpec):
 
 export function createLiveAssistantStep(turnId: string, stepOrdinal: number): AppendCanonicalMessage {
   const extra: ContentBlock[] = []
-  if (stepOrdinal === 1) extra.push(block('work-plan', 'plan', { title: 'Rendering-engine hardening plan', items: planItemsForStep(1) }))
-  if (stepOrdinal === 3) extra.push(block('review-run', 'agent-run', {
-    runId: 'review-rendering-contract',
-    title: 'Review rendering contract',
-    agent: 'reviewer',
-    status: 'completed',
-    summary: 'Confirmed that ResourceRef, Plan, Terminal and delegated-run semantics do not introduce provider policy or workspace layout into the Engine.',
-  }))
+  if (stepOrdinal === 1) {
+    extra.push(block('work-plan', 'plan', { title: 'Rendering-engine hardening plan', items: planItemsForStep(1) }))
+  }
+  if (stepOrdinal === 3) {
+    extra.push(block('review-run', 'agent-run', {
+      runId: 'review-rendering-contract',
+      title: 'Review rendering contract',
+      agent: 'reviewer',
+      status: 'completed',
+      summary: 'Confirmed that ResourceRef, Plan, Terminal and delegated-run semantics do not introduce provider policy or workspace layout into the Engine.',
+    }))
+  }
   return {
     turnId,
     stepId: `${turnId}:step-${stepOrdinal}`,
@@ -329,24 +339,34 @@ function planItemsForStep(activeStep: number) {
 }
 
 export function addFinalEvidence(message: LogicalMessage, kind: 'diff' | 'code' | 'artifacts'): LogicalMessage {
-  if (kind === 'diff') return addBlockBeforeAnswer(message, block('live-final-diff', 'diff', {
-    resource: KERNEL_FILE,
-    lines: [
-      ' for (const entry of entries) {',
-      '+  preserveStableTurnAndStepCoordinates(entry)',
-      '+  publishSemanticContentWithoutLayoutMetadata(entry)',
-      ' }',
-      '+projection.appendTerminalDelta(message, blockId, delta)',
-    ],
-    defaultOpen: true,
-  }))
-  if (kind === 'code') return addBlockBeforeAnswer(message, block('live-final-code', 'code', {
-    language: 'typescript',
-    filename: 'tests/workbench-rendering.contract.ts',
-    resource: resource('workbench-contract-test', 'tests/workbench-rendering.contract.ts', 'workbench-rendering.contract.ts'),
-    defaultOpen: true,
-    code: `expect(planItems).toSeparateIntentFromExecutionSteps()\nexpect(toolPresentation).not.toDefineLayout()\nexpect(resourceRefs).toBeHostNeutral()\nexpect(terminalAppend).toPatchOneStableRenderUnit()\nexpect(agentRun).not.toSpawnAnythingInsideEngine()`,
-  }))
+  if (kind === 'diff') {
+    return addBlockBeforeAnswer(message, block('live-final-diff', 'diff', {
+      resource: KERNEL_FILE,
+      lines: [
+        ' for (const entry of entries) {',
+        '+  preserveStableTurnAndStepCoordinates(entry)',
+        '+  publishSemanticContentWithoutLayoutMetadata(entry)',
+        ' }',
+        '+projection.appendTerminalDelta(message, blockId, delta)',
+      ],
+      defaultOpen: true,
+    }))
+  }
+  if (kind === 'code') {
+    return addBlockBeforeAnswer(message, block('live-final-code', 'code', {
+      language: 'typescript',
+      filename: 'tests/workbench-rendering.contract.ts',
+      resource: resource('workbench-contract-test', 'tests/workbench-rendering.contract.ts', 'workbench-rendering.contract.ts'),
+      defaultOpen: true,
+      code: [
+        'expect(planItems).toSeparateIntentFromExecutionSteps()',
+        'expect(toolPresentation).not.toDefineLayout()',
+        'expect(resourceRefs).toBeHostNeutral()',
+        'expect(terminalAppend).toPatchOneStableRenderUnit()',
+        'expect(agentRun).not.toSpawnAnythingInsideEngine()',
+      ].join('\n'),
+    }))
+  }
   return addBlockBeforeAnswer(message, block('live-final-artifacts', 'attachments', {
     title: 'Workbench verification artifacts',
     provenance: { origin: 'tool-output', toolCallId: 'loop-run-tests', toolName: 'run_tests' },
