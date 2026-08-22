@@ -84,7 +84,7 @@ function pauseStream(): void { props.stream.pause() }
 <template>
   <aside class="diagnostics-panel">
     <div class="diagnostics-head">
-      <div><span class="eyebrow">Engine observability</span><strong>Session diagnostics</strong></div>
+      <div><span class="eyebrow">Demo observability</span><strong>Session diagnostics</strong></div>
       <button class="icon-button" type="button" aria-label="Close diagnostics" @click="emit('close')">×</button>
     </div>
     <div class="session-scope-card" data-testid="active-session-card">
@@ -99,9 +99,9 @@ function pauseStream(): void { props.stream.pause() }
     </div>
 
     <div class="control-group">
-      <label>Live output</label>
+      <label>Demo playback</label>
       <div class="inline-control"><select :value="streamRate" aria-label="Stream rate" @change="onRateChange"><option :value="5">5 Hz</option><option :value="20">20 Hz</option><option :value="60">60 Hz</option></select><button data-testid="stream-start" :disabled="uiState.sessionStatus !== 'working'" @click="resumeStream">Resume</button><button class="secondary" :disabled="uiState.sessionStatus !== 'working'" @click="pauseStream">Pause</button></div>
-      <small class="control-note">Changes producer cadence while the Engine keeps semantic mutations ordered and presentation work bounded.</small>
+      <small class="control-note">These cadence controls belong to the synthetic Demo producer; the Engine only receives ordered canonical mutations.</small>
     </div>
 
     <div class="control-group">
@@ -143,14 +143,14 @@ function pauseStream(): void { props.stream.pause() }
     </div>
 
     <div class="control-group">
-      <label>Projection & streaming</label>
+      <label>Projection & playback</label>
       <div class="metrics">
         <div><span>projection cache</span><strong data-testid="projection-cache">{{ uiState.projectionCacheSize }}</strong></div>
         <div><span>full projects</span><strong data-testid="projection-full-projects">{{ uiState.projectionFullProjects }}</strong></div>
         <div><span>incremental patches</span><strong data-testid="projection-incremental">{{ uiState.projectionIncrementalPatches }}</strong></div>
-        <div><span>stream ingress</span><strong data-testid="stream-ingress">{{ streamIngressTicks }}</strong></div>
-        <div><span>UI publishes</span><strong data-testid="stream-ticks">{{ streamPublishTicks }}</strong></div>
-        <div><span>live render units</span><strong data-testid="live-chunks">{{ uiState.liveChunkCount }}</strong></div>
+        <div><span>Demo ingress</span><strong data-testid="stream-ingress">{{ streamIngressTicks }}</strong></div>
+        <div><span>Demo publishes</span><strong data-testid="stream-ticks">{{ streamPublishTicks }}</strong></div>
+        <div><span>active render units</span><strong data-testid="live-chunks">{{ uiState.activeRenderUnitCount }}</strong></div>
       </div>
     </div>
 
@@ -178,7 +178,7 @@ function pauseStream(): void { props.stream.pause() }
 
     <div class="architecture-note">
       <strong>What this panel proves</strong>
-      <span>Large logical history stays decoupled from hot projection and mounted DOM, while canonical Turn/Step/tool identity, background SessionKernels, queue/blockers, streaming and exact reader state remain observable.</span>
+      <span>Engine state stays decoupled from Demo playback controls: large logical history remains separate from hot projection and mounted DOM, while canonical Turn/Step/tool identity, background SessionKernels, queue/blockers and exact reader state remain observable.</span>
     </div>
   </aside>
 </template>
