@@ -4,10 +4,12 @@ import { SyntheticHistoryAdapter } from '../src/demo/history-adapter'
 import {
   addFinalEvidence,
   agentMarkdownDelta,
+  appendLiveTerminal,
   createLiveAssistantStep,
   createLiveToolCall,
   createLiveToolResult,
   liveToolForStep,
+  settleLiveTerminal,
   updateLiveToolCall,
 } from '../src/demo/live-run-script'
 import { createScenarioTail } from '../src/demo/session-scenarios'
@@ -51,9 +53,11 @@ describe('public Demo scenarios', () => {
     expect(recent).toBe(tail.at(-1))
   })
 
-  it('models three provider-neutral tool phases as separate call/result records in one Turn', () => {
+  it('models capability, presentation and resources independently across tool phases', () => {
     const specs = [1, 2, 3].map(step => liveToolForStep(step)!)
     expect(specs.map(spec => spec.category)).toEqual(['filesystem', 'search', 'shell'])
+    expect(specs.map(spec => spec.presentation.kind)).toEqual(['resources', 'resources', 'terminal'])
+    expect(specs.every(spec => (spec.resources?.length ?? 0) > 0)).toBe(true)
     expect(new Set(specs.map(spec => spec.callId)).size).toBe(3)
 
     const assistant = liveMessage(1)
@@ -68,27 +72,61 @@ describe('public Demo scenarios', () => {
     const call = callMessage.blocks.find(contentBlock => contentBlock.type === 'tool-call')
     expect(callEntry).toMatchObject({ turnId: assistant.turnId, stepId: assistant.stepId, role: 'assistant', live: true })
     expect(call?.type === 'tool-call' ? call.data.callId : null).toBe(specs[0]!.callId)
-    expect(call?.type === 'tool-call' ? call.data.status : null).toBe('success')
+    expect(call?.type === 'tool-call' ? call.data.presentation?.kind : null).toBe('resources')
+    expect(call?.type === 'tool-call' ? call.data.resources?.[0]?.kind : null).toBe('file')
     expect(result).toMatchObject({ turnId: assistant.turnId, stepId: assistant.stepId, role: 'tool' })
-    expect(result.blocks[0]?.type === 'tool-result' ? result.blocks[0].data.callId : null).toBe(specs[0]!.callId)
     expect(next).toMatchObject({ turnId: assistant.turnId, stepId: `${assistant.turnId}:step-2`, role: 'assistant', live: true })
   })
 
-  it('streams complex GFM across model steps and adds final evidence as canonical blocks', () => {
+  it('keeps Plan separate from execution Step and AgentRun as a render-only delegated reference', () => {
+    const first = createLiveAssistantStep('demo:turn', 1)
+    const third = createLiveAssistantStep('demo:turn', 3)
+    const plan = first.blocks.find(contentBlock => contentBlock.type === 'plan')
+    const delegated = third.blocks.find(contentBlock => contentBlock.type === 'agent-run')
+    expect(plan?.type === 'plan' ? plan.data.items.map(item => item.status) : null).toEqual(['in-progress', 'pending', 'pending', 'pending'])
+    expect(delegated?.type === 'agent-run' ? delegated.data : null).toMatchObject({
+      runId: 'review-rendering-contract', status: 'completed', agent: 'reviewer',
+    })
+    expect(first.stepId).toBe('demo:turn:step-1')
+    expect(third.stepId).toBe('demo:turn:step-3')
+  })
+
+  it('models shell evidence as a live terminal block and settles it without changing call identity', () => {
+    const spec = liveToolForStep(3)!
+    const callEntry = createLiveToolCall(liveMessage(3), spec)
+    const callMessage: LogicalMessage = { id: 'demo:m-20', index: 20, turnId: callEntry.turnId, stepId: callEntry.stepId, role: 'assistant', live: true, blocks: callEntry.blocks }
+    const resultEntry = createLiveToolResult(callMessage, spec, true)
+    let result: LogicalMessage = { id: 'demo:m-21', index: 21, turnId: resultEntry.turnId, stepId: resultEntry.stepId, role: 'tool', live: true, blocks: resultEntry.blocks }
+    expect(result.blocks.map(contentBlock => contentBlock.type)).toEqual(['tool-result', 'terminal'])
+    const appended = appendLiveTerminal(result, spec, 0)!
+    result = appended.message
+    expect(appended.delta).toContain('$ pnpm test')
+    expect(result.blocks.find(contentBlock => contentBlock.type === 'terminal')?.type === 'terminal'
+      ? result.blocks.find(contentBlock => contentBlock.type === 'terminal')!.data.output
+      : '').toContain('RUN')
+    const settled = settleLiveTerminal(result, spec)
+    const terminal = settled.blocks.find(contentBlock => contentBlock.type === 'terminal')
+    expect(terminal?.type === 'terminal' ? terminal.data.status : null).toBe('success')
+    expect(terminal?.type === 'terminal' ? terminal.data.exitCode : null).toBe(0)
+  })
+
+  it('streams complex GFM and adds resource-aware final evidence as canonical blocks', () => {
     const source = [1, 2, 3, 4]
       .flatMap(step => Array.from({ length: 10 }, (_, index) => agentMarkdownDelta(step, index)))
       .join('')
-    expect(source).toContain('| Surface | Owner | Invariant |')
+    expect(source).toContain('| Semantic layer | Owns | Must not own |')
     expect(source).toContain('```ts')
     expect(source).toContain('```text')
     expect(source).toContain('- [x]')
-    expect(source).toContain('> A virtual row may remount')
-    expect(source).toContain('1. `turnId` groups')
+    expect(source).toContain('A resource can identify')
+    expect(source).toContain('Plan items describe intended work')
 
     let final = liveMessage(4)
     final = addFinalEvidence(final, 'diff')
     final = addFinalEvidence(final, 'code')
     final = addFinalEvidence(final, 'artifacts')
     expect(final.blocks.map(contentBlock => contentBlock.type)).toEqual(['reasoning', 'diff', 'code', 'attachments', 'markdown'])
+    const diff = final.blocks.find(contentBlock => contentBlock.type === 'diff')
+    expect(diff?.type === 'diff' ? diff.data.resource.kind : null).toBe('file')
   })
 })
