@@ -10,7 +10,7 @@ import AudioBlock from './AudioBlock.vue'
 import HtmlBlock from './HtmlBlock.vue'
 import ToolBlock from './ToolBlock.vue'
 import TerminalBlock from './TerminalBlock.vue'
-import AgentRunBlock from './AgentRunBlock.vue'
+import DelegationBlock from './DelegationBlock.vue'
 import DiffBlock from './DiffBlock.vue'
 import UnknownBlock from './UnknownBlock.vue'
 
@@ -30,7 +30,7 @@ const DEFAULT_ENTRIES: readonly (readonly [string, Component])[] = [
   ['html', HtmlBlock],
   ['tool', ToolBlock],
   ['terminal', TerminalBlock],
-  ['agent-run', AgentRunBlock],
+  ['delegation', DelegationBlock],
   ['diff', DiffBlock],
   ['unknown', UnknownBlock],
 ]
