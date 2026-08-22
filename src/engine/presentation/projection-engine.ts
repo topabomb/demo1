@@ -100,15 +100,24 @@ export class ProjectionEngine {
     const settledPrefix = blockUnits.slice(0, -1)
     const chunks = splitMarkdown(`${oldTailText}${delta}`)
     const baseIndex = settledPrefix.length
+    const partCount = settledPrefix.length + chunks.length
     const tailUnits = chunks.map((chunk, localIndex) => {
-      if (localIndex === 0 && chunk.text === oldTailText && chunk.hash === oldTail.revision) return oldTail
+      // Once an append creates another chunk, the old tail is no longer the last
+      // part and must publish new continuation metadata even if its text is stable.
+      if (chunks.length === 1 && localIndex === 0 && chunk.text === oldTailText && chunk.hash === oldTail.revision) return oldTail
+      const partIndex = baseIndex + localIndex
       return makeRenderUnit(
         message,
         contentBlock,
-        `md-${baseIndex + localIndex}`,
+        `md-${partIndex}`,
         'markdown',
         estimateMarkdown(chunk.text),
-        { markdown: chunk.text, markdownHash: chunk.hash },
+        {
+          markdown: chunk.text,
+          markdownHash: chunk.hash,
+          partIndex,
+          partCount,
+        },
         chunk.hash,
       )
     })

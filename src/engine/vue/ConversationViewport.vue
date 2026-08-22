@@ -14,9 +14,10 @@ import type { ConversationSessionRuntime, SessionUiSnapshot, ShiftPlan } from '.
 import type { SessionViewMemory } from '../viewport/state'
 import { VIEWPORT_POLICY, type CommittedViewportAnchor } from '../viewport/contracts'
 import ConversationNodeSeat from './ConversationNodeSeat.vue'
+import type { RendererResolver } from './renderers/registry'
 import { ViewportNavigationController } from './viewport-navigation-controller'
 
-const props = defineProps<{ runtime: ConversationSessionRuntime; stream: ConversationExecutionController; uiState: SessionUiSnapshot }>()
+const props = defineProps<{ runtime: ConversationSessionRuntime; stream: ConversationExecutionController; uiState: SessionUiSnapshot; renderers?: RendererResolver }>()
 const emit = defineEmits<{ viewportMetrics: [metrics: { mountedRows: number }] }>()
 
 const VIRTUAL_BUFFER_PX = 900
@@ -316,7 +317,7 @@ defineExpose({ captureSnapshot, jumpToMessage, jumpToLatest, shiftBackward, shif
 </script>
 
 <template>
-  <main class="conversation-shell" :data-session-id="runtime.id">
+  <main class="conversation-shell" data-conversation-engine="vue" :data-session-id="runtime.id">
     <header class="conversation-header">
       <div class="conversation-heading">
         <div class="conversation-title"><strong>{{ runtime.title }}</strong><span>conversation / {{ runtime.id }}</span></div>
@@ -335,7 +336,7 @@ defineExpose({ captureSnapshot, jumpToMessage, jumpToLatest, shiftBackward, shif
       <div v-if="order.length === 0" class="empty-conversation" data-testid="empty-conversation"><div class="empty-agent-mark">✦</div><h2>Start a conversation</h2><p>Send a prompt to begin. Session state is independent from the mounted viewport.</p></div>
 
       <VList v-else :key="`${runtime.id}:${uiState.virtualEpoch}`" ref="listRef" class="conversation-vlist" :data="order" :item-size="VIRTUAL_ITEM_HINT_PX" :buffer-size="VIRTUAL_BUFFER_PX" :shift="runtime.shiftMode" :item-props="itemProps" @scroll="onVirtualScroll" @scroll-end="onVirtualScrollEnd">
-        <template #default="{ item }"><ConversationNodeSeat :runtime="runtime" :node-id="item" /></template>
+        <template #default="{ item }"><ConversationNodeSeat :runtime="runtime" :node-id="item" :renderers="renderers" /></template>
       </VList>
 
       <button v-if="showLatest" class="jump-latest" data-testid="jump-latest" type="button" @click="jumpToLatest"><span>↓</span><strong>Latest</strong><em v-if="messagesAfter > 0" data-testid="messages-after">{{ formatAfter(messagesAfter) }}</em></button>

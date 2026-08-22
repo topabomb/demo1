@@ -50,6 +50,36 @@ describe('ConversationSessionKernel', () => {
     expect(kernel.getMessage(assistantIndex)).toMatchObject({ live: false, blocks: [{ type: 'reasoning', data: { status: 'complete' } }, { type: 'markdown' }] })
   })
 
+  it('owns a monotonic message revision for every canonical replacement', () => {
+    const descriptor = { id: 'revision', title: 'Revision', status: 'idle' as const, logicalCount: 0 }
+    const kernel = new ConversationSessionKernel(descriptor, new SyntheticHistoryAdapter('revision', 0, 4))
+    const [index] = kernel.appendCanonicalMessages([{
+      turnId: 'revision:turn-1',
+      stepId: 'revision:turn-1:step-0',
+      role: 'assistant',
+      blocks: [block('answer', 'markdown', { markdown: 'first' })],
+    }])
+    const target = index!
+    const initial = kernel.getMessage(target)
+    expect(initial.revision).toBe(0)
+
+    kernel.replaceCanonicalMessage(target, {
+      ...initial,
+      revision: 0,
+      blocks: [block('answer', 'markdown', { markdown: 'second' })],
+    })
+    const second = kernel.getMessage(target)
+    expect(second.revision).toBe(1)
+
+    kernel.replaceCanonicalMessage(target, {
+      ...second,
+      revision: 0,
+      blocks: [block('answer', 'markdown', { markdown: 'third' })],
+    })
+    expect(kernel.getMessage(target).revision).toBe(2)
+    expect(kernel.getMessage(target).blocks[0]).toMatchObject({ type: 'markdown', data: { markdown: 'third' } })
+  })
+
   it('delivers every semantic mutation in producer order while summary notification stays coalesced', async () => {
     const descriptor = { id: 'events', title: 'Events', status: 'idle' as const, logicalCount: 0 }
     const kernel = new ConversationSessionKernel(descriptor, new SyntheticHistoryAdapter('events', 0, 4))

@@ -110,11 +110,26 @@ describe('engine architecture boundaries', () => {
     expect(workspace).not.toContain('data-testid="metrics"')
     expect(workspace).toContain('#header-context')
     expect(workspace).toContain('#header-actions')
+    expect(workspace).not.toContain('data-conversation-engine=')
+    expect(viewport).toContain('data-conversation-engine="vue"')
     expect(viewport).toContain("./viewport-navigation-controller")
     expect(viewport).not.toContain('function restoreListAnchor')
     expect(viewport).not.toContain('function pinMeasuredEnd')
     expect(viewport).toContain("emit('viewportMetrics'")
     expect(viewport).not.toMatch(/Synthetic Agent|Reasoning · balanced|Search conversation|title="Attach"|>Agent ▾<|>Model ▾</)
+  })
+
+  it('supports per-viewport renderer customization without requiring global registry mutation', () => {
+    const registry = readFileSync(join(engineRoot, 'vue/renderers/registry.ts'), 'utf8')
+    const viewport = readFileSync(join(engineRoot, 'vue/ConversationViewport.vue'), 'utf8')
+    const nodeSeat = readFileSync(join(engineRoot, 'vue/ConversationNodeSeat.vue'), 'utf8')
+
+    expect(registry).toContain('export class RendererRegistry')
+    expect(registry).toContain('clone(): RendererRegistry')
+    expect(registry).toContain('defaultRendererRegistry')
+    expect(viewport).toContain('renderers?: RendererResolver')
+    expect(viewport).toContain(':renderers="renderers"')
+    expect(nodeSeat).toContain(':renderers="renderers"')
   })
 
   it('loads demo and engine styles from their owning trees only', () => {

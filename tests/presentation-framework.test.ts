@@ -30,6 +30,14 @@ describe('Agent presentation framework', () => {
     }
   })
 
+  it('emits explicit Markdown continuation metadata for multi-unit messages', () => {
+    const source = Array.from({ length: 90 }, (_, i) => `### section ${i}\n\n${'paragraph '.repeat(30)}`).join('\n\n')
+    const units = projectMessage(message([block('answer', 'markdown', { markdown: source })]))
+    expect(units.length).toBeGreaterThan(1)
+    expect(units.map(unit => unit.payload.partIndex)).toEqual(units.map((_, index) => index))
+    expect(units.every(unit => unit.payload.partCount === units.length)).toBe(true)
+  })
+
   it('never splits an open fenced code block', () => {
     const source = `intro\n\n\`\`\`ts\n${Array.from({ length: 600 }, (_, i) => `const line_${i} = ${i}`).join('\n')}\n\`\`\`\n\nafter`
     const chunks = splitMarkdown(source, 900)
@@ -38,6 +46,17 @@ describe('Agent presentation framework', () => {
       const fences = chunk.text.match(/```/g)?.length ?? 0
       expect(fences % 2).toBe(0)
     }
+  })
+
+  it('keeps tight GFM tables intact instead of splitting at ordinary line breaks', () => {
+    const source = [
+      '| key | value |',
+      '| --- | --- |',
+      ...Array.from({ length: 120 }, (_, index) => `| row-${index} | ${'value '.repeat(8)} |`),
+    ].join('\n')
+    const chunks = splitMarkdown(source, 180)
+    expect(chunks).toHaveLength(1)
+    expect(chunks[0]?.text).toBe(source)
   })
 
   it('supports semantic projector extensions without modifying the default registry', () => {

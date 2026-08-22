@@ -50,6 +50,23 @@ describe('ProjectionEngine', () => {
     expect(engine.stats.incrementalPatches).toBe(1)
   })
 
+  it('updates Markdown continuation metadata when a streamed append creates a new unit', () => {
+    const engine = new ProjectionEngine(undefined, 256)
+    const initialText = `${'first paragraph '.repeat(330)}\n\n${'tail '.repeat(40)}`
+    const initial = live(initialText, 0)
+    const before = engine.projectMessage(initial)
+    const oldTail = before.at(-1)!
+
+    const delta = `\n\n${'new section '.repeat(600)}`
+    const after = engine.appendMarkdownDelta(live(`${initialText}${delta}`, 1), 'answer', delta)
+    const nextOldTail = after.find(unit => unit.id === oldTail.id)!
+
+    expect(after.length).toBeGreaterThan(before.length)
+    expect(nextOldTail).not.toBe(oldTail)
+    expect(Number(nextOldTail.payload.partIndex)).toBeLessThan(Number(nextOldTail.payload.partCount) - 1)
+    expect(after.at(-1)?.payload.partCount).toBe(after.filter(unit => unit.blockId === 'answer').length)
+  })
+
   it('patches reasoning inside a mixed live message without invalidating the answer sibling', () => {
     const engine = new ProjectionEngine(undefined, 256)
     const before = engine.projectMessage(mixed('inspect ', 'stable answer', 0))

@@ -2,8 +2,9 @@
 import { onBeforeUnmount, shallowRef, watch } from 'vue'
 import type { ConversationSessionRuntime } from '../runtime/session-runtime'
 import RenderUnitView from './RenderUnitView.vue'
+import type { RendererResolver } from './renderers/registry'
 
-const props = defineProps<{ runtime: ConversationSessionRuntime; nodeId: string }>()
+const props = defineProps<{ runtime: ConversationSessionRuntime; nodeId: string; renderers?: RendererResolver }>()
 const unit = shallowRef(props.runtime.projection.getNode(props.nodeId))
 let unsubscribe: (() => void) | null = null
 
@@ -21,6 +22,6 @@ onBeforeUnmount(() => unsubscribe?.())
 
 <template>
   <div v-if="unit" class="node-seat">
-    <RenderUnitView :unit="unit" />
+    <RenderUnitView :unit="unit" :renderers="renderers" />
   </div>
 </template>

@@ -187,7 +187,11 @@ export class ConversationSessionKernel {
       message.role !== current.role
     ) throw new Error(`canonical identity changed for message ${index}`)
 
-    this.#writeMessage(index, { ...message, blocks: cloneBlocks(message.blocks) })
+    // Message revision is Kernel-owned mutation identity. Providers may supply a
+    // newer revision, but a replacement can never reuse the currently committed
+    // revision because presentation caches key their rebuildable work by it.
+    const revision = Math.max((current.revision ?? 0) + 1, message.revision ?? 0)
+    this.#writeMessage(index, { ...message, revision, blocks: cloneBlocks(message.blocks) })
     if (contentPatch) this.#recordFirstOutput()
     this.#emit({ kind: 'content', messageIndex: index, contentPatch })
   }

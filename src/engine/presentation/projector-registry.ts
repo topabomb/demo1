@@ -50,6 +50,8 @@ export function createDefaultContentProjectors(): ContentProjectorRegistry {
       return chunks.map(chunk => makeRenderUnit(message, contentBlock, `md-${chunk.index}`, 'markdown', estimateMarkdown(chunk.text), {
         markdown: chunk.text,
         markdownHash: chunk.hash,
+        partIndex: chunk.index,
+        partCount: chunks.length,
       }, chunk.hash))
     })
     .register('reasoning', ({ message, block: contentBlock }) => {

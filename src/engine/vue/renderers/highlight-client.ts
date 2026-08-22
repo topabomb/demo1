@@ -6,20 +6,33 @@ interface Pending {
 const MAX_CACHE = 256
 const cache = new Map<string, string>()
 const pending = new Map<number, Pending>()
+const inFlight = new Map<string, Promise<string>>()
 let sequence = 0
 let worker: Worker | null = null
 
+function failWorker(reason: unknown): void {
+  const error = reason instanceof Error ? reason : new Error(String(reason || 'Code highlighting worker failed'))
+  const failed = worker
+  worker = null
+  failed?.terminate()
+  for (const request of pending.values()) request.reject(error)
+  pending.clear()
+}
+
 function getWorker(): Worker {
   if (worker) return worker
-  worker = new Worker(new URL('../../workers/highlight.worker.ts', import.meta.url), { type: 'module' })
-  worker.onmessage = (event: MessageEvent<{ id: number; html?: string; error?: string }>) => {
+  const instance = new Worker(new URL('../../workers/highlight.worker.ts', import.meta.url), { type: 'module' })
+  worker = instance
+  instance.onmessage = (event: MessageEvent<{ id: number; html?: string; error?: string }>) => {
     const request = pending.get(event.data.id)
     if (!request) return
     pending.delete(event.data.id)
     if (event.data.error) request.reject(new Error(event.data.error))
     else request.resolve(event.data.html ?? '')
   }
-  return worker
+  instance.onerror = event => failWorker(event.error ?? new Error(event.message || 'Code highlighting worker failed'))
+  instance.onmessageerror = () => failWorker(new Error('Code highlighting worker returned an unreadable message'))
+  return instance
 }
 
 function remember(key: string, html: string): void {
@@ -39,8 +52,11 @@ export function highlightCode(code: string, language: string): Promise<string> {
     return Promise.resolve(hit)
   }
 
+  const running = inFlight.get(key)
+  if (running) return running
+
   const id = ++sequence
-  return new Promise<string>((resolve, reject) => {
+  const promise = new Promise<string>((resolve, reject) => {
     pending.set(id, {
       resolve: html => {
         remember(key, html)
@@ -50,6 +66,10 @@ export function highlightCode(code: string, language: string): Promise<string> {
     })
     getWorker().postMessage({ id, code, language })
   })
+  inFlight.set(key, promise)
+  const cleanup = () => { if (inFlight.get(key) === promise) inFlight.delete(key) }
+  void promise.then(cleanup, cleanup)
+  return promise
 }
 
 export function highlightCacheSize(): number {

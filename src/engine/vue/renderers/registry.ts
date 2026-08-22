@@ -11,12 +11,11 @@ import ToolBlock from './ToolBlock.vue'
 import DiffBlock from './DiffBlock.vue'
 import UnknownBlock from './UnknownBlock.vue'
 
-/**
- * Physical frontend rendering is intentionally separate from semantic projection.
- * Product packages may register or replace renderer IDs without changing the store,
- * SessionKernel, projection economics or viewport algorithms.
- */
-const renderers = new Map<string, Component>([
+export interface RendererResolver {
+  resolve(id: string): Component
+}
+
+const DEFAULT_ENTRIES: readonly (readonly [string, Component])[] = [
   ['text', TextBlock],
   ['markdown', MarkdownBlock],
   ['thinking', ThinkingBlock],
@@ -28,16 +27,55 @@ const renderers = new Map<string, Component>([
   ['tool', ToolBlock],
   ['diff', DiffBlock],
   ['unknown', UnknownBlock],
-])
+]
+
+/**
+ * Per-surface physical renderer registry. Semantic projection remains framework
+ * neutral; products can clone/replace renderer IDs for one viewport without
+ * mutating every Engine instance mounted in the same application.
+ */
+export class RendererRegistry implements RendererResolver {
+  #renderers = new Map<string, Component>()
+  readonly fallback: Component
+
+  constructor(entries: Iterable<readonly [string, Component]> = DEFAULT_ENTRIES, fallback: Component = UnknownBlock) {
+    this.fallback = fallback
+    for (const [id, component] of entries) this.#renderers.set(id, component)
+  }
+
+  register(id: string, component: Component): this {
+    this.#renderers.set(id, component)
+    return this
+  }
+
+  resolve(id: string): Component {
+    return this.#renderers.get(id) ?? this.fallback
+  }
+
+  ids(): readonly string[] {
+    return Object.freeze([...this.#renderers.keys()])
+  }
+
+  clone(): RendererRegistry {
+    return new RendererRegistry(this.#renderers, this.fallback)
+  }
+}
+
+export function createDefaultRendererRegistry(): RendererRegistry {
+  return new RendererRegistry()
+}
+
+/** Compatibility default for simple applications. Prefer a per-viewport clone when customizing. */
+export const defaultRendererRegistry = createDefaultRendererRegistry()
 
 export function registerRenderer(id: string, component: Component): void {
-  renderers.set(id, component)
+  defaultRendererRegistry.register(id, component)
 }
 
 export function resolveRenderer(id: string): Component {
-  return renderers.get(id) ?? UnknownBlock
+  return defaultRendererRegistry.resolve(id)
 }
 
 export function registeredRendererIds(): readonly string[] {
-  return Object.freeze([...renderers.keys()])
+  return defaultRendererRegistry.ids()
 }

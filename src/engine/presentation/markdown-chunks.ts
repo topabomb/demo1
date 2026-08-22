@@ -5,8 +5,14 @@ export interface MarkdownChunk {
 }
 
 /**
- * Split long Markdown at block boundaries while never cutting an open fenced code block.
- * Existing prefix chunks remain byte-identical as a stream appends to the tail.
+ * Split long Markdown at conservative block boundaries while never cutting an
+ * open fenced code block. Existing prefix chunks remain byte-identical as a
+ * stream appends to the tail.
+ *
+ * A single newline is deliberately not considered a safe boundary: tight GFM
+ * tables, lists and other multi-line blocks depend on adjacent lines staying in
+ * the same parse context. Oversized atomic blocks are preferable to changing
+ * Markdown semantics merely to hit the target chunk size.
  */
 export function splitMarkdown(source: string, targetChars = 6000): MarkdownChunk[] {
   if (!source) return [{ text: '', index: 0, hash: hashText('') }]
@@ -21,9 +27,10 @@ export function splitMarkdown(source: string, targetChars = 6000): MarkdownChunk
 
     // Decide whether to flush using the state *before* this line. In particular,
     // a closing-fence line belongs to the currently open chunk and must never be
-    // separated from its opener.
+    // separated from its opener. Require an actual blank line so tight tables or
+    // lists are not split between structurally related lines.
     const wouldOverflow = buffer.length > 0 && buffer.length + line.length > targetChars
-    const cleanBoundary = !fence && /\n\s*$/.test(buffer)
+    const cleanBoundary = !fence && /(?:\r?\n)[\t ]*(?:\r?\n)$/.test(buffer)
     if (wouldOverflow && cleanBoundary) {
       chunks.push(buffer)
       buffer = ''

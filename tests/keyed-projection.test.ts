@@ -49,6 +49,21 @@ describe('KeyedConversationProjection', () => {
     expect(projection.getNode(a.id)).toMatchObject({ turnId: 'session:turn-1', stepId: 'session:turn-1:step-0', blockId: 'md' })
   })
 
+  it('publishes metadata/payload changes even when a content-derived revision stays equal', async () => {
+    const projection = new KeyedConversationProjection()
+    const a = { ...node('session:m-1:md', 42), payload: { markdown: 'done', live: true } }
+    projection.replace([a])
+    await flush()
+
+    let publishes = 0
+    projection.subscribeNode(a.id, () => { publishes += 1 })
+    projection.replace([{ ...a, payload: { markdown: 'done', live: false } }])
+    await flush()
+
+    expect(publishes).toBe(1)
+    expect(projection.getNode(a.id)?.payload.live).toBe(false)
+  })
+
   it('microtask-batches repeated patches to the same visible node', async () => {
     const projection = new KeyedConversationProjection()
     const a = node('session:m-1:md')

@@ -156,7 +156,6 @@ async function injectAgentScenarios(): Promise<void> {
     </aside>
 
     <ConversationViewport
-      data-conversation-engine="vue"
       :key="activeSession.id"
       ref="viewportRef"
       :runtime="activeSession"

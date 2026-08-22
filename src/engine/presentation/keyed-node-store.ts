@@ -38,7 +38,9 @@ export class KeyedConversationProjection implements ConversationProjectionStore 
     for (const unit of units) {
       const previous = this.#nodes.get(unit.id)
       if (previous === unit) continue
-      if (previous && previous.revision === unit.revision && previous.kind === unit.kind) continue
+      // Revision is a renderer/cache hint, not a complete equality contract.
+      // Presentation metadata such as `live`, role or provenance may change while
+      // a content-derived revision stays stable, so a new unit object must publish.
       this.#nodes.set(unit.id, unit)
       this.#nodeNotifiers.get(unit.id)?.markDirty()
     }
