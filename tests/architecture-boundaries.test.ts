@@ -147,7 +147,7 @@ describe('engine architecture boundaries', () => {
     expect(adapter).toContain('async DB/network fetching stays')
   })
 
-  it('never infers provider execution, blocker policy or Turn outcomes inside SessionKernel', () => {
+  it('owns blocker identity and session invariants without owning post-resolution workflow policy', () => {
     const contracts = readFileSync(join(engineRoot, 'conversation/contracts.ts'), 'utf8')
     const kernel = readFileSync(join(engineRoot, 'conversation/session-kernel.ts'), 'utf8')
     const runtime = readFileSync(join(engineRoot, 'runtime/session-runtime.ts'), 'utf8')
@@ -155,13 +155,18 @@ describe('engine architecture boundaries', () => {
     const workspace = readFileSync(join(demoRoot, 'workspace-runtime.ts'), 'utf8')
     const turnReasonDeclaration = contracts.slice(contracts.indexOf('export type TurnEndReasonKind'), contracts.indexOf('export interface LlmFailure'))
 
-    expect(contracts).toContain("| { kind: 'question'; answer: string | null }")
+    expect(contracts).toContain("{ interactionId: string; kind: 'question'; answer: string | null }")
+    expect(contracts).toContain("{ interactionId: string; kind: 'approval'; approved: boolean }")
+    expect(contracts).toContain('callId?: string')
     expect(contracts).toContain('activeAssistantIndex?: number | null')
     expect(turnReasonDeclaration).not.toContain("'blocked'")
     expect(kernel).toContain('descriptor.activeAssistantIndex')
     expect(kernel).not.toMatch(/(?:history|backend)\.count\s*-\s*1/)
     expect(kernel).toContain('requestInteraction(interaction: PendingInteraction)')
     expect(kernel).toContain('resolveInteraction(resolution: InteractionResolution)')
+    expect(kernel).toContain('pending.id !== resolution.interactionId')
+    expect(kernel).toContain('cannot finish execution while interaction')
+    expect(kernel).toContain("this.#pendingInteraction || this.#status === 'working'")
     expect(kernel).not.toContain('resolution.approved')
     expect(kernel).not.toContain('resolution.answer === null')
     expect(kernel).not.toContain('defaultTurnReason')
@@ -170,6 +175,23 @@ describe('engine architecture boundaries', () => {
     expect(runtime).not.toMatch(/streamTarget|liveChunkCount|mountedRows|jumpInput/)
     expect(demoStream).toContain('resolveInteraction(resolution: InteractionResolution)')
     expect(workspace).toContain('activeAssistantIndex: descriptor.logicalCount - 1')
+  })
+
+  it('keeps tool execution facts producer-owned instead of inventing defaults in projection or Vue', () => {
+    const projector = readFileSync(join(engineRoot, 'presentation/projector-registry.ts'), 'utf8')
+    const toolRenderer = readFileSync(join(engineRoot, 'vue/renderers/ToolBlock.vue'), 'utf8')
+    const office = readFileSync(join(demoRoot, 'office-scenarios.ts'), 'utf8')
+    const scenarios = readFileSync(join(demoRoot, 'session-scenarios.ts'), 'utf8')
+    const fixtures = readFileSync(join(demoRoot, 'workspace-fixtures.ts'), 'utf8')
+
+    expect(projector).not.toMatch(/status:\s*data\.status\s*\?\?\s*['"](?:running|success)['"]/) 
+    expect(toolRenderer).not.toMatch(/payload\.status\s*\?\?\s*['"]running['"]/) 
+    expect(toolRenderer).toContain('v-if="status"')
+    expect(office).toContain("callId: 'meeting-followup-approval'")
+    expect(office).not.toMatch(/callId: 'meeting-followup-approval'[^\n]*status: 'running'/)
+    expect(scenarios).not.toMatch(/callId: 'config-edit-approval'[^\n]*status: 'running'/)
+    expect(fixtures).toContain("callId: 'meeting-followup-approval'")
+    expect(fixtures).toContain("callId: 'config-edit-approval'")
   })
 
   it('keeps synthetic playback, Agent-loop, child timing and delegation lifecycle in Demo', () => {
@@ -205,7 +227,8 @@ describe('engine architecture boundaries', () => {
     expect(viewport).toContain('execution: ConversationExecutionController')
     expect(viewport).not.toContain('stream: ConversationExecutionController')
     expect(viewport).toContain('data-testid="question-answer"')
-    expect(viewport).toContain("{ kind: 'question', answer: normalized }")
+    expect(viewport).toContain("interactionId: pending.id, kind: 'question', answer: normalized")
+    expect(viewport).toContain('data-interaction-id')
     expect(diagnostics).toContain('Demo observability')
     expect(diagnostics).toContain('Demo playback')
     expect(diagnostics).toContain('uiState.activeRenderUnitCount')
