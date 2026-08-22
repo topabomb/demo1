@@ -122,10 +122,12 @@ export function createDefaultContentProjectors(): ContentProjectorRegistry {
       return [makeRenderUnit(message, contentBlock, 'agent-run', 'agent-run', 92, data)]
     })
     .register('diff', ({ message, block: contentBlock }) => {
-      const data = contentBlock.data as { resource: Record<string, unknown>; lines: readonly string[]; defaultOpen?: boolean }
+      const data = contentBlock.data as { resource?: Record<string, unknown>; file?: string; lines: readonly string[]; defaultOpen?: boolean }
+      // Defensive read tolerance for stale persisted/demo data. The public canonical contract has one source of truth: ResourceRef.
+      const resource = data.resource ?? { id: `${message.id}:${contentBlock.id}:legacy-resource`, kind: 'file', uri: String(data.file ?? 'unknown'), label: String(data.file ?? 'unknown') }
       return chunkArray([...data.lines], 72).map((lines, index) => makeRenderUnit(message, contentBlock, `diff-${index}`, 'diff', 110 + Math.min(28, lines.length) * 20, {
-        resource: data.resource,
-        file: typeof data.resource.label === 'string' ? data.resource.label : data.resource.uri,
+        resource,
+        file: typeof resource.label === 'string' ? resource.label : resource.uri,
         lines,
         defaultOpen: data.defaultOpen ?? lines.length <= 32,
       }))
