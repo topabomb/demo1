@@ -65,9 +65,5 @@ export {
 } from './viewport/contracts'
 export { type SemanticViewportSnapshot, type SessionViewMemory } from './viewport/state'
 
-/**
- * SessionUiSnapshot, shift plans, window sizes and cache telemetry are adapter/runtime
- * implementation details. Consumers compose the runtime but should not treat those
- * tuning details as stable framework contracts.
- */
+/** Runtime tuning and adapter telemetry stay implementation details, not stable API. */
 export { ConversationSessionRuntime } from './runtime/session-runtime'
