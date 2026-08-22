@@ -30,6 +30,9 @@ type DemoNavigationTarget =
   | 'agent-final'
   | 'office-briefing'
   | 'office-followup'
+  | 'lifecycle-clarify'
+  | 'lifecycle-fallback'
+  | 'lifecycle-steer'
 
 const AGENT_DEMO_MESSAGE = {
   'agent-plan': 83_999,
@@ -123,8 +126,15 @@ async function navigateDemo(target: DemoNavigationTarget): Promise<void> {
     return
   }
 
-  if (target === 'office-briefing' || target === 'office-followup') {
-    switchSession(target === 'office-briefing' ? 'office-briefing' : 'office-followup')
+  const directSession = {
+    'office-briefing': 'office-briefing',
+    'office-followup': 'office-followup',
+    'lifecycle-clarify': 'android-protocol',
+    'lifecycle-fallback': 'resilience-fallback',
+    'lifecycle-steer': 'steered-migration',
+  }[target]
+  if (directSession) {
+    switchSession(directSession)
     await nextTick()
     await viewportRef.value?.jumpToLatest()
     return
