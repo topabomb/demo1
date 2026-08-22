@@ -320,7 +320,7 @@ defineExpose({ captureSnapshot, jumpToMessage, jumpToLatest, shiftBackward, shif
   <main class="conversation-shell" data-conversation-engine="vue" :data-session-id="runtime.id">
     <header class="conversation-header">
       <div class="conversation-heading">
-        <div class="conversation-title"><strong>{{ runtime.title }}</strong><span>conversation / {{ runtime.id }}</span></div>
+        <div class="conversation-title"><strong>{{ runtime.title }}</strong></div>
         <div class="conversation-header-context"><slot name="header-context" /></div>
       </div>
       <div class="conversation-header-actions">
