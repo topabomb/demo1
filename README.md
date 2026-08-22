@@ -64,7 +64,9 @@ type InteractionResolution =
   | { kind: 'question'; answer: string | null }
 ```
 
-A user question therefore carries an actual answer instead of being reduced to a fake approval boolean. Resolving any blocker validates the response type and clears blocker state only; approval, denial, answer or skip does not itself invent a `completed` or `aborted` Turn outcome. The execution adapter decides what happens next.
+`waiting` is reserved for a pending user interaction: restored state must provide `status: 'waiting'` and `pendingInteraction` together. During live execution, `requestInteraction(...)` is the explicit transition from `working` to `waiting`; `resolveInteraction(...)` validates the typed response, clears the blocker and returns the session to outcome-neutral `idle`.
+
+A user question therefore carries an actual answer instead of being reduced to a fake approval boolean. Approval, denial, answer or skip does not itself invent a `completed` or `aborted` Turn outcome. The execution adapter decides whether to resume, change strategy or explicitly finish the Turn.
 
 ### History source
 
@@ -120,7 +122,7 @@ The one-click diagnostics panel is intentionally **Demo-owned observability**. I
 - Demo controls/telemetry — synthetic playback rate, pause/resume, ingress/publish counts and fixture injection;
 - Engine evidence — logical/hot/DOM scale, projection work, exact reader state, Turn/Step/tool identity, blockers/queue and normalized accounting.
 
-It is closed by default for normal users and automatically open under Playwright.
+It is closed by default for normal users and automatically open under Playwright. A missing historical Turn outcome is displayed as `none`, never overloaded as “active”; live execution state has its own status field.
 
 ## Extension rule
 
