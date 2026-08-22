@@ -72,9 +72,9 @@ test('architecture proof exposes layout-agnostic Engine, delegation, adapter and
   await page.getByTestId('architecture-link').click()
   await expect(page.getByTestId('architecture-page')).toBeVisible()
   await expect(page.getByRole('heading', { name: /external runtime.*semantic engine.*demo host/i })).toBeVisible()
-  await expect(page.getByRole('heading', { name: /compact set of concepts that survive across agent clients/i })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /general semantics go inward.*behavior policy stays outward/i })).toBeVisible()
   await expect(page.getByRole('heading', { name: /concepts that must not collapse into each other/i })).toBeVisible()
-  await expect(page.getByRole('heading', { name: /rich workbench output does not change the scaling law/i })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /correct semantics do not change the scaling law/i })).toBeVisible()
 
   for (const name of ['Canonical identity', 'Workbench semantics', 'Delegated child refs', 'SessionKernel', 'History source', 'Projection', 'Semantic viewport', 'Vue reference adapter']) {
     await expect(page.getByText(name, { exact: true })).toBeVisible()
@@ -89,7 +89,7 @@ test('architecture proof exposes layout-agnostic Engine, delegation, adapter and
   await expect(page.getByText(/O\(delta \+ mutable tail\)/)).toBeVisible()
   await expect(page.getByText(/^Streaming terminal/)).toBeVisible()
   await expect(page.getByText(/^Delegation status update/)).toBeVisible()
-  await expect(page.getByText(/Child traces remain in child sessions/)).toBeVisible()
+  await expect(page.getByText(/Detailed child trace stays in an independently addressable conversation session/)).toBeVisible()
   await expect(page.getByText(/no core PresentationSurface/)).toBeVisible()
   await expect(page.getByText(/package publishing disabled/i)).toBeVisible()
   await page.getByTestId('launch-lab').click()
