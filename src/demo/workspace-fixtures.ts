@@ -1,5 +1,6 @@
 import type { ConversationDescriptor, PendingInteraction } from '../engine/conversation/contracts'
 import type { DemoScenarioKey } from './session-scenarios'
+import type { DemoPlaybackMode } from './stream-controller'
 
 export interface DemoSessionDescriptor extends ConversationDescriptor {
   age: string
@@ -9,6 +10,7 @@ export interface DemoSessionSeed extends DemoSessionDescriptor {
   seedOffset: number
   liveTail?: boolean
   scenario?: DemoScenarioKey
+  playbackMode?: DemoPlaybackMode
 }
 
 const approval: PendingInteraction = {
@@ -33,8 +35,13 @@ function usage(inputTokens: number, outputTokens: number, cacheReadTokens: numbe
 /** Public Demo conversations: realistic recent tails over large lazy histories. */
 export const RECENT_SESSIONS: readonly DemoSessionSeed[] = [
   {
-    id: 'million', title: 'Release regression investigation', age: 'now', status: 'working', logicalCount: 1_000_000,
-    seedOffset: 0, liveTail: true, scenario: 'release-investigation',
+    id: 'agent-loop', title: 'Agent loop investigation', age: 'now', status: 'working', logicalCount: 84_000,
+    seedOffset: 17, liveTail: true, scenario: 'release-investigation', playbackMode: 'agent-loop',
+    usage: usage(52_000, 7_900, 218_000, 11_000, 2_400), context: { projectedTokens: 68_200, contextWindow: 128_000 }, turnCount: 3_800, stepCount: 7_600,
+  },
+  {
+    id: 'million', title: 'Million-message streaming stress', age: '2m', status: 'working', logicalCount: 1_000_000,
+    seedOffset: 0, liveTail: true, scenario: 'release-investigation', playbackMode: 'stress',
     usage: usage(184_000, 12_600, 936_000, 31_000, 3_900), context: { projectedTokens: 103_400, contextWindow: 128_000 }, turnCount: 42_100, stepCount: 81_900,
   },
   {
@@ -83,6 +90,7 @@ export function newSessionSeed(counter: number): DemoSessionSeed {
     status: 'idle',
     logicalCount: 0,
     seedOffset: 900 + counter,
+    playbackMode: 'standard',
     lastTurnReason: null,
     usage: usage(0, 0, 0, 0, 0),
     context: { projectedTokens: 0, contextWindow: 128_000 },
