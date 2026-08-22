@@ -7,13 +7,14 @@ const ownership = [
 
 const contracts = [
   ['01', 'Canonical identity', 'Message · Turn · Step · Block · callId', 'Stable producer coordinates survive remounts and virtualization. DOM adjacency is never business identity.'],
-  ['02', 'Workbench semantics', 'ResourceRef · Plan · Tool intent · Terminal · Delegation', 'Describe resources, history snapshots, streams and delegated-child evidence without defining editor actions, panels, scheduling, connectors or provider policy.'],
+  ['02', 'Workbench semantics', 'ResourceRef · Plan · Tool intent · Terminal · Delegation', 'Describe resources, history snapshots, streams and delegated child evidence without defining editor actions, panels, scheduling, connectors or provider policy.'],
   ['03', 'Current work state', 'WorkPlan = canonical Plan shape', 'SessionKernel stores an explicit producer-owned current WorkPlan. It never scans latest history or DOM to infer which Plan is current.'],
   ['04', 'Delegated child refs', 'AgentRunRef · foreground/background · childSessionId', 'Parent keeps stable child identity/status/summary. Detailed child trace stays in an independently addressable conversation session.'],
   ['05', 'SessionKernel', 'runtime session truth', 'Execution state, current WorkPlan, blockers, queue, explicit outcomes and accounting. Workspace topology and external side effects remain outside.'],
   ['06', 'History source', 'sync hot-read boundary', 'Async database/network/connector fetch and cache fill stop before ConversationHistorySource.'],
   ['07', 'Projection', 'bounded rebuildable presentation', 'Hot canonical content becomes stable RenderUnits. Markdown, reasoning and terminal append paths update incrementally.'],
-  ['08', 'Vue reference adapter', 'optional physical integration', 'Virtua, DOM measurement, ActivePlanStrip, components and CSS demonstrate one implementation without entering core semantics.'],
+  ['08', 'Semantic viewport', 'reader · Latest · anchor · follow', 'Conversation position remains semantic while current-plan disclosure, child navigation and rich rows change physical composition.'],
+  ['09', 'Vue reference adapter', 'optional physical integration', 'Virtua, DOM measurement, ActivePlanStrip, components and CSS demonstrate one implementation without entering core semantics.'],
 ]
 
 const distinctions = [
@@ -26,7 +27,7 @@ const distinctions = [
   ['Child reference ≠ child trace', 'Parent history keeps runId/childSessionId/summary only. Child messages/tools/nested delegation remain in the child session.'],
   ['Child address ≠ session tree', 'childSessionId is a semantic address. Parent/child topology, visibility, activation and return navigation are Host/Demo state.'],
   ['Approval ≠ external side effect', 'PendingApproval is session state. Sending mail, creating meetings or editing enterprise documents remains external-adapter work.'],
-  ['Semantic state ≠ layout surface', 'There is intentionally no core PresentationSurface, composer-strip placement, panel, sidebar, tab or preview-placement contract.'],
+  ['Semantic content ≠ layout surface', 'There is intentionally no core PresentationSurface, composer-strip placement, panel, sidebar, tab or preview-placement contract.'],
 ]
 
 const hotPaths = [
@@ -91,7 +92,7 @@ const invariants = [
       <div class="hero-copy">
         <span class="architecture-kicker">layout-agnostic conversation + session semantics · executable host proof</span>
         <h1>Render a real Agent workbench without turning the Engine into <em>the workbench product.</em></h1>
-        <p>The core records replayable history and explicit renderable session state. Provider execution, child scheduling, child-session navigation, enterprise connectors, external actions, permission policy and workspace layout remain outside it; Vue is an optional physical reference adapter.</p>
+        <p>The core records replayable history and explicit renderable session state. Provider execution, delegated child scheduling, child-session navigation, enterprise connectors, external actions, permission policy and workspace layout remain outside it; Vue is an optional physical reference adapter.</p>
         <div class="hero-actions"><a class="primary-link" href="#lab">Exercise the demo</a><a class="secondary-link" href="https://github.com/topabomb/demo1/blob/main/docs/architecture.md">Read architecture contract</a></div>
       </div>
       <div class="hero-proof"><span>Normal UI work</span><strong>O(changed + hot + visible)</strong><p>One million records stay addressable while current session state updates directly and only hot semantic history plus visible physical rows do work.</p><div><b>Plan-synced</b><b>Child-addressable</b><b>Resource-aware</b><b>Layout-agnostic</b></div></div>
