@@ -1,6 +1,6 @@
 # Agent Workbench Rendering Engine Lab
 
-A provider-neutral **front-end rendering Engine + executable Demo host** for long-running Agent workbenches: very long histories, multi-step tool loops, plans, resource references, delegated child runs, streaming terminal output, office/research artifacts, rich Markdown/media and dynamic virtualization.
+A provider-neutral **front-end rendering Engine + executable Demo host** for long-running Agent workbenches: very long histories, multi-step tool loops, plans, resource references, delegated child runs, streaming terminal output, office/research artifacts, lifecycle recovery, rich Markdown/media and dynamic virtualization.
 
 - Live demo: https://topabomb.github.io/demo1/
 - Architecture view: https://topabomb.github.io/demo1/#architecture
@@ -11,7 +11,7 @@ The performance target is:
 
 > normal UI work scales with **changed + hot + visible** state, not total history.
 
-The scope is deliberately narrower than a full Agent product: **the framework-neutral Engine describes what happened and what session state is currently renderable; it does not decide how a workbench lays out panels, opens resources or child sessions, connects enterprise apps, schedules agents, evaluates permissions or performs external actions.**
+The scope is deliberately narrower than a full Agent product: **the framework-neutral Engine describes what happened and what session state is currently renderable; it does not decide how a workbench lays out panels, opens resources or child sessions, connects enterprise apps, schedules agents, evaluates permissions, retries failed work, chooses fallbacks or performs external actions.**
 
 ## Responsibility boundary
 
@@ -27,11 +27,11 @@ src/engine/** framework-neutral core
         │
         ▲ consume
 src/demo/**
-  workspace/session navigation · coding + office scenarios
+  workspace/session navigation · coding + office + lifecycle scenarios
   synthetic playback · stress history · diagnostics
 ```
 
-External adapters own provider decoding, model/tool/child-Agent orchestration, child scheduling, app authentication/connectors, actual mail/calendar/document actions, retry policy, durable persistence and async IO. The Demo owns multi-session composition, scripted evidence, parent/child navigation, fake office sources/actions and inspection shortcuts. `engine/**` never imports `demo/**`; architecture tests enforce the dependency direction.
+External adapters own provider decoding, model/tool/child-Agent orchestration, child scheduling, app authentication/connectors, actual mail/calendar/document actions, retry/backoff/fallback policy, durable persistence and async IO. The Demo owns multi-session composition, scripted evidence, parent/child navigation, fake office sources/actions, lifecycle scenarios and inspection shortcuts. `engine/**` never imports `demo/**`; architecture tests enforce the dependency direction.
 
 The **framework-neutral Engine core is layout- and style-agnostic**. Vue components and CSS are optional reference physical adapters: they may display semantic session state, but geometry, popovers and navigation choices never enter canonical contracts.
 
@@ -86,15 +86,17 @@ One parent `delegation` block contains one or more `AgentRunRef`s. `foreground` 
 
 Each child has stable `runId`, independent status, optional `childSessionId` and concise summary. `childSessionId` is a **semantic address only**. Parent history does **not** recursively embed child messages/tool traces, and the Engine does not own a session tree or an `openChildSession()` action.
 
-The Demo now proves the real product behavior behind that reference: matching child IDs are independent conversation sessions with their own user prompt, reasoning, tool records and final answer. Clicking a delegation row is Demo/Host policy that activates that session; the child header can return to its parent. Hidden child sessions remain directly addressable without cluttering the normal Recent list.
+The Demo proves the real product behavior behind that reference: matching child IDs are independent conversation sessions with their own user prompt, reasoning, tool records and final answer. Clicking a delegation row is Demo/Host policy that activates that session; the child header can return to its parent. Hidden child sessions remain directly addressable without cluttering the normal Recent list.
 
-This mirrors the durable boundary used by modern Agent clients: child work has independent context/transcript, while the parent keeps stable identity/status/summary and a navigable address.
+A child may also report `failed` while siblings and the parent continue. That status is evidence, not an instruction to retry or fail the parent. Whether to retry, fall back to another source, abort the parent or continue with reduced confidence belongs to the Agent runtime/host.
 
 ## Session, history and bounded presentation
 
-`ConversationSessionKernel` owns normalized runtime session truth: messages, live execution status, typed blockers, queue, explicit current WorkPlan, active assistant coordinate, explicit Turn outcome and accounting. It is not a persistence, scheduler or workspace-navigation server.
+`ConversationSessionKernel` owns normalized runtime session truth: messages, live execution status, typed blockers, queue, explicit current WorkPlan, active assistant coordinate, explicit Turn outcome and accounting. It is not a persistence, scheduler, recovery-policy or workspace-navigation server.
 
-`SessionStatus` and `lastTurnReason` remain separate. `waiting` exists iff one typed pending interaction exists. `requestInteraction(...)` and `resolveInteraction(...)` expose the blocker lifecycle, while an external execution adapter decides what an approval actually causes.
+`SessionStatus` and `lastTurnReason` remain separate. `waiting` exists iff one typed pending interaction exists. `requestInteraction(...)` and `resolveInteraction(...)` expose the blocker lifecycle, while an external execution adapter decides what an approval/answer actually causes.
+
+Likewise, `failed` child/tool evidence and `interrupted` terminal/Turn evidence are facts. The Engine does not own retry budgets, backoff, fallback-source choice, automatic continuation or user-steering policy.
 
 `ConversationHistorySource` is a synchronous hot-read boundary. Async DB/API/connector fetch and cache fill remain outside it.
 
@@ -148,13 +150,55 @@ meeting transcript + email thread + launch brief
 
 Approve/Deny demonstrates the **renderable approval boundary** only. The Engine clears typed interaction state; a real external adapter would perform or cancel the mail/calendar side effect. The Demo deliberately does not pretend to be Gmail, Outlook, Calendar or a workflow scheduler.
 
+### Agent lifecycle / resilience
+
+The Demo now also proves three lifecycle transitions that are common across coding and office Agents but are easy to model incorrectly as product-specific workflow state.
+
+**Clarify → answer → continue**
+
+```text
+working goal needs a product decision
+→ typed PendingQuestion / waiting session
+→ user supplies an answer
+→ blocker clears to outcome-neutral idle
+→ the same session can start the next Turn
+```
+
+The Engine owns the typed blocker and resolution contract. What the answer means, whether it resumes the same provider request or starts a new one, and how the Agent updates its plan remain runtime/host policy.
+
+**Partial child failure → explicit fallback → parent completes**
+
+```text
+parallel specialist delegation
+→ customer specialist failed
+→ metrics + policy specialists completed
+→ Demo/runtime selects an allowed cached customer export
+→ fallback tool evidence is rendered normally
+→ parent completes with the stale-evidence gap called out
+```
+
+This demonstrates that `AgentRunStatus:'failed'` is independent from parent SessionStatus/Turn outcome. Retry budgets, fallback selection and confidence policy stay outside Engine.
+
+**Interrupt → steer → new Turn**
+
+```text
+migration dry-run terminal
+→ user interrupts before write phase (exit 130)
+→ interrupted Turn remains replayable history
+→ user changes direction
+→ separate read-only Turn gets its own Plan/tools/result
+→ current session completes without rewriting old evidence
+```
+
+Interruption is canonical execution evidence, not an automatic resume command. The runtime decides whether a later instruction retries, resumes, branches or begins a new Turn.
+
 ### Million-message stress and other evidence
 
-The separate Million-message session proves 1,000,000+ addressable records, bounded hot projection/cache/DOM and far navigation independently from workbench orchestration. Other sessions cover typed questions/approvals, failure/resume, viewport eviction, multimodal inputs, generated artifacts, TTS/ASR and responsive content.
+The separate Million-message session proves 1,000,000+ addressable records, bounded hot projection/cache/DOM and far navigation independently from workbench orchestration. Other sessions cover approvals, failure/resume, viewport eviction, multimodal inputs, generated artifacts, TTS/ASR and responsive content.
 
 ## Session diagnostics
 
-Diagnostics are Demo-owned observability and include direct Demo scenario controls for Restart, Plan, Delegation, Terminal, Final, Executive briefing and Meeting approval.
+Diagnostics are Demo-owned observability and include direct Demo scenario controls for Restart, Plan, Delegation, Terminal, Final, Executive briefing and Meeting approval. The lifecycle-resilience sessions are also available in the normal Recent list so their complete canonical histories can be inspected without inventing Engine scenario/navigation APIs.
 
 The semantic buttons switch/jump to existing canonical evidence; Restart reconstructs the synthetic Demo host. None is an Engine replay/navigation/workflow API. Diagnostics also expose logical/hot/DOM scale, projection full/incremental work, reader state, Turn/Step/tool identity, blockers, queue and normalized accounting.
 
@@ -174,6 +218,7 @@ The rendering Engine does **not** own:
 - model/Agent selection or child scheduling/concurrency;
 - parent/child workspace trees, child-session activation or navigation history;
 - child permissions, resume/interrupt or team messaging;
+- retry budgets, backoff, fallback-source selection or automatic recovery policy;
 - Gmail/Outlook/Calendar/Drive/Teams/SharePoint connector contracts or authentication;
 - mail sending, meeting creation, document editing or scheduled/recurring workflow execution;
 - permission/allowlist evaluation;
