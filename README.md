@@ -52,6 +52,8 @@ A Turn may contain several assistant/tool records. Tool call and result correlat
 
 `ConversationSessionKernel` owns runtime session truth: normalized messages, execution status, blockers, queue, outcomes and accounting. It is **not** a persistence server.
 
+`SessionStatus` and `lastTurnReason` are deliberately different facts. `idle` means no execution is currently running; it does **not** imply that a Turn completed. Historical outcomes change only when an execution adapter explicitly reports them.
+
 A rehydrated working session may provide `activeAssistantIndex`. The Engine never guesses that the newest history record is the active execution target.
 
 Approval and question blockers also remain semantically distinct:
@@ -62,7 +64,7 @@ type InteractionResolution =
   | { kind: 'question'; answer: string | null }
 ```
 
-A user question therefore carries an actual answer instead of being reduced to a fake approval boolean.
+A user question therefore carries an actual answer instead of being reduced to a fake approval boolean. Resolving any blocker validates the response type and clears blocker state only; approval, denial, answer or skip does not itself invent a `completed` or `aborted` Turn outcome. The execution adapter decides what happens next.
 
 ### History source
 
@@ -89,7 +91,7 @@ Markdown chunking uses the same Marked GFM parser contract as rendering; lists, 
 
 Per-viewport renderer registries are preferred; process-global renderer mutation is not part of the public Vue API.
 
-The current repository is a private Vite application used for the Demo/Pages site. The Engine is source-level reusable and extraction-ready, but this repo does **not** claim a published npm package. Packaging/export maps should be added only when distribution itself becomes a requirement.
+This repository builds a Vite Demo/Pages application. Its package manifest has `"private": true`, which disables package publication; it does **not** mean the public GitHub repository is private. The Engine is source-level reusable and extraction-ready, but this repo does **not** claim a published npm package. Packaging/export maps should be added only when distribution itself becomes a requirement.
 
 ## What the Demo proves
 
@@ -109,7 +111,7 @@ Tool call/result are separate addressable history records. Rich Markdown include
 
 The separate **Million-message streaming stress** scenario proves 1,000,000+ addressable messages with bounded hot projection/DOM, far navigation and incremental Markdown without mixing those measurements with expected multi-step tool transitions.
 
-Other Recent sessions cover approvals, typed user questions, failure/resume, background execution during viewport eviction, multimodal attachments/ASR/audio and responsive artifacts.
+Other Recent sessions cover approvals, question blockers with user-entered answers, failure/resume, background execution during viewport eviction, multimodal attachments/ASR/audio and responsive artifacts.
 
 ### Session diagnostics
 
