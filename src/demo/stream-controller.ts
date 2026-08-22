@@ -21,21 +21,21 @@ import {
   agentMarkdownDelta,
   agentReasoningDelta,
   createLiveAssistantStep,
+  createLiveToolCall,
   createLiveToolResult,
   liveToolForStep,
   parseStepOrdinal,
-  setLiveToolCall,
   settleReasoningBlock,
   STRESS_REASONING_PUBLISHES,
   stressMarkdownDelta,
   stressReasoningDelta,
+  updateLiveToolCall,
 } from './live-run-script'
 
 export type DemoPlaybackMode = 'standard' | 'stress' | 'agent-loop'
+type AgentPlaybackPhase = 'model' | 'tool'
 
 const STRESS_MAX_PUBLISHES = 600
-const AGENT_TOOL_PROGRESS_PUBLISH = AGENT_TOOL_CALL_PUBLISH + 3
-const AGENT_TOOL_SUCCESS_PUBLISH = AGENT_TOOL_RESULT_PUBLISH - 1
 const AGENT_FINAL_COMPLETE_PUBLISH = AGENT_FINAL_ARTIFACT_PUBLISH + 12
 
 /** Demo-only playback driver. Synthetic timing/accounting and scripted scenario output never enter Engine policy. */
@@ -48,6 +48,7 @@ export class SyntheticStreamController implements ConversationExecutionControlle
   #runPublishes = 0
   #stepPublishes = 0
   #markdownTicks = 0
+  #agentPhase: AgentPlaybackPhase = 'model'
 
   rate = 20
   ingressTicks = 0
@@ -68,6 +69,7 @@ export class SyntheticStreamController implements ConversationExecutionControlle
       this.#runPublishes = 0
       this.#stepPublishes = 0
       this.#markdownTicks = 0
+      this.#agentPhase = 'model'
     }
     this.#timer = setInterval(() => this.#ingest(), Math.max(16, Math.round(1000 / this.rate)))
   }
@@ -78,9 +80,14 @@ export class SyntheticStreamController implements ConversationExecutionControlle
     this.#stopTimer()
     const index = this.#kernel.currentAssistantIndex
     if (index !== null) {
-      const current = settleReasoning(this.#kernel.getMessage(index), 'interrupted')
-      const patched = appendMarkdownContent(current, '\n\n_Stopped by user._')
-      this.#kernel.replaceCanonicalMessage(index, { ...patched.message, live: false })
+      const current = this.#kernel.getMessage(index)
+      if (current.blocks.some(entry => entry.type === 'reasoning' || entry.type === 'markdown')) {
+        const settled = settleReasoning(current, 'interrupted')
+        const patched = appendMarkdownContent(settled, '\n\n_Stopped by user._')
+        this.#kernel.replaceCanonicalMessage(index, { ...patched.message, live: false })
+      } else {
+        this.#kernel.replaceCanonicalMessage(index, { ...current, live: false })
+      }
     }
     this.#kernel.clearQueue()
     this.#kernel.finishExecution('aborted')
@@ -90,8 +97,9 @@ export class SyntheticStreamController implements ConversationExecutionControlle
     this.#stopTimer()
     const index = this.#kernel.currentAssistantIndex
     if (index !== null) {
-      const current = settleReasoning(this.#kernel.getMessage(index), 'interrupted')
-      this.#kernel.replaceCanonicalMessage(index, { ...current, live: false })
+      const current = this.#kernel.getMessage(index)
+      const next = current.blocks.some(entry => entry.type === 'reasoning') ? settleReasoning(current, 'interrupted') : current
+      this.#kernel.replaceCanonicalMessage(index, { ...next, live: false })
     }
     this.#kernel.finishExecution('error', failure)
   }
@@ -152,12 +160,15 @@ export class SyntheticStreamController implements ConversationExecutionControlle
 
   #ingest(): void {
     this.ingressTicks += 1
-    const reasoningPublishes = this.#mode === 'agent-loop' ? AGENT_REASONING_PUBLISHES : STRESS_REASONING_PUBLISHES
-    this.#pendingDelta = this.#stepPublishes < reasoningPublishes
-      ? this.#mode === 'agent-loop'
-        ? agentReasoningDelta(this.#currentStepOrdinal(), this.ingressTicks)
-        : stressReasoningDelta(this.ingressTicks)
-      : 'answer-ready'
+    if (this.#mode === 'agent-loop' && this.#agentPhase === 'tool') this.#pendingDelta = 'tool-progress'
+    else {
+      const reasoningPublishes = this.#mode === 'agent-loop' ? AGENT_REASONING_PUBLISHES : STRESS_REASONING_PUBLISHES
+      this.#pendingDelta = this.#stepPublishes < reasoningPublishes
+        ? this.#mode === 'agent-loop'
+          ? agentReasoningDelta(this.#currentStepOrdinal(), this.ingressTicks)
+          : stressReasoningDelta(this.ingressTicks)
+        : 'answer-ready'
+    }
     if (this.#framePending) return
     this.#framePending = true
     scheduleFrame(() => { this.#framePending = false; this.#publish() })
@@ -181,14 +192,17 @@ export class SyntheticStreamController implements ConversationExecutionControlle
       this.#appendMarkdown(index, delta)
     }
 
-    this.#stepPublishes += 1
-    this.#runPublishes += 1
-    this.publishTicks += 1
+    this.#recordPublish()
     if (this.#runPublishes < STRESS_MAX_PUBLISHES) return
     this.#completeCurrentTurn()
   }
 
   #publishAgentLoop(index: number): void {
+    if (this.#agentPhase === 'tool') {
+      this.#publishAgentTool(index)
+      return
+    }
+
     const stepOrdinal = this.#currentStepOrdinal()
     const reasoningPhase = this.#stepPublishes < AGENT_REASONING_PUBLISHES
     const delta = reasoningPhase ? this.#pendingDelta : agentMarkdownDelta(stepOrdinal, this.#markdownTicks++)
@@ -200,49 +214,67 @@ export class SyntheticStreamController implements ConversationExecutionControlle
       this.#appendMarkdown(index, delta)
     }
 
-    if (stepOrdinal < AGENT_FINAL_STEP) {
-      const spec = liveToolForStep(stepOrdinal)
-      if (spec && this.#stepPublishes === AGENT_TOOL_CALL_PUBLISH) {
-        this.#kernel.replaceCanonicalMessage(index, setLiveToolCall(this.#kernel.getMessage(index), spec, 'running', 25))
-      } else if (spec && this.#stepPublishes === AGENT_TOOL_PROGRESS_PUBLISH) {
-        this.#kernel.replaceCanonicalMessage(index, setLiveToolCall(this.#kernel.getMessage(index), spec, 'running', 70))
-      } else if (spec && this.#stepPublishes === AGENT_TOOL_SUCCESS_PUBLISH) {
-        this.#kernel.replaceCanonicalMessage(index, setLiveToolCall(this.#kernel.getMessage(index), spec, 'success', 100))
-      }
-    } else {
+    if (stepOrdinal === AGENT_FINAL_STEP) {
       if (this.#stepPublishes === AGENT_FINAL_DIFF_PUBLISH) this.#kernel.replaceCanonicalMessage(index, addFinalEvidence(this.#kernel.getMessage(index), 'diff'))
       if (this.#stepPublishes === AGENT_FINAL_CODE_PUBLISH) this.#kernel.replaceCanonicalMessage(index, addFinalEvidence(this.#kernel.getMessage(index), 'code'))
       if (this.#stepPublishes === AGENT_FINAL_ARTIFACT_PUBLISH) this.#kernel.replaceCanonicalMessage(index, addFinalEvidence(this.#kernel.getMessage(index), 'artifacts'))
     }
 
-    this.#stepPublishes += 1
-    this.#runPublishes += 1
-    this.publishTicks += 1
+    this.#recordPublish()
 
-    if (stepOrdinal < AGENT_FINAL_STEP && this.#stepPublishes > AGENT_TOOL_RESULT_PUBLISH) {
-      this.#advanceAgentStep(index, stepOrdinal)
+    if (stepOrdinal < AGENT_FINAL_STEP && this.#stepPublishes >= AGENT_TOOL_CALL_PUBLISH) {
+      this.#beginAgentTool(index, stepOrdinal)
       return
     }
-    if (stepOrdinal === AGENT_FINAL_STEP && (this.#stepPublishes > AGENT_FINAL_COMPLETE_PUBLISH || this.#runPublishes >= AGENT_MAX_PUBLISHES)) {
-      this.#completeCurrentTurn()
-    }
+    if (stepOrdinal === AGENT_FINAL_STEP && (this.#stepPublishes > AGENT_FINAL_COMPLETE_PUBLISH || this.#runPublishes >= AGENT_MAX_PUBLISHES)) this.#completeCurrentTurn()
   }
 
-  #advanceAgentStep(index: number, stepOrdinal: number): void {
+  #beginAgentTool(index: number, stepOrdinal: number): void {
     const current = this.#kernel.getMessage(index)
     const spec = liveToolForStep(stepOrdinal)
-    if (!spec) return
+    if (!spec) throw new Error(`Agent-loop tool spec missing for step ${stepOrdinal}`)
     const settled = settleReasoningBlock(current) ?? current
     this.#kernel.replaceCanonicalMessage(index, { ...settled, live: false })
+    const [callIndex] = this.#kernel.appendCanonicalMessages([createLiveToolCall(current, spec)])
+    if (callIndex === undefined) throw new Error('agent-loop tool call record missing')
+    this.#kernel.continueExecutionAt(callIndex)
+    this.#agentPhase = 'tool'
+    this.#stepPublishes = 0
+    this.#markdownTicks = 0
+  }
+
+  #publishAgentTool(index: number): void {
+    const current = this.#kernel.getMessage(index)
+    const stepOrdinal = parseStepOrdinal(current)
+    const spec = liveToolForStep(stepOrdinal)
+    if (!spec) throw new Error(`Agent-loop tool spec missing for step ${stepOrdinal}`)
+    this.#pendingDelta = ''
+
+    if (this.#stepPublishes === 0) this.#kernel.replaceCanonicalMessage(index, updateLiveToolCall(current, spec, 'running', 25))
+    else if (this.#stepPublishes === 2) this.#kernel.replaceCanonicalMessage(index, updateLiveToolCall(current, spec, 'running', 70))
+    else if (this.#stepPublishes === 4) this.#kernel.replaceCanonicalMessage(index, updateLiveToolCall(current, spec, 'success', 100))
+
+    this.#recordPublish()
+    if (this.#stepPublishes < AGENT_TOOL_RESULT_PUBLISH) return
+
+    const completedCall = this.#kernel.getMessage(index)
+    this.#kernel.replaceCanonicalMessage(index, { ...completedCall, live: false })
     const indexes = this.#kernel.appendCanonicalMessages([
-      createLiveToolResult(current, spec),
-      createLiveAssistantStep(current.turnId, stepOrdinal + 1),
+      createLiveToolResult(completedCall, spec),
+      createLiveAssistantStep(completedCall.turnId, stepOrdinal + 1),
     ])
     const nextAssistant = indexes[1]
     if (nextAssistant === undefined) throw new Error('agent-loop assistant step missing')
     this.#kernel.continueExecutionAt(nextAssistant)
+    this.#agentPhase = 'model'
     this.#stepPublishes = 0
     this.#markdownTicks = 0
+  }
+
+  #recordPublish(): void {
+    this.#stepPublishes += 1
+    this.#runPublishes += 1
+    this.publishTicks += 1
   }
 
   #appendReasoning(index: number, delta: string): void {
@@ -275,10 +307,13 @@ export class SyntheticStreamController implements ConversationExecutionControlle
     this.#stopTimer()
     const index = this.#kernel.currentAssistantIndex
     if (index !== null) {
-      const current = settleReasoning(this.#kernel.getMessage(index), 'complete')
-      const answer = markdownText(current).trim()
-      const next = answer ? { ...current, live: false } : replaceMarkdownContent(current, 'Completed.', false)
-      this.#kernel.replaceCanonicalMessage(index, next)
+      const current = this.#kernel.getMessage(index)
+      if (current.blocks.some(entry => entry.type === 'markdown')) {
+        const settled = settleReasoning(current, 'complete')
+        const answer = markdownText(settled).trim()
+        const next = answer ? { ...settled, live: false } : replaceMarkdownContent(settled, 'Completed.', false)
+        this.#kernel.replaceCanonicalMessage(index, next)
+      } else this.#kernel.replaceCanonicalMessage(index, { ...current, live: false })
     }
     this.#kernel.finishExecution('completed')
     const queued = this.#kernel.dequeue()
