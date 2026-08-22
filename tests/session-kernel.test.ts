@@ -93,6 +93,46 @@ describe('ConversationSessionKernel', () => {
     expect(() => kernel.continueExecutionAt(assistant1!)).toThrow(/not working/)
   })
 
+  it('never infers a restored execution target from the last history record', () => {
+    const history = new SyntheticHistoryAdapter('restore', 12, 5)
+    const kernel = new ConversationSessionKernel({ id: 'restore', title: 'Restore', status: 'working', logicalCount: 12 }, history)
+    expect(kernel.status).toBe('working')
+    expect(kernel.currentAssistantIndex).toBeNull()
+
+    const tail = history.loadRange(11, 1)[0]!
+    expect(tail.index).toBe(11)
+    const explicitHistory = new SyntheticHistoryAdapter('explicit', 1, 1, false, [{
+      ...tail,
+      id: 'explicit:m-0',
+      index: 0,
+      role: 'assistant',
+      live: true,
+    }])
+    const explicit = new ConversationSessionKernel({ id: 'explicit', title: 'Explicit', status: 'working', logicalCount: 1, activeAssistantIndex: 0 }, explicitHistory)
+    expect(explicit.currentAssistantIndex).toBe(0)
+    expect(explicit.summary.activeAssistantIndex).toBe(0)
+  })
+
+  it('keeps approval and question resolutions typed instead of reducing both to a boolean', () => {
+    const questionKernel = new ConversationSessionKernel({
+      id: 'question', title: 'Question', status: 'waiting', logicalCount: 0,
+      pendingInteraction: { id: 'q1', kind: 'question', title: 'Choose behavior', detail: 'Which fallback?' },
+    }, new SyntheticHistoryAdapter('question', 0, 1))
+    expect(() => questionKernel.resolveInteraction({ kind: 'approval', approved: true })).toThrow(/expects question/)
+    questionKernel.resolveInteraction({ kind: 'question', answer: 'Keep the last accepted configuration.' })
+    expect(questionKernel.pendingInteraction).toBeNull()
+    expect(questionKernel.status).toBe('idle')
+    expect(questionKernel.lastTurnReason).toBeNull()
+
+    const approvalKernel = new ConversationSessionKernel({
+      id: 'approval', title: 'Approval', status: 'waiting', logicalCount: 0,
+      pendingInteraction: { id: 'a1', kind: 'approval', title: 'Edit config', detail: 'Apply patch?', toolName: 'edit_file' },
+    }, new SyntheticHistoryAdapter('approval', 0, 1))
+    approvalKernel.resolveInteraction({ kind: 'approval', approved: false })
+    expect(approvalKernel.status).toBe('interrupted')
+    expect(approvalKernel.lastTurnReason).toBe('aborted')
+  })
+
   it('owns a monotonic message revision for every canonical replacement', () => {
     const descriptor = { id: 'revision', title: 'Revision', status: 'idle' as const, logicalCount: 0 }
     const kernel = new ConversationSessionKernel(descriptor, new SyntheticHistoryAdapter('revision', 0, 4))
