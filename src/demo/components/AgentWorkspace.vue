@@ -107,9 +107,12 @@ function onConversationClick(event: MouseEvent): void {
 async function returnToParent(): Promise<void> {
   const parent = activeParentSessionId.value
   if (!parent) return
+  // switchSession captures the child snapshot and DemoWorkspaceRuntime restores the
+  // parent's previously committed viewport snapshot. Do not override that restoration
+  // with a jump-to-latest: returning from a child should land back on the delegation
+  // context that opened it.
   switchSession(parent)
   await nextTick()
-  await viewportRef.value?.jumpToLatest()
 }
 
 async function navigateDemo(target: DemoNavigationTarget): Promise<void> {
