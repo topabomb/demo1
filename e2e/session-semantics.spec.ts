@@ -32,24 +32,31 @@ test('a failed last turn is resumable and new execution clears the failure surfa
   await expect(page.getByTestId('last-turn-reason')).toHaveText('active')
 })
 
-test('approval and question are independent session-owned blockers', async ({ page }) => {
+test('approval and question use distinct session-owned resolution contracts', async ({ page }) => {
   await open(page)
   await switchTo(page, 'android-protocol')
   const question = page.getByTestId('pending-interaction')
   await expect(question).toHaveAttribute('data-kind', 'question')
   await expect(question).toContainText('Choose Android fallback behavior')
-  await expect(page.getByTestId('approve-interaction')).toHaveText('Continue')
+  await expect(page.getByTestId('question-answer')).toBeVisible()
+  await expect(page.getByTestId('approve-interaction')).toHaveText('Answer')
+  await expect(page.getByTestId('approve-interaction')).toBeDisabled()
   await expect(page.getByTestId('composer-input')).toBeDisabled()
 
+  // The blocker is session-owned and survives viewport/runtime eviction with the
+  // answer UI reconstructed from canonical blocker type, not from local component state.
   for (const id of ['dsh-transport', 'event-normalization', 'workspace-files', 'dynamic-heights']) await switchTo(page, id)
   await switchTo(page, 'android-protocol')
   await expect(page.getByTestId('pending-interaction')).toHaveAttribute('data-kind', 'question')
+  await page.getByTestId('question-answer').fill('Keep the last accepted configuration for one refresh window.')
+  await expect(page.getByTestId('approve-interaction')).toBeEnabled()
   await page.getByTestId('approve-interaction').click()
   await expect(page.getByTestId('pending-interaction')).toHaveCount(0)
   await expect(page.getByTestId('composer-input')).toBeEnabled()
 
   await switchTo(page, 'tool-rendering')
   await expect(page.getByTestId('pending-interaction')).toHaveAttribute('data-kind', 'approval')
+  await expect(page.getByTestId('question-answer')).toHaveCount(0)
   await expect(page.getByTestId('approve-interaction')).toHaveText('Approve')
 })
 
