@@ -20,15 +20,18 @@ import {
   AGENT_TOOL_RESULT_PUBLISH,
   agentMarkdownDelta,
   agentReasoningDelta,
+  appendLiveTerminal,
   createLiveAssistantStep,
   createLiveToolCall,
   createLiveToolResult,
   liveToolForStep,
   parseStepOrdinal,
+  settleLiveTerminal,
   settleReasoningBlock,
   STRESS_REASONING_PUBLISHES,
   stressMarkdownDelta,
   stressReasoningDelta,
+  updateLivePlan,
   updateLiveToolCall,
 } from './live-run-script'
 
@@ -49,6 +52,8 @@ export class SyntheticStreamController implements ConversationExecutionControlle
   #stepPublishes = 0
   #markdownTicks = 0
   #agentPhase: AgentPlaybackPhase = 'model'
+  #planMessageIndex: number | null = null
+  #toolResultIndex: number | null = null
 
   rate = 20
   ingressTicks = 0
@@ -70,6 +75,11 @@ export class SyntheticStreamController implements ConversationExecutionControlle
       this.#stepPublishes = 0
       this.#markdownTicks = 0
       this.#agentPhase = 'model'
+      this.#toolResultIndex = null
+      if (this.#mode === 'agent-loop') {
+        const current = this.#kernel.currentAssistantIndex
+        if (current !== null && parseStepOrdinal(this.#kernel.getMessage(current)) === 1) this.#planMessageIndex = current
+      }
     }
     this.#timer = setInterval(() => this.#ingest(), Math.max(16, Math.round(1000 / this.rate)))
   }
@@ -78,6 +88,12 @@ export class SyntheticStreamController implements ConversationExecutionControlle
 
   abort(): void {
     this.#stopTimer()
+    if (this.#toolResultIndex !== null) {
+      const result = this.#kernel.getMessage(this.#toolResultIndex)
+      const spec = liveToolForStep(parseStepOrdinal(result))
+      if (spec?.terminalChunks) this.#kernel.replaceCanonicalMessage(this.#toolResultIndex, settleLiveTerminal(result, { ...spec, output: { ...spec.output, exitCode: 130 } }))
+      this.#toolResultIndex = null
+    }
     const index = this.#kernel.currentAssistantIndex
     if (index !== null) {
       const current = this.#kernel.getMessage(index)
@@ -147,6 +163,8 @@ export class SyntheticStreamController implements ConversationExecutionControlle
     ])
     const assistantIndex = indexes[1]
     if (assistantIndex === undefined || !this.#kernel.startExecution(assistantIndex)) return false
+    this.#planMessageIndex = this.#mode === 'agent-loop' ? assistantIndex : null
+    this.#toolResultIndex = null
     this.#accountPrompt(prompt)
     return true
   }
@@ -241,6 +259,7 @@ export class SyntheticStreamController implements ConversationExecutionControlle
     this.#agentPhase = 'tool'
     this.#stepPublishes = 0
     this.#markdownTicks = 0
+    this.#toolResultIndex = null
   }
 
   #publishAgentTool(index: number): void {
@@ -251,24 +270,57 @@ export class SyntheticStreamController implements ConversationExecutionControlle
     this.#pendingDelta = ''
 
     if (this.#stepPublishes === 0) this.#kernel.replaceCanonicalMessage(index, updateLiveToolCall(current, spec, 'running', 25))
-    else if (this.#stepPublishes === 2) this.#kernel.replaceCanonicalMessage(index, updateLiveToolCall(current, spec, 'running', 70))
-    else if (this.#stepPublishes === 4) this.#kernel.replaceCanonicalMessage(index, updateLiveToolCall(current, spec, 'success', 100))
+    else if (this.#stepPublishes === 2) this.#kernel.replaceCanonicalMessage(index, updateLiveToolCall(this.#kernel.getMessage(index), spec, 'running', 70))
+
+    if (spec.terminalChunks) this.#publishTerminalTool(index, spec)
+    else if (this.#stepPublishes === 4) this.#kernel.replaceCanonicalMessage(index, updateLiveToolCall(this.#kernel.getMessage(index), spec, 'success', 100))
 
     this.#recordPublish()
     if (this.#stepPublishes < AGENT_TOOL_RESULT_PUBLISH) return
 
     const completedCall = this.#kernel.getMessage(index)
     this.#kernel.replaceCanonicalMessage(index, { ...completedCall, live: false })
-    const indexes = this.#kernel.appendCanonicalMessages([
-      createLiveToolResult(completedCall, spec),
-      createLiveAssistantStep(completedCall.turnId, stepOrdinal + 1),
-    ])
-    const nextAssistant = indexes[1]
+    const records = []
+    if (!spec.terminalChunks) records.push(createLiveToolResult(completedCall, spec))
+    else if (this.#toolResultIndex !== null) {
+      const result = this.#kernel.getMessage(this.#toolResultIndex)
+      this.#kernel.replaceCanonicalMessage(this.#toolResultIndex, settleLiveTerminal(result, spec))
+    }
+    records.push(createLiveAssistantStep(completedCall.turnId, stepOrdinal + 1))
+    const indexes = this.#kernel.appendCanonicalMessages(records)
+    const nextAssistant = indexes[indexes.length - 1]
     if (nextAssistant === undefined) throw new Error('agent-loop assistant step missing')
+    this.#updatePlan(stepOrdinal + 1)
     this.#kernel.continueExecutionAt(nextAssistant)
     this.#agentPhase = 'model'
     this.#stepPublishes = 0
     this.#markdownTicks = 0
+    this.#toolResultIndex = null
+  }
+
+  #publishTerminalTool(callIndex: number, spec: NonNullable<ReturnType<typeof liveToolForStep>>): void {
+    if (this.#stepPublishes === 1 && this.#toolResultIndex === null) {
+      const [resultIndex] = this.#kernel.appendCanonicalMessages([createLiveToolResult(this.#kernel.getMessage(callIndex), spec, true)])
+      if (resultIndex === undefined) throw new Error('terminal result record missing')
+      this.#toolResultIndex = resultIndex
+    }
+    if (this.#toolResultIndex === null) return
+    const chunkIndex = this.#stepPublishes - 2
+    if (chunkIndex >= 0) {
+      const currentResult = this.#kernel.getMessage(this.#toolResultIndex)
+      const patched = appendLiveTerminal(currentResult, spec, chunkIndex)
+      if (patched) this.#kernel.replaceCanonicalMessage(this.#toolResultIndex, patched.message, { kind: 'append-terminal', blockId: patched.blockId, delta: patched.delta })
+    }
+    if (this.#stepPublishes === AGENT_TOOL_RESULT_PUBLISH - 1) {
+      this.#kernel.replaceCanonicalMessage(callIndex, updateLiveToolCall(this.#kernel.getMessage(callIndex), spec, 'success', 100))
+    }
+  }
+
+  #updatePlan(activeStep: number): void {
+    if (this.#planMessageIndex === null) return
+    const current = this.#kernel.getMessage(this.#planMessageIndex)
+    const next = updateLivePlan(current, activeStep)
+    if (next !== current) this.#kernel.replaceCanonicalMessage(this.#planMessageIndex, next)
   }
 
   #recordPublish(): void {
@@ -305,6 +357,7 @@ export class SyntheticStreamController implements ConversationExecutionControlle
 
   #completeCurrentTurn(): void {
     this.#stopTimer()
+    this.#updatePlan(5)
     const index = this.#kernel.currentAssistantIndex
     if (index !== null) {
       const current = this.#kernel.getMessage(index)
