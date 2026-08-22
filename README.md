@@ -22,12 +22,12 @@ src/
 │   ├── viewport/            semantic reader / Latest / anchor policy
 │   ├── runtime/             bounded hot-session composition
 │   └── vue/                 Vue/Virtua reference adapter + renderers
-└── demo/                    executable product scenario + verification fixtures
+└── demo/                    executable product scenarios + verification fixtures
     ├── session-scenarios.ts realistic canonical tails for public conversations
-    ├── live-run-script.ts   mixed-content streaming scenario
+    ├── live-run-script.ts   declarative Agent-loop/stress scenario data
+    ├── stream-controller.ts Demo-only execution/timing orchestration
     ├── synthetic.ts         lazy deep-history source for stress coverage
     ├── scenarios.ts         diagnostics/E2E compatibility gallery
-    ├── stream-controller.ts synthetic provider/execution timing
     └── components/          workspace + diagnostics UI
 ```
 
@@ -49,39 +49,66 @@ Semantic viewport runtime
 Vue/Virtua physical adapter + renderer registry
 ```
 
-The Engine owns normalized conversation/session facts. It does not assume a provider, generate demo reasoning/answers, estimate billing usage, or hard-code product controls. Those policies belong to adapters such as the Demo's `stream-controller.ts`.
+The Engine owns normalized conversation/session facts. It does not assume a provider, generate Demo reasoning/answers, choose tool sequences, estimate billing usage, or hard-code product controls. Those policies belong to adapters such as the Demo's `stream-controller.ts` and `live-run-script.ts`.
 
 The UI also separates semantic state from physical layout: reader position, exact `Latest`, anchors and follow intent are Engine/runtime concepts; DOM measurements and Virtua state are physical-adapter concerns.
 
+## Turn / Step / tool-loop model
+
+A Turn is not assumed to be one DOM card or one assistant record. Producers may append several canonical records under one stable `turnId`:
+
+```text
+user request                 turn A / step 0
+assistant stream             turn A / step 1
+assistant tool call          turn A / step 1
+tool result                  turn A / step 1
+assistant stream             turn A / step 2
+assistant tool call          turn A / step 2
+ tool result                 turn A / step 2
+assistant final synthesis    turn A / step 3+
+```
+
+`stepId` is the stable model/tool-loop coordinate when the producer has one; `callId` correlates a tool call with its result. The Engine preserves these identities, while an execution adapter decides whether another model Step or tool invocation happens next. `ConversationSessionKernel.continueExecutionAt()` only moves an already-running execution to the next canonical assistant record; it contains no Agent-loop script or provider policy.
+
 ## What the public Demo proves
 
-The default page is intentionally a **realistic Agent workspace**, not an architecture control panel. Its preset conversations land on concrete recent tasks while retaining large lazy histories underneath:
+The default page is intentionally a **realistic Agent workspace**, not an architecture control panel or a benchmark page.
 
-- a 1,000,000-message release investigation that keeps running while history is browsed;
-- live reasoning followed by rich Markdown while tool call/result, diff, code and image artifacts enter the same active turn;
-- transport/code refactoring with tool correlation and patches;
-- a production edit blocked on approval;
-- a user-question blocker that survives session switching;
-- multimodal upload/ASR/audio handoff;
-- responsive image/HTML/table artifacts;
-- resumable provider failure and long-context history.
+The default `Agent loop investigation` demonstrates one live Turn progressing through multiple canonical Steps:
 
-New session, queue/stop/resume, session switching, exact Latest/follow behavior and background execution use the same Engine path as the seeded scenarios.
+```text
+rich reasoning + streaming Markdown
+        ↓
+filesystem tool call/result
+        ↓
+new model Step + richer Markdown
+        ↓
+search tool call/result
+        ↓
+new model Step + richer Markdown
+        ↓
+shell verification call/result
+        ↓
+final synthesis + diff + code + artifacts
+```
 
-Synthetic deep history remains a Demo-only storage substitute so the same scenarios also prove:
+The Markdown stream deliberately contains GFM tables, task lists, nested lists, blockquotes, fenced code and repeated growing sections. Tool categories and stable `callId`s are visible in the generic tool renderer. Tool results are separate canonical `role: tool` history records rather than renderer-only decorations.
 
-- 1,000,000+ addressable messages with bounded hot projection and DOM;
-- far jump and prepend with semantic anchor preservation;
-- hot-runtime eviction while SessionKernels keep working;
-- responsive layout and variable-height composer behavior.
+Other Recent conversations demonstrate transport/code refactoring, approval and user-question blockers, multimodal upload/ASR/audio handoff, responsive image/HTML/table artifacts, and resumable provider failure/long-context history.
 
-Demo scenario tails are canonical messages; there is no renderer-only shortcut.
+The separate `Million-message streaming stress` conversation has a narrower job: prove that 1,000,000+ addressable messages, continuous rich Markdown, history browsing and virtualized layout stay bounded. It intentionally does **not** reuse the product Agent-loop script, so performance measurements are not polluted by expected structural tool/message transitions.
+
+New session, queue/stop/resume, session switching, exact Latest/follow behavior and background execution use the same Engine path as the seeded scenarios. Demo scenario tails are canonical messages; there is no renderer-only shortcut.
 
 ### Session diagnostics
 
 The public workspace keeps a one-click **Session diagnostics** panel because observability is part of the engine demonstration, not disposable test chrome. It is closed by default for normal use and automatically open under Playwright.
 
-The panel intentionally focuses on high-value evidence: exact history navigation, bounded window loading, live-output cadence, canonical renderer verification, logical/hot/DOM scale, concurrent SessionKernel/runtime counts, projection/incremental work, queue/reader state, provider token/cache/context accounting, and browser frame performance. Low-value implementation counters such as virtual epochs, renderer counts and individual renderer-cache sizes are not part of the public diagnostics surface.
+The panel intentionally focuses on high-value evidence: exact history navigation, bounded window loading, live-output cadence, active canonical Turn/Step, tool call/category correlation, canonical renderer verification, logical/hot/DOM scale, concurrent SessionKernel/runtime counts, projection/incremental work, queue/reader state, provider token/cache/context accounting, and browser frame performance. Low-value implementation counters such as virtual epochs, renderer counts and individual renderer-cache sizes are not part of the public diagnostics surface.
+
+## Markdown rendering contract
+
+Markdown chunking uses the same Marked GFM parser contract as HTML rendering. A long document may split only between top-level parser blocks; lists, tables, blockquotes and fenced code stay semantically atomic even when they contain blank lines. During normal streaming, settled prefix `RenderUnit`s retain identity and only the changed Markdown tail is reprojected.
 
 ## Extension rule
 
@@ -99,7 +126,7 @@ Do not introduce a generic plugin graph or cross-event node engine until a real 
 
 - `src/engine/vue/engine.css` — Engine shell, viewport and composer geometry;
 - `src/engine/vue/renderers.css` — renderer visuals and containment;
-- `src/demo/styles/*` — host workspace, scenario chrome, diagnostics and architecture-page styling.
+- `src/demo/styles/*` — host workspace, diagnostics and architecture-page styling.
 
 Both Engine stylesheets are rooted at `[data-conversation-engine].conversation-shell`; only Demo styles may reset `html`, `body` or `#app`.
 
