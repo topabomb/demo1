@@ -1,66 +1,48 @@
-# Agent Conversation Engine Architecture
+# Agent Workbench Rendering Engine Architecture
 
-`demo1` is an executable reference for long-running Agent conversation clients. The repository deliberately separates three responsibilities:
+`demo1` is an executable reference for the **front-end rendering infrastructure** shared by long-running Agent workbenches. It deliberately separates three responsibilities:
 
-1. **External adapters** — provider protocol, Agent orchestration, durable persistence, async network/database IO and recovery policy.
-2. **Engine (`src/engine/**`)** — provider-neutral conversation/session semantics, bounded presentation, semantic viewport policy and a Vue reference surface.
-3. **Demo host (`src/demo/**`)** — multi-session workspace composition, synthetic histories/playback, scenarios, diagnostics and the public architecture page.
+1. **External adapters** — provider protocol, Agent/model/tool orchestration, permission policy, durable persistence, async network/database IO and recovery strategy.
+2. **Framework-neutral Engine core (`src/engine/**`, excluding the optional Vue adapter)** — canonical renderable semantics, runtime session truth, bounded projection and semantic viewport policy.
+3. **Demo host (`src/demo/**`)** — multi-session product composition, realistic scripted Agent tasks, synthetic histories/playback, diagnostics and the public architecture page.
 
 The core performance target is:
 
 > Normal UI work scales with **changed + hot + visible** state, not total history.
 
-The Engine is intentionally smaller than the Demo. It is not an Agent runtime, provider SDK, persistence server, workspace manager or general plugin framework.
+The Engine is intentionally smaller than the workbench. It is not an Agent runtime, provider SDK, project/worktree manager, editor integration, permission system or workspace layout framework.
 
 ## 1. Dependency and ownership law
 
 ```text
-Provider / persistence / network
+Provider / Agent runtime / persistence / network
         │ normalize + cache
         ▼
-┌─────────────────────────────────────┐
-│              Engine                 │
-│ canonical model · SessionKernel     │
-│ projection · semantic viewport      │
-│ Vue reference adapter · renderers   │
-└─────────────────────────────────────┘
-        ▲
-        │ consume
-┌─────────────────────────────────────┐
-│             Demo host               │
-│ workspace/LRU · scenarios ·         │
-│ synthetic playback · diagnostics    │
-└─────────────────────────────────────┘
+┌──────────────────────────────────────┐
+│ Framework-neutral Engine core        │
+│ canonical semantics · SessionKernel  │
+│ projection · semantic viewport       │
+└──────────────────────────────────────┘
+        │
+        ├── optional Vue adapter/renderers
+        │
+        ▲ consume
+┌──────────────────────────────────────┐
+│ Demo host                            │
+│ workspace/LRU · scenarios · playback│
+│ stress history · diagnostics         │
+└──────────────────────────────────────┘
 ```
 
-`src/engine/**` never imports `src/demo/**`. The Engine also contains no provider-specific orchestration. Architecture tests enforce the source dependency direction.
+`src/engine/**` never imports `src/demo/**`. Framework-neutral modules do not depend on Vue, DOM, Virtua or CSS. `src/engine/vue/**` is a reference physical adapter that consumes semantic Engine state; its components and CSS do not define canonical identity.
 
-### What belongs outside Engine
+External/provider adapters own SSE/WebSocket decoding, model/tool-loop decisions, delegated-Agent scheduling, retry/recovery lifecycle, permission evaluation, durable persistence, async fetch/cache fill and provider-specific billing/cache interpretation.
 
-External/provider adapters own:
+The Demo owns Recent-session metadata, active-session routing, hot-runtime LRU, fake 1M history, playback timing, scripted tool outputs, fake delegated review, diagnostics and browser performance counters.
 
-- SSE/WebSocket/provider event decoding;
-- model/tool loop decisions;
-- retry/recovery/provider request lifecycle;
-- durable conversation persistence;
-- async database/network fetching and cache fill;
-- provider-specific billing/cache interpretation before normalized accounting is written to Engine.
+## 2. Canonical identity model
 
-The Demo owns:
-
-- the list of Recent sessions and relative ages;
-- active-session routing;
-- the three-hot-runtime LRU policy;
-- fake 1M history generation;
-- scripted Agent-loop behavior and playback rate;
-- renderer compatibility fixtures;
-- Session diagnostics and browser performance counters.
-
-None of those become implicit Engine services merely because the Demo exercises them.
-
-## 2. Canonical conversation model
-
-Provider/runtime data is normalized before presentation:
+Provider/runtime events normalize into stable history records:
 
 ```ts
 interface LogicalMessage {
@@ -75,269 +57,269 @@ interface LogicalMessage {
 }
 ```
 
-Identity levels are explicit:
+Identity levels are deliberately distinct:
 
-- **Message** — one globally addressable history record;
+- **Message** — globally addressable history record;
 - **Turn** — one user-level interaction lifecycle;
-- **Step** — optional producer-owned model/tool-loop coordinate;
-- **Block** — stable semantic content inside a Message;
+- **Step** — actual producer-owned model/tool execution coordinate;
+- **Block** — stable semantic content in a Message;
 - **callId** — producer-owned correlation between tool call/result;
-- **artifact provenance** — explicit link from generated media/files to a producing call where applicable.
+- **ResourceRef** — stable host-neutral reference to a file, URL or artifact;
+- **AgentRunRef** — producer-reported reference to delegated Agent work;
+- **artifact provenance** — link from generated outputs to their producing call where applicable.
 
-DOM adjacency, “latest unfinished row” and renderer order are never business identity.
+DOM adjacency, virtual-row order, renderer type and “latest unfinished row” are never business identity.
 
-### Turn is not one assistant card
-
-One Turn can contain several canonical records:
+One Turn may append multiple model/tool records over time:
 
 ```text
 user request             turn A / step 0
-assistant model output   turn A / step 1
+assistant output         turn A / step 1
 assistant tool call      turn A / step 1
 tool result              turn A / step 1
-assistant model output   turn A / step 2
+assistant output         turn A / step 2
 assistant tool call      turn A / step 2
 tool result              turn A / step 2
 assistant synthesis      turn A / step 3+
 ```
 
-The Engine preserves these coordinates. It does not decide when another model Step or tool invocation occurs.
+The Engine preserves these coordinates but never decides when another Step/tool/Agent run occurs.
 
-## 3. SessionKernel: runtime session truth, not persistence
+## 3. Workbench rendering primitives
 
-`ConversationSessionKernel` owns facts that must remain correct without a mounted viewport:
+The Engine adds only concepts that are stable across coding/research/office Agent clients and directly useful to rendering/replay.
 
-- canonical history access plus appended/overridden normalized messages;
-- live execution status and explicit active assistant coordinate;
-- queue payloads for the current runtime session;
-- approval/question blockers;
-- foreground/unread attention;
-- last explicitly settled Turn outcome/failure;
-- normalized token/context accounting;
-- Turn/Step counters.
-
-It does **not** imply durable persistence. A host that requires restart-safe queue/blocker/execution recovery must persist and restore those facts explicitly through its own storage/runtime adapter.
-
-### Live status is not historical outcome
-
-`SessionStatus` answers whether execution is currently `working`, `waiting`, `interrupted` or `idle`. `lastTurnReason` answers how the latest explicitly settled Turn ended. They are separate facts.
-
-In particular:
-
-- `idle` means no execution is currently running;
-- `waiting` means exactly one user interaction is pending;
-- `idle` does **not** imply `completed`;
-- a fresh session therefore has `status: 'idle'` and `lastTurnReason: null`;
-- `completed`, `error`, `max-tokens`, `aborted` and `interrupted` are written only when an execution adapter explicitly calls `finishExecution(...)`.
-
-This prevents product badges and recovery logic from inferring history from a live-state enum.
-
-### No inferred execution target
-
-A restored descriptor may provide:
+### 3.1 `ResourceRef`: identity, not navigation
 
 ```ts
-activeAssistantIndex?: number | null
-```
-
-If a session is `working` and this coordinate is absent, the Kernel keeps `currentAssistantIndex === null`. It never guesses that the last history record must be the active assistant record. The producer/host owns recovery truth.
-
-`continueExecutionAt(index)` has one narrow responsibility: move an already-running execution to another canonical assistant record without resetting Turn timing. It contains no Agent-loop policy.
-
-## 4. Blocker contract and lifecycle
-
-Approval and user questions are different semantic interactions:
-
-```ts
-type InteractionResolution =
-  | { kind: 'approval'; approved: boolean }
-  | { kind: 'question'; answer: string | null }
-```
-
-A question is therefore not reduced to a fake “approved” boolean. `answer: null` is an explicit no-answer/skip payload; it does not itself mean that the Turn was aborted.
-
-There is one interaction lifecycle:
-
-```text
-working
-  │ requestInteraction(pending)
-  ▼
-waiting + pendingInteraction
-  │ resolveInteraction(typed response)
-  ▼
-idle + no pendingInteraction + no inferred Turn outcome
-  │ execution adapter chooses resume / alternate strategy / explicit finishExecution(...)
-```
-
-The invariant is strict: restored `status: 'waiting'` and `pendingInteraction` must appear together, and `requestInteraction(...)` is valid only from `working` state. `SessionKernel.resolveInteraction()` validates that the resolution kind matches the pending blocker and clears blocker state. It does **not** translate approval, denial, answer or skip into a Turn outcome. Neither `approved: false` nor `answer: null` changes `lastTurnReason` by itself.
-
-## 5. History source and async IO boundary
-
-The hot Engine contract is intentionally synchronous:
-
-```ts
-interface ConversationHistorySource {
-  readonly sessionId: string
-  readonly count: number
-  loadRange(start: number, count: number): readonly LogicalMessage[]
+interface ResourceRef {
+  id: string
+  kind: 'file' | 'url' | 'artifact'
+  uri: string
+  label?: string
+  range?: {
+    startLine: number
+    startColumn?: number
+    endLine?: number
+    endColumn?: number
+  }
 }
 ```
 
-This is a **locally addressable history source**, not a promise that the Engine performs database/network paging.
+A ResourceRef answers **what resource is being referenced and where**, not **what the UI should do when clicked**. VS Code opening, browser routing, preview drawers, download behavior and security policy belong to the host.
 
-A real remote integration should look like:
+`code`, `diff`, attachments and tool activities can reuse the same resource identity instead of inventing incompatible path/url/artifact fields. `diff` has one canonical source of truth: `resource`, not a parallel legacy `file` identity.
+
+### 3.2 Plan is not execution Step
+
+```ts
+interface PlanItem {
+  id: string
+  text: string
+  status: 'pending' | 'in-progress' | 'completed' | 'blocked' | 'cancelled'
+}
+```
+
+A `plan` block reports intended/progress work. `stepId` reports execution that actually happened. They must not be merged: one PlanItem may consume many model/tool Steps, execution may add unplanned Steps, and a Plan can be updated without changing execution identity.
+
+The Engine renders producer-reported Plan state; it does not generate, reorder or schedule the plan.
+
+### 3.3 Tool category is not presentation intent
+
+`ToolCategory` is capability semantics such as `filesystem`, `search` or `shell`. `ToolPresentationIntent` is a renderer-neutral hint describing how the activity is best understood:
+
+```ts
+type ToolPresentationIntent =
+  | { kind: 'generic' }
+  | { kind: 'resources'; resources: readonly ResourceRef[] }
+  | { kind: 'changes'; resources?: readonly ResourceRef[] }
+  | { kind: 'terminal'; command?: string; cwd?: ResourceRef }
+```
+
+Presentation intent does **not** contain panel/side/width/color/component identifiers or host actions. For example, `read_file` and `edit_file` can both be `filesystem` while one is understood as resources and the other as changes.
+
+Tool call/result remain separate canonical records linked by `callId`. Provider permission decisions remain outside this metadata.
+
+### 3.4 Terminal is a streaming semantic primitive
+
+Large command/test/build output is common enough that serializing it repeatedly through an opaque tool-result payload is both semantically weak and inefficient.
+
+A `terminal` block therefore carries command, cwd ResourceRef, output, status, exit code and duration. Append-only output publishes:
+
+```ts
+{ kind: 'append-terminal', blockId, delta }
+```
+
+`ProjectionEngine.appendTerminalDelta(...)` replaces only the stable terminal RenderUnit and preserves unrelated sibling units. This is the same incremental invariant used by reasoning/Markdown rather than a special workbench orchestration service.
+
+Terminal status describes the reported command output only. Starting, killing, retrying or attaching to a process remains the execution adapter's job.
+
+### 3.5 AgentRunRef is reference-only
+
+```ts
+interface AgentRunRef {
+  runId: string
+  title: string
+  agent?: string
+  status: 'queued' | 'running' | 'waiting' | 'completed' | 'failed' | 'interrupted'
+  childSessionId?: string
+  summary?: string
+}
+```
+
+An `agent-run` block lets history state that delegated work occurred and report its status. It is not a subagent API. The Engine never spawns, schedules, cancels, routes models or opens a child session.
+
+## 4. Deliberate non-abstraction: no core PresentationSurface
+
+The core does **not** define `conversation`, `changes`, `artifacts`, `preview`, `left-panel`, `right-panel`, tabs or drawers as a projection target.
+
+A host may derive any layout from canonical resources, diffs, artifacts, plans and AgentRunRefs. Encoding surface placement now would couple reusable rendering semantics to one workbench shell. A multi-surface projection contract should be added only if a concrete reusable requirement proves that the same canonical state must independently project into multiple semantic streams.
+
+This is a central boundary: **semantic renderability is Engine responsibility; application layout and style are not.**
+
+## 5. SessionKernel: runtime truth, not persistence or orchestration
+
+`ConversationSessionKernel` owns normalized history access, appended/overridden messages, live execution status, explicit active assistant coordinate, runtime queue, typed blockers, foreground/unread attention, last explicitly settled Turn outcome/failure, normalized accounting and Turn/Step counters.
+
+It does not imply durable persistence. A restart-safe host must persist/restore those facts itself.
+
+`SessionStatus` answers current live state. `lastTurnReason` answers the latest explicitly settled Turn outcome. Therefore:
+
+- `idle` means no execution is currently running, not “completed”;
+- `waiting` exists iff one `pendingInteraction` exists;
+- a fresh session is `idle + lastTurnReason:null`;
+- outcomes are written only by explicit `finishExecution(...)`;
+- a restored working session never infers its target from the newest history row; `activeAssistantIndex` is producer/host truth.
+
+`continueExecutionAt(index)` only moves an already-running execution target without resetting Turn timing. It contains no Agent-loop policy.
+
+Approval and question blockers remain separate typed interactions. `requestInteraction(...)` suspends working execution into `waiting`; `resolveInteraction(...)` validates/clears the blocker and returns to outcome-neutral `idle`. Approval/denial/answer/skip does not itself decide whether execution resumes or ends.
+
+## 6. History, projection and bounded work
+
+`ConversationHistorySource` is an intentionally synchronous, globally addressable hot-read contract. Remote DB/API access sits outside it:
 
 ```text
-remote DB / API
-    ↓ async fetch/prefetch
+remote storage/API
+  ↓ async fetch/prefetch
 host/provider cache
-    ↓ synchronous addressable reads
+  ↓ synchronous local range
 ConversationHistorySource
-    ↓
+  ↓
 SessionKernel / ConversationSessionRuntime
 ```
 
-Keeping async IO outside the render hot path avoids mixing network lifecycle with semantic reader/virtualizer state. Products may choose any cache, persistence or prefetch strategy as long as the Engine-facing source can satisfy the requested local range.
+`ConversationSessionRuntime` keeps a bounded hot segment (reference ~2,048 messages) and projects keyed RenderUnits. Projection caching is bounded; neighbor shifts project only incoming slices; far jumps rebase one bounded window.
 
-## 6. Projection and bounded presentation
+High-frequency append paths are explicit:
 
-`ConversationSessionRuntime` keeps a bounded hot segment (reference configuration: about 2,048 logical messages) and derives keyed `RenderUnit`s through `ProjectionEngine`.
+- reasoning — one stable thinking unit;
+- Markdown — mutable parser-aligned tail only;
+- terminal — one stable terminal unit.
 
-Important properties:
+Structural Block changes may reproject the changed message, never total history. Presentation state remains rebuildable/disposable.
 
-- only the hot segment is projected;
-- projection memoization is bounded;
-- stable IDs preserve unrelated rows during Block updates;
-- neighbor shifts project only the incoming slice;
-- far jumps rebase one bounded window;
-- reasoning and Markdown append paths patch incrementally;
-- presentation state is rebuildable and disposable.
+Markdown chunking and HTML rendering share one Marked GFM parser configuration so lists, tables, blockquotes and fences remain semantically atomic.
 
-### Markdown correctness
-
-Markdown chunking and HTML rendering share the same Marked GFM parser options. Splitting may happen only between top-level parser blocks. Lists, tables, blockquotes and fenced code remain semantically atomic even when they contain internal blank lines.
-
-For append-only streaming, the projector re-processes the mutable Markdown tail plus the delta; settled prefix RenderUnits retain identity.
-
-## 7. Semantic viewport vs physical list
+## 7. Semantic viewport vs physical rendering
 
 Application position is semantic:
 
 ```text
 committed reader index
 + exact messages-after
-+ committed RenderUnit anchor / offset
++ committed RenderUnit anchor/offset
 + follow-tail intent
-+ atVisualBottom
++ atVisualBottom observation
 ```
 
-`Latest` is exact:
+The physical adapter owns DOM measurement, scroll handles, ResizeObserver, virtualizer convergence and responsive reflow. Requested navigation commits only after the physical target resolves.
 
-```text
-messagesAfter = logicalCount - 1 - committedReader
-```
+Plan expansion, terminal growth, media loading or CSS reflow can change row height without redefining reader/Turn/Step identity.
 
-The Vue/Virtua layer owns physical measurements, scroll handles, ResizeObserver and convergence. Requested navigation becomes committed reader state only after the physical target has stably resolved.
+## 8. Optional Vue reference adapter and CSS
 
-This separation makes the virtualizer replaceable and prevents measurement probes, responsive reflow or composer growth from redefining conversation state.
+`src/engine/vue/**` demonstrates one physical integration using Vue/Virtua. It is not part of the framework-neutral semantic model.
 
-## 8. Vue reference surface
+The public Vue surface provides `ConversationViewport`, `RenderUnitView`, per-viewport `RendererRegistry` and `createDefaultRendererRegistry`. Built-in reference renderers include Markdown, reasoning, code, diff, tool, media, Plan, Terminal and AgentRun.
 
-`ConversationViewport.vue` is a reference conversation UI adapter, not a headless domain service. It combines:
+CSS is adapter implementation, not Engine semantics:
 
-- Engine runtime/projection state;
-- semantic navigation policy;
-- a generic `ConversationExecutionController` command port;
-- Virtua physical list integration;
-- composer and typed blocker UI;
-- renderer resolution.
+- `engine.css` — reference viewport/composer/blocker geometry;
+- `renderers.css` — existing renderer visuals/containment;
+- `workbench-renderers.css` — Plan/Terminal/AgentRun reference visuals.
 
-Its generic execution prop is named `execution`; streaming cadence is not part of this API.
+All are scoped under `[data-conversation-engine].conversation-shell`; none may reset `html`, `body` or `#app`. Demo CSS alone owns the host page.
 
-Products can provide a per-viewport `RendererRegistry`. The public Vue entry intentionally exposes the registry class/factory rather than process-global mutation helpers. Internal defaults remain an implementation convenience for the built-in surface.
-
-Engine CSS is host-scoped under `[data-conversation-engine].conversation-shell`:
-
-- `engine.css` — shell, viewport, composer and blocker geometry;
-- `renderers.css` — renderer visuals and containment.
-
-Only Demo CSS may reset or style `html`, `body` or `#app`.
+No canonical or RenderUnit contract may contain CSS class, color, width, panel placement or physical scroll state.
 
 ## 9. Public API policy
 
-`src/engine/index.ts` is the framework-neutral public surface. It exports stable semantic contracts and core composition objects, but intentionally does **not** export runtime tuning/telemetry such as:
+`src/engine/index.ts` exports framework-neutral semantic contracts and core composition objects, including ResourceRef, PlanItem, ToolPresentationIntent and AgentRunRef. It intentionally excludes Vue/Demo implementation and runtime tuning/telemetry such as `WINDOW_MESSAGES`, `SHIFT_MESSAGES`, `SessionUiSnapshot` and `ShiftPlan`.
 
-- `WINDOW_MESSAGES` / `SHIFT_MESSAGES`;
-- `SessionUiSnapshot`;
-- `ShiftPlan`;
-- Demo playback counters.
+`src/engine/vue/index.ts` exposes intended Vue composition rather than internal node seats or process-global renderer mutation helpers.
 
-Those remain directly importable implementation modules inside this repository where tests/reference adapters need them, but they are not promised as stable framework-level contracts.
-
-Likewise, `src/engine/vue/index.ts` exposes the intended Vue composition surface rather than internal `ConversationNodeSeat` or global renderer mutation helpers.
+The repository builds a Vite Demo/Pages application with npm publication disabled. The Engine is source-level reusable/extraction-ready; package distribution remains a separate future release concern.
 
 ## 10. Demo: executable proof, not architecture source of truth
 
-The default `Agent loop investigation` demonstrates one Turn progressing through:
+The default coding-agent scenario now demonstrates one realistic Turn:
 
 ```text
-reasoning + rich streaming Markdown
-→ filesystem tool call/result
+visible Plan
+→ reasoning + rich streaming GFM
+→ resource-aware filesystem call/result
 → next model Step
-→ search tool call/result
+→ resource-aware search call/result
+→ next model Step + delegated reviewer AgentRunRef
+→ shell call
+→ live Terminal unit: tests → build → Chromium output
 → next model Step
-→ shell verification call/result
-→ final synthesis + diff + code + artifacts
+→ final synthesis + ResourceRef diff/code + artifacts
+→ completed Plan
 ```
 
-Tool call/result are separate canonical history records linked by `callId`.
+Tool calls/results are standalone canonical records; terminal output is a live role:tool record; delegated review is a producer-reported AgentRunRef. None of these paths invoke hidden product functionality.
 
-The separate `Million-message streaming stress` conversation has one job: prove that 1,000,000+ addressable messages, continuous rich Markdown, history browsing and physical virtualization stay bounded. It does not reuse the multi-step tool script, so stress evidence is easier to interpret.
+The separate million-message session remains a pure projection/viewport stress test. It intentionally does not reuse workbench orchestration so its evidence remains interpretable.
 
-Other Demo sessions cover:
+Other scenarios cover typed blockers, failure/resume, background execution during viewport eviction, resource-aware changes, multimodal artifacts, TTS/ASR and responsive content.
 
-- approval blockers;
-- question blockers with user-entered answers;
-- failure/resume;
-- background execution while viewports are evicted;
-- multimodal attachments and ASR/audio;
-- code/diff/HTML/media renderers;
-- responsive/mobile reflow.
+Diagnostics are Demo-owned observability. They may read Engine evidence and expose synthetic controls, but those controls never become Engine APIs.
 
-### Session diagnostics
+## 11. Explicit Engine non-goals
 
-Diagnostics are explicitly **Demo-owned observability**. They mix two categories that must not be confused:
+Do not add the following to this rendering Engine merely because Agent workbenches use them:
 
-- **Demo controls/telemetry** — playback rate, pause/resume, ingress/publish counts, fixture injection;
-- **Engine evidence** — logical/hot/DOM scale, projection work, reader state, Turn/Step/tool identity, queue/blockers and normalized accounting.
+- Project/repository/worktree lifecycle;
+- Agent/model routing or subagent scheduling;
+- permission/allowlist evaluation;
+- MCP/skills registry;
+- process/background-job manager;
+- editor/resource-opening behavior;
+- preview server lifecycle;
+- Changes/Artifacts/Preview panel layout;
+- sidebar/tab/drawer/workspace navigation;
+- durable cloud sync or provider retry policy.
 
-Diagnostics may inspect Engine state, but its synthetic controls do not become Engine APIs. A missing `lastTurnReason` is displayed as `none`, not overloaded as a live execution label.
-
-## 11. Distribution status
-
-The package manifest currently has `"private": true`; the repository builds a Vite Demo/Pages application. This flag disables package publication—it does **not** describe the visibility of the public GitHub repository.
-
-The Engine is **source-level reusable and extraction-ready**, but the repository does not claim to publish an npm package today.
-
-If package distribution becomes a requirement, add a dedicated library build/export map, package-level CSS entry points and consumer smoke tests as a separate release concern. Do not distort Engine responsibilities merely to simulate package maturity that does not yet exist.
+If a future feature needs one of these, integrate it through host/external adapters and add only the minimum stable renderable semantic evidence to the Engine.
 
 ## 12. Verification contract
 
 A release must prove architecture and behavior together:
 
-- Engine never imports Demo;
-- neutral public API does not leak Demo/Vue/tuning details;
-- working-session restore never guesses active history position;
-- live status never invents a settled Turn outcome;
-- `waiting` and `pendingInteraction` remain one consistent state;
-- approval and question resolutions remain typed;
-- interaction request/resolve transitions never invent completion/abort policy;
-- async IO responsibility stays outside `ConversationHistorySource`;
-- multi-step Demo data enters through canonical Message/Block paths;
-- 1M history keeps hot state and mounted DOM bounded;
-- Markdown append remains incremental after structural changes settle;
-- exact Latest/reader/anchor behavior survives navigation and responsive reflow;
-- Engine CSS survives hostile host-global styling;
-- local production and deployed Pages run the same Chromium suite.
+- Engine never imports Demo and framework-neutral code never imports Vue/DOM;
+- canonical workbench semantics contain no layout/style/policy fields;
+- Plan remains distinct from Step;
+- ToolCategory remains distinct from ToolPresentationIntent;
+- ResourceRef carries identity/location only, not host actions;
+- AgentRunRef remains reference-only;
+- terminal append patches one stable RenderUnit and preserves unrelated siblings;
+- session/blocker/outcome/history invariants remain unchanged;
+- realistic Demo data enters only through canonical Message/Block mutations;
+- 1M history keeps hot state/cache/DOM bounded;
+- exact Latest/reader/anchor behavior survives variable-height workbench content;
+- optional Vue CSS stays host-scoped;
+- local production and deployed Pages run the same full Chromium suite.
 
-The exact `main` SHA is a release only when unit/architecture tests, strict build, local Chromium, Pages deployment and deployed-site Chromium are all Green.
+The exact `main` SHA is released only when unit/architecture tests, strict build, local Chromium, Pages deployment and deployed-site Chromium are all Green.
