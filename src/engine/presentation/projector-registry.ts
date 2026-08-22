@@ -51,7 +51,7 @@ export function createDefaultContentProjectors(): ContentProjectorRegistry {
         markdown: chunk.text,
         markdownHash: chunk.hash,
         partIndex: chunk.index,
-        partCount: chunks.length,
+        hasNextPart: chunk.index < chunks.length - 1,
       }, chunk.hash))
     })
     .register('reasoning', ({ message, block: contentBlock }) => {

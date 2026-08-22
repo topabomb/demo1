@@ -35,7 +35,7 @@ describe('Agent presentation framework', () => {
     const units = projectMessage(message([block('answer', 'markdown', { markdown: source })]))
     expect(units.length).toBeGreaterThan(1)
     expect(units.map(unit => unit.payload.partIndex)).toEqual(units.map((_, index) => index))
-    expect(units.every(unit => unit.payload.partCount === units.length)).toBe(true)
+    expect(units.map(unit => unit.payload.hasNextPart)).toEqual(units.map((_, index) => index < units.length - 1))
   })
 
   it('never splits an open fenced code block', () => {

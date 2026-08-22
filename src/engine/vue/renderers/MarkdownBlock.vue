@@ -5,7 +5,7 @@ import { renderMarkdownCached } from './markdown-cache'
 
 const props = defineProps<{ unit: RenderUnit }>()
 const isFirst = computed(() => Number(props.unit.payload.partIndex ?? 0) === 0)
-const isLast = computed(() => Number(props.unit.payload.partIndex ?? 0) >= Number(props.unit.payload.partCount ?? 1) - 1)
+const isLast = computed(() => props.unit.payload.hasNextPart !== true)
 const role = computed(() => String(props.unit.payload.role ?? 'assistant'))
 const live = computed(() => props.unit.payload.live === true)
 const html = computed(() => renderMarkdownCached(props.unit.id, props.unit.revision, String(props.unit.payload.markdown ?? '')))

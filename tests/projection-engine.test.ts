@@ -50,11 +50,13 @@ describe('ProjectionEngine', () => {
     expect(engine.stats.incrementalPatches).toBe(1)
   })
 
-  it('updates Markdown continuation metadata when a streamed append creates a new unit', () => {
+  it('changes only the former Markdown tail when a streamed append creates a new unit', () => {
     const engine = new ProjectionEngine(undefined, 256)
-    const initialText = `${'first paragraph '.repeat(330)}\n\n${'tail '.repeat(40)}`
+    const initialText = `${'first paragraph '.repeat(330)}\n\n${'middle paragraph '.repeat(330)}\n\n${'tail '.repeat(40)}`
     const initial = live(initialText, 0)
     const before = engine.projectMessage(initial)
+    expect(before.length).toBeGreaterThan(2)
+    const stablePrefix = before.slice(0, -1)
     const oldTail = before.at(-1)!
 
     const delta = `\n\n${'new section '.repeat(600)}`
@@ -63,9 +65,11 @@ describe('ProjectionEngine', () => {
     const nextOldTail = answerUnits.find(unit => unit.id === oldTail.id)!
 
     expect(after.length).toBeGreaterThan(before.length)
+    for (let index = 0; index < stablePrefix.length; index += 1) expect(after[index]).toBe(stablePrefix[index])
     expect(nextOldTail).not.toBe(oldTail)
-    expect(Number(nextOldTail.payload.partIndex)).toBeLessThan(Number(nextOldTail.payload.partCount) - 1)
-    expect(answerUnits.every(unit => unit.payload.partCount === answerUnits.length)).toBe(true)
+    expect(nextOldTail.payload.hasNextPart).toBe(true)
+    expect(answerUnits.slice(0, -1).every(unit => unit.payload.hasNextPart === true)).toBe(true)
+    expect(answerUnits.at(-1)?.payload.hasNextPart).toBe(false)
   })
 
   it('patches reasoning inside a mixed live message without invalidating the answer sibling', () => {
