@@ -1,5 +1,6 @@
 import {
   block,
+  type AgentRunRef,
   type AppendCanonicalMessage,
   type ContentBlock,
   type LogicalMessage,
@@ -89,6 +90,39 @@ const PLAN_ITEMS = [
   { id: 'synthesize', text: 'Summarize the smallest rendering-layer change' },
 ] as const
 
+const DELEGATED_RUNS: readonly AgentRunRef[] = [
+  {
+    runId: 'review-rendering-contract',
+    title: 'Review rendering contract',
+    agent: 'architecture-reviewer',
+    mode: 'foreground',
+    status: 'completed',
+    childSessionId: 'child-review-contract',
+    summary: 'The parent waited for this focused review before advancing; no layout or orchestration policy leaked into Engine semantics.',
+  },
+  {
+    runId: 'audit-terminal-projection',
+    title: 'Audit terminal projection',
+    agent: 'performance-reviewer',
+    mode: 'background',
+    status: 'running',
+    childSessionId: 'child-terminal-audit',
+  },
+  {
+    runId: 'audit-resource-semantics',
+    title: 'Audit resource semantics',
+    agent: 'contract-reviewer',
+    mode: 'background',
+    status: 'running',
+    childSessionId: 'child-resource-audit',
+  },
+]
+
+const BACKGROUND_SUMMARIES: Readonly<Record<string, string>> = {
+  'audit-terminal-projection': 'Confirmed append-only terminal updates replace one stable RenderUnit and keep unrelated siblings reusable.',
+  'audit-resource-semantics': 'Confirmed ResourceRef carries identity/range only; editor routing and panel placement remain host-owned.',
+}
+
 const STEP_MARKDOWN: Readonly<Record<number, readonly string[]>> = {
   1: [
     '### Step 1 · Inspect the projection path\n\nThe first release clue points at the rendering boundary. I am keeping canonical history independent from viewport state while checking how live content becomes keyed `RenderUnit`s. ',
@@ -99,33 +133,31 @@ const STEP_MARKDOWN: Readonly<Record<number, readonly string[]>> = {
     '> A resource can identify `src/engine/...` without telling the Engine whether a product opens VS Code, a browser, or a side panel.\n\n',
   ],
   2: [
-    '### Step 2 · Correlate workbench semantics\n\nThe file read confirms the hot path, so I am following tool, resource and delegated-run references before changing anything. ',
+    '### Step 2 · Correlate workbench semantics\n\nThe file read confirms the hot path, so I am following tool, resource and delegation references before changing anything. ',
     '\n\n1. `turnId` groups the complete user-level run.\n2. `stepId` identifies actual execution iterations.\n',
-    '\n   - Plan items describe intended work, not execution Steps.\n   - Tool call/result correlate by producer-owned `callId`.\n   - `ResourceRef` identifies files/URLs/artifacts without defining navigation.\n\n',
+    '\n   - Plan items describe intended work, not execution Steps.\n   - Tool call/result correlate by producer-owned `callId`.\n   - `ResourceRef` identifies files/URLs/artifacts without defining navigation.\n   - Delegated child traces stay in child sessions; the parent renders stable run references and statuses.\n\n',
     '```ts\nconst location = { id: "kernel", kind: "file", uri: "src/engine/conversation/session-kernel.ts" }\n',
     'const tool = { category: "filesystem", presentation: { kind: "resources", resources: [location] } }\n```\n\n',
     '| Boundary | Provider policy? | Layout/style? |\n| --- | ---: | ---: |\n| canonical Engine | no | no |\n| Demo execution adapter | yes | no |\n| Vue reference renderer | no | physical visuals only |\n\n',
   ],
   3: [
-    '### Step 3 · Verify under load\n\nA delegated reviewer found no cross-layer dependency. I am now running the release gate and streaming the shell output through a dedicated terminal semantic block. ',
+    '### Step 3 · Verify under load\n\nOne foreground reviewer has completed, while two independent background reviewers continue beside the parent shell verification. Their child conversations remain separate; this parent only needs stable identity, mode, status and concise result. ',
     '\n\n| Verification | Expected | Live state |\n| --- | --- | --- |\n| unit + architecture | deterministic | passing |\n',
     '| strict build | no type drift | passing |\n| Chromium | no row overlap / no page overflow | running |\n\n',
-    '```text\nlogical history      -> 1,000,000+\nhot projection       -> bounded window\nterminal delta       -> one stable RenderUnit\n',
+    '```text\nlogical history      -> 1,000,000+\nhot projection       -> bounded window\nterminal delta       -> one stable RenderUnit\nchild delegation     -> stable run refs, not nested traces\n',
     'mounted DOM          -> visible rows only\n```\n\n',
-    '> Tool category says what capability ran; presentation intent says how its activity is best understood. Neither tells the host where to place it.\n\n',
+    '> Foreground/background is a producer-reported relationship to parent flow. The Engine renders it; it never schedules the child.\n\n',
   ],
   4: [
-    '## Final synthesis\n\nThe task now demonstrates a realistic coding-agent run: plan, filesystem/search activities, delegated review, streaming terminal verification, code/diff/artifacts, and final synthesis — all through canonical rendering semantics. ',
-    '\n\n### Boundary result\n\n- Engine owns reusable semantic primitives and bounded projection.\n- Demo owns scenario timing, fake provider output and workbench composition.\n- Layout, editor routing, permission policy and Agent orchestration remain outside the Engine.\n\n',
-    '| Property | Result |\n| --- | --- |\n| Plan vs execution Step | distinct |\n| ResourceRef vs host action | distinct |\n| tool category vs presentation intent | distinct |\n| terminal streaming | incremental |\n| delegated Agent run | explicit reference |\n\n',
-    '### Release checklist\n\n- [x] canonical tool correlation\n- [x] workbench semantic blocks\n- [x] stable incremental terminal output\n- [x] resource-aware diff/tool evidence\n- [ ] deployed Chromium verification\n\n',
+    '## Final synthesis\n\nThe task now demonstrates a realistic coding-agent run: plan, filesystem/search activities, one foreground delegated review, two parallel background child runs, streaming terminal verification, code/diff/artifacts, and final synthesis — all through canonical rendering semantics. ',
+    '\n\n### Boundary result\n\n- Engine owns reusable semantic primitives and bounded projection.\n- Demo owns scenario timing, fake provider output and workbench composition.\n- Child scheduling, child-session navigation, layout, editor routing, permission policy and Agent orchestration remain outside the Engine.\n\n',
+    '| Property | Result |\n| --- | --- |\n| Plan vs execution Step | distinct |\n| ResourceRef vs host action | distinct |\n| tool category vs presentation intent | distinct |\n| terminal streaming | incremental |\n| delegated child batch | sync + async/parallel refs |\n\n',
+    '### Release checklist\n\n- [x] canonical tool correlation\n- [x] workbench semantic blocks\n- [x] stable incremental terminal output\n- [x] foreground/background child status semantics\n- [x] resource-aware diff/tool evidence\n- [ ] deployed Chromium verification\n\n',
     '> The Engine stays smaller than the workbench: it knows what can be rendered and correlated, not how a product arranges panels or executes agents.\n\n',
   ],
 }
 
-export function liveToolForStep(stepOrdinal: number): LiveToolSpec | null {
-  return TOOL_STEPS[stepOrdinal] ?? null
-}
+export function liveToolForStep(stepOrdinal: number): LiveToolSpec | null { return TOOL_STEPS[stepOrdinal] ?? null }
 
 export function parseStepOrdinal(message: LogicalMessage): number {
   const match = message.stepId?.match(/:step-(\d+)$/)
@@ -137,7 +169,7 @@ export function agentReasoningDelta(stepOrdinal: number, tick: number): string {
     `Step ${stepOrdinal}: preserve canonical identity before touching presentation policy. `,
     'Separate execution semantics from viewport measurement and product layout. ',
     'Inspect only changed hot state; never scan total history for ordinary UI work. ',
-    'Keep tool/resource correlation explicit so remounts cannot change business identity. ',
+    'Keep tool/resource/delegation correlation explicit so remounts cannot change business identity. ',
   ]
   const phrase = phrases[tick % phrases.length]!
   return tick % 3 === 0 ? `\n\n${phrase}` : phrase
@@ -151,7 +183,7 @@ export function agentMarkdownDelta(stepOrdinal: number, markdownTick: number): s
     `### Ongoing verification ${cycle + 1}\n\nThe stream is still growing after structured blocks above. Only the active Markdown tail is reparsed; settled prefix units keep identity.\n\n`,
     `| live check | value |\n| --- | --- |\n| step | ${stepOrdinal} |\n| sample | ${cycle + 1} |\n| semantic reader | preserved |\n\n`,
     '```ts\nconst next = appendMarkdownDelta(current, delta)\n// projection reuses every settled prefix RenderUnit\n```\n\n',
-    '- [x] stream continues\n- [x] tool/resource records stay correlated\n- [x] physical measurement stays bounded\n\n',
+    '- [x] stream continues\n- [x] tool/resource records stay correlated\n- [x] child runs remain references rather than recursive parent trace\n- [x] physical measurement stays bounded\n\n',
     '> Rich content can change physical height without changing Turn, Step or reader identity.\n\n',
   ]
   return variants[cycle % variants.length]!
@@ -246,17 +278,15 @@ export function createLiveToolResult(message: LogicalMessage, spec: LiveToolSpec
     durationMs: runningTerminal ? 0 : 480,
     defaultOpen: false,
   })]
-  if (runningTerminal) {
-    blocks.push(block(`terminal-${spec.callId}`, 'terminal', {
-      callId: spec.callId,
-      command: spec.presentation.kind === 'terminal' ? spec.presentation.command : spec.name,
-      cwd: spec.presentation.kind === 'terminal' ? spec.presentation.cwd : undefined,
-      output: '',
-      status: 'running',
-      durationMs: 0,
-      defaultOpen: true,
-    }))
-  }
+  if (runningTerminal) blocks.push(block(`terminal-${spec.callId}`, 'terminal', {
+    callId: spec.callId,
+    command: spec.presentation.kind === 'terminal' ? spec.presentation.command : spec.name,
+    cwd: spec.presentation.kind === 'terminal' ? spec.presentation.cwd : undefined,
+    output: '',
+    status: 'running',
+    durationMs: 0,
+    defaultOpen: true,
+  }))
   return { turnId: message.turnId, stepId: message.stepId, role: 'tool', live: runningTerminal, blocks }
 }
 
@@ -297,18 +327,8 @@ export function settleLiveTerminal(message: LogicalMessage, spec: LiveToolSpec):
 
 export function createLiveAssistantStep(turnId: string, stepOrdinal: number): AppendCanonicalMessage {
   const extra: ContentBlock[] = []
-  if (stepOrdinal === 1) {
-    extra.push(block('work-plan', 'plan', { title: 'Rendering-engine hardening plan', items: planItemsForStep(1) }))
-  }
-  if (stepOrdinal === 3) {
-    extra.push(block('review-run', 'agent-run', {
-      runId: 'review-rendering-contract',
-      title: 'Review rendering contract',
-      agent: 'reviewer',
-      status: 'completed',
-      summary: 'Confirmed that ResourceRef, Plan, Terminal and delegated-run semantics do not introduce provider policy or workspace layout into the Engine.',
-    }))
-  }
+  if (stepOrdinal === 1) extra.push(block('work-plan', 'plan', { title: 'Rendering-engine hardening plan', items: planItemsForStep(1) }))
+  if (stepOrdinal === 3) extra.push(block('delegated-review', 'delegation', { title: 'Delegated verification', runs: DELEGATED_RUNS }))
   return {
     turnId,
     stepId: `${turnId}:step-${stepOrdinal}`,
@@ -330,6 +350,23 @@ export function updateLivePlan(message: LogicalMessage, activeStep: number): Log
   return { ...message, blocks }
 }
 
+export function updateLiveDelegations(message: LogicalMessage, completedBackground: number): LogicalMessage {
+  const blocks = [...message.blocks]
+  const index = blocks.findIndex(entry => entry.id === 'delegated-review' && entry.type === 'delegation')
+  if (index < 0) return message
+  const current = blocks[index]
+  if (!current || current.type !== 'delegation') return message
+  let seenBackground = 0
+  const runs = current.data.runs.map(run => {
+    if (run.mode !== 'background') return run
+    seenBackground += 1
+    if (seenBackground > completedBackground) return run
+    return { ...run, status: 'completed' as const, summary: BACKGROUND_SUMMARIES[run.runId] }
+  })
+  blocks[index] = block(current.id, 'delegation', { ...current.data, runs }, (current.revision ?? 0) + 1)
+  return { ...message, blocks, revision: (message.revision ?? 0) + 1 }
+}
+
 function planItemsForStep(activeStep: number) {
   return PLAN_ITEMS.map((item, index) => {
     const step = index + 1
@@ -339,34 +376,30 @@ function planItemsForStep(activeStep: number) {
 }
 
 export function addFinalEvidence(message: LogicalMessage, kind: 'diff' | 'code' | 'artifacts'): LogicalMessage {
-  if (kind === 'diff') {
-    return addBlockBeforeAnswer(message, block('live-final-diff', 'diff', {
-      resource: KERNEL_FILE,
-      lines: [
-        ' for (const entry of entries) {',
-        '+  preserveStableTurnAndStepCoordinates(entry)',
-        '+  publishSemanticContentWithoutLayoutMetadata(entry)',
-        ' }',
-        '+projection.appendTerminalDelta(message, blockId, delta)',
-      ],
-      defaultOpen: true,
-    }))
-  }
-  if (kind === 'code') {
-    return addBlockBeforeAnswer(message, block('live-final-code', 'code', {
-      language: 'typescript',
-      filename: 'tests/workbench-rendering.contract.ts',
-      resource: resource('workbench-contract-test', 'tests/workbench-rendering.contract.ts', 'workbench-rendering.contract.ts'),
-      defaultOpen: true,
-      code: [
-        'expect(planItems).toSeparateIntentFromExecutionSteps()',
-        'expect(toolPresentation).not.toDefineLayout()',
-        'expect(resourceRefs).toBeHostNeutral()',
-        'expect(terminalAppend).toPatchOneStableRenderUnit()',
-        'expect(agentRun).not.toSpawnAnythingInsideEngine()',
-      ].join('\n'),
-    }))
-  }
+  if (kind === 'diff') return addBlockBeforeAnswer(message, block('live-final-diff', 'diff', {
+    resource: KERNEL_FILE,
+    lines: [
+      ' for (const entry of entries) {',
+      '+  preserveStableTurnAndStepCoordinates(entry)',
+      '+  publishSemanticContentWithoutLayoutMetadata(entry)',
+      ' }',
+      '+projection.appendTerminalDelta(message, blockId, delta)',
+    ],
+    defaultOpen: true,
+  }))
+  if (kind === 'code') return addBlockBeforeAnswer(message, block('live-final-code', 'code', {
+    language: 'typescript',
+    filename: 'tests/workbench-rendering.contract.ts',
+    resource: resource('workbench-contract-test', 'tests/workbench-rendering.contract.ts', 'workbench-rendering.contract.ts'),
+    defaultOpen: true,
+    code: [
+      'expect(planItems).toSeparateIntentFromExecutionSteps()',
+      'expect(toolPresentation).not.toDefineLayout()',
+      'expect(resourceRefs).toBeHostNeutral()',
+      'expect(terminalAppend).toPatchOneStableRenderUnit()',
+      'expect(delegation.runs).toKeepChildTracesOutOfParentHistory()',
+    ].join('\n'),
+  }))
   return addBlockBeforeAnswer(message, block('live-final-artifacts', 'attachments', {
     title: 'Workbench verification artifacts',
     provenance: { origin: 'tool-output', toolCallId: 'loop-run-tests', toolName: 'run_tests' },
