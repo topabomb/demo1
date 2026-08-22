@@ -161,7 +161,7 @@ function pauseStream(): void { props.stream.pause() }
         <div><span>output</span><strong data-testid="diagnostic-output-tokens">{{ formatTokens(activeUsage.outputTokens) }}</strong></div>
         <div><span>provider cache hit</span><strong data-testid="diagnostic-cache-hit">{{ activeCacheHit === null ? 'n/a' : `${activeCacheHit}%` }}</strong></div>
         <div><span>context used</span><strong data-testid="diagnostic-context">{{ activeContext === null ? 'n/a' : `${activeContext}%` }}</strong></div>
-        <div><span>last turn</span><strong data-testid="last-turn-reason">{{ runtime.kernel.lastTurnReason ?? 'active' }}</strong></div>
+        <div><span>last turn outcome</span><strong data-testid="last-turn-reason">{{ runtime.kernel.lastTurnReason ?? 'none' }}</strong></div>
         <div><span>failure</span><strong data-testid="last-failure-code">{{ runtime.kernel.lastFailure?.code ?? '—' }}</strong></div>
       </div>
     </div>
