@@ -23,28 +23,41 @@ Automated tests must protect these boundaries:
 - `src/engine/**` never imports `src/demo/**`;
 - framework-neutral Engine layers do not depend on Vue/DOM/physical layout;
 - `src/engine/index.ts` excludes Vue/Demo implementation and tuning telemetry;
-- `src/engine/vue/index.ts` remains instance-oriented rather than exposing process-global renderer mutation;
-- external adapters own provider decoding, Agent/tool/child orchestration, child concurrency/provider selection, permission policy, persistence, retries and async IO;
-- Demo owns workspace/LRU, playback timing, realistic scripted output, scripted child lifecycles and diagnostics;
-- no core `PresentationSurface`, panel, sidebar, tab, drawer or editor-routing contract is introduced without a proven reusable multi-surface requirement;
+- `src/engine/vue/index.ts` remains an optional instance-oriented adapter;
+- external adapters own provider decoding, Agent/tool/child orchestration, child concurrency/provider selection, permission policy, connectors/authentication, real external side effects, persistence, retries and async IO;
+- Demo owns workspace/LRU, scripted coding/office scenarios, synthetic source/action evidence, child timing, playback and diagnostics;
+- no core `PresentationSurface`, panel, sidebar, tab, drawer or editor-routing contract is introduced without a proven reusable requirement;
 - canonical or RenderUnit contracts contain no CSS class, color, width, panel placement or host open action.
 
 ### Workbench semantic invariants
 
-- `ResourceRef` is the only canonical resource/location identity for resource-aware blocks and contains no host navigation behavior;
+- `ResourceRef` is the canonical host-neutral identity for files, URLs and artifacts; it contains no connector/open behavior;
 - `diff` uses `ResourceRef`, not a parallel `file` identity;
 - PlanItem describes intended/progress work and never replaces or derives `stepId`;
 - `ToolCategory` describes capability while `ToolPresentationIntent` independently describes renderer-neutral interpretation;
-- presentation intent remains limited to generic/resources/changes/terminal semantics and contains no physical placement;
+- presentation intent is limited to generic/resources/changes/terminal semantics and contains no physical placement or application routing;
 - tool call/result remain separate records correlated through producer-owned `callId`;
-- one canonical `delegation` block contains one or more stable `AgentRunRef`s rather than separate singular/plural concepts;
-- `AgentRunMode` is exactly parent-facing `foreground | background` observation and is never a scheduling command;
-- each delegated run has its own status, stable `runId` and optional `childSessionId`; child status never redefines parent `SessionStatus` or `lastTurnReason`;
-- parent delegation state never recursively embeds child `LogicalMessage[]`, child tool traces or nested child history;
-- child scheduling, concurrency, provider/worktree choice, permission, resume/interrupt and child-session navigation remain outside Engine;
-- terminal output is first-class canonical content rather than repeated opaque tool JSON;
-- append-only terminal output emits `append-terminal` and `ProjectionEngine.appendTerminalDelta(...)` updates one stable terminal RenderUnit while unrelated siblings retain identity;
-- terminal process lifecycle remains execution-adapter policy; Demo abort evidence must settle the terminal as `interrupted` with exit code `130`, never success.
+- one canonical `delegation` block contains one or more stable `AgentRunRef`s;
+- `AgentRunMode` is exactly parent-facing `foreground | background` observation, never a scheduling command;
+- child status never redefines parent `SessionStatus` or `lastTurnReason`;
+- parent delegation never recursively embeds child `LogicalMessage[]` or child tool history;
+- child scheduling, provider/worktree choice, permissions, resume/interrupt and child-session navigation remain outside Engine;
+- terminal output is first-class canonical content and append-only growth patches one stable RenderUnit;
+- terminal process lifecycle remains execution-adapter policy; Demo abort evidence settles terminal as `interrupted` with exit code `130`.
+
+### Office/knowledge-work boundary invariants
+
+Office Agent examples must **reuse generic rendering contracts**. In particular:
+
+- Engine must not introduce Gmail, Outlook, Calendar, Microsoft Graph, Workspace, Teams, SharePoint or provider-specific connector models;
+- Engine must not implement `sendEmail`, `scheduleMeeting`, `createEvent`, connector auth or recurring workflow execution;
+- mail threads, calendar events, documents and web evidence are represented as neutral `ResourceRef`s;
+- office tool activity uses the existing generic tool call/result + category + presentation-intent contracts;
+- Word/PowerPoint/Excel-style outputs are normal artifact attachments with ResourceRefs, not new Engine document-workflow types;
+- office specialist agents use the existing `delegation` contract;
+- a staged mail/calendar action is represented by ordinary tool evidence plus a typed session `PendingApproval`;
+- approving/denying clears the Engine blocker only; the real adapter decides whether to perform an external side effect;
+- Diagnostics scenario shortcuts, replay/reset and fixed demo coordinates remain under `src/demo/**`.
 
 ### Existing session/runtime invariants
 
@@ -53,10 +66,10 @@ Automated tests must protect these boundaries:
 - `SessionStatus` and `lastTurnReason` remain independent;
 - `status:'waiting'` exists iff one `pendingInteraction` exists;
 - `requestInteraction(...)` is the explicit working→waiting transition;
-- `resolveInteraction(...)` clears the blocker without inventing a Turn outcome;
+- `resolveInteraction(...)` clears the blocker without inventing a Turn outcome or side effect;
 - approval/question resolutions remain typed;
 - queue payloads are runtime state, not implied durable persistence;
-- realistic Demo scenarios enter through canonical `LogicalMessage + ContentBlock[]` only;
+- all Demo scenarios enter through canonical `LogicalMessage + ContentBlock[]` only;
 - presentation remains bounded/rebuildable;
 - semantic reader/Latest/anchor is independent from virtualizer measurement;
 - Demo playback/diagnostics never become Engine APIs;
@@ -66,24 +79,57 @@ Automated tests must protect these boundaries:
 
 Local and deployed suites exercise the same real behavior.
 
-### Default coding-agent workbench flow
+### Default coding-Agent flow
 
-The browser must prove the default public scenario, not a hidden fixture:
+The browser must prove the public default scenario:
 
-- the seeded first assistant Step visibly contains a Plan with one active and later completed items;
-- filesystem/search tools expose stable `callId`, capability category, `resources` presentation intent and ResourceRef labels;
-- Plan progress changes independently from actual model/tool Step coordinates;
-- Step 3 renders one `delegation` batch containing a completed foreground reviewer and two independently addressable background reviewers still running;
-- each delegated run exposes stable `runId`, `mode`, `status` and child-session address without rendering child trace recursively;
-- the parent advances into shell/terminal work while the background children are still represented independently;
-- the two background child statuses later settle to completed without redefining parent Turn/Session state;
-- shell verification exposes `terminal` presentation intent;
-- a standalone role:tool result streams a dedicated Terminal block through multiple deltas;
-- terminal output contains unit/build/Chromium evidence and settles with explicit status/exit code;
+- seeded first assistant Step visibly contains a Plan;
+- filesystem/search tools expose stable `callId`, capability category, ResourceRefs and `resources` presentation intent;
+- Plan progress changes independently from model/tool Step coordinates;
+- Step 3 renders one delegation batch with one completed foreground reviewer and two background reviewers still running;
+- each child exposes stable `runId`, `mode`, `status` and child-session address without recursive child trace;
+- parent advances into shell/terminal while background children remain independently live;
+- background child statuses settle independently;
+- a role:tool record streams a dedicated Terminal through multiple deltas and settles with explicit exit state;
 - projection incremental counters increase during terminal growth;
-- final synthesis includes rich GFM, resource-aware diff/code and artifacts;
+- final synthesis includes rich GFM, ResourceRef-aware diff/code and artifacts;
 - the original Plan reaches all-completed state;
-- mounted rows stay bounded and adjacent rows do not overlap throughout.
+- mounted rows stay bounded and adjacent rows do not overlap.
+
+### Diagnostics scenario controls
+
+The browser must prove the Demo-owned shortcuts actually expose the relevant evidence:
+
+- Restart agent loop reconstructs the synthetic Demo host rather than inventing an Engine reset API;
+- Plan jumps to the canonical Plan record;
+- Delegation jumps to the canonical multi-child record;
+- Terminal jumps to the canonical terminal/tool result;
+- Final jumps to final synthesis when available;
+- Executive briefing activates the office briefing session;
+- Meeting approval activates the waiting office follow-up session.
+
+### Executive briefing
+
+The browser must prove a realistic cross-source knowledge-work flow:
+
+- completed Plan is visible;
+- source-bearing tool evidence references a mail thread, calendar meeting, KPI document and external web update through ResourceRefs;
+- the same resource-oriented renderer handles those sources without office-provider-specific UI contracts;
+- one foreground specialist plus two background specialists render through `delegation`;
+- the final brief contains decision-oriented Markdown and source evidence;
+- DOCX, PPTX and XLSX deliverables render through ordinary attachment/artifact semantics.
+
+### Meeting follow-up approval
+
+The browser must prove an action-oriented office flow without simulating connector ownership inside Engine:
+
+- transcript, email and document context is represented by neutral resource-aware tool evidence;
+- Plan extracts/reconciles work and ends with the send/schedule item `blocked`;
+- the staged `send_meeting_followup` tool call is visible and correlated by `callId`;
+- session state is `waiting` with a typed approval;
+- Approve/Deny controls are rendered by the generic pending-interaction path;
+- resolving the approval removes the blocker and re-enables the composer;
+- tests do not claim a real email or calendar mutation occurred.
 
 ### General coverage
 
@@ -93,12 +139,12 @@ The suite also covers:
 - continuously growing GFM tables, tasks, nested lists, blockquotes and fenced code;
 - typed user question answers and independent approval behavior;
 - fresh idle sessions with no invented Turn outcome;
-- failure/resume and background execution while viewports are switched/evicted;
+- failure/resume and background execution while viewports switch/evict;
 - image/file/audio attachments, generated images, TTS/ASR, code, diff and sanitized HTML;
 - far jump, prepend, exact Latest/follow and session restore;
 - desktop/mobile reflow and variable-height content including expanded reasoning/terminal/delegation rows;
 - hostile host CSS without breaking reference adapter containment;
-- a focused public workspace with one-click Demo-owned Session diagnostics and no fake search/model/attachment/product controls.
+- a focused public workspace with one-click Demo-owned diagnostics and no fake product controls.
 
 ## Deterministic reference bounds
 
@@ -116,25 +162,25 @@ body horizontal overflow    <= 1 px
 virtual wrapper block gap   exactly 0 px margin/padding
 ```
 
-These are verification bounds for the reference implementation, not framework-neutral API constants. FPS/heap/long-task values remain diagnostics because shared CI hardware is noisy.
+These are verification bounds for the reference implementation, not framework-neutral API constants.
 
 ## Public API checks
 
-Architecture tests fail if the neutral entry exposes implementation details such as `SessionUiSnapshot`, `ShiftPlan`, `WINDOW_MESSAGES` or `SHIFT_MESSAGES`, or if workbench semantics acquire panel/layout/style/orchestration fields.
+Architecture tests fail if the neutral entry exposes implementation details such as `SessionUiSnapshot`, `ShiftPlan`, `WINDOW_MESSAGES` or `SHIFT_MESSAGES`, or if workbench semantics acquire panel/layout/style/orchestration/connector fields.
 
-Architecture tests also assert the stable semantic additions (`ResourceRef`, PlanItem, ToolPresentationIntent, AgentRunMode/AgentRunRef, canonical `delegation` and terminal append support), the absence of the superseded singular `agent-run` block, and the absence of a speculative `PresentationSurface` core API.
+Tests also assert stable `ResourceRef`, PlanItem, ToolPresentationIntent, AgentRunMode/AgentRunRef, canonical delegation and terminal append support; the absence of the superseded singular `agent-run`; and the absence of speculative `PresentationSurface` or office-provider-specific core APIs.
 
-The Vue API remains an optional reference adapter. Plan/Terminal/Delegation components and `workbench-renderers.css` may define physical presentation but cannot change canonical semantics. Every Engine Vue stylesheet must remain rooted at `[data-conversation-engine].conversation-shell` and must not reset `html`, `body` or `#app`.
+The Vue API remains an optional reference adapter. Plan/Terminal/Delegation components and Engine Vue styles may define physical presentation but cannot change canonical semantics. Every Engine Vue stylesheet remains rooted at `[data-conversation-engine].conversation-shell`.
 
-The repository verifies source-level reuse; its package manifest disables npm publication. Package distribution requires a separate library-build/export-map/consumer-smoke-test decision.
+The repository verifies source-level reuse; package distribution requires a separate library-build/export-map/consumer-smoke decision.
 
 ## Workflow policy
 
-- `pnpm-lock.yaml` is committed and CI uses `--frozen-lockfile`.
-- Node/pnpm versions are explicit.
-- PRs run the full validation gate but never deploy Pages.
-- `main` deploys only after validation succeeds.
-- main release concurrency is isolated from merged-PR cleanup.
+- `pnpm-lock.yaml` is committed and CI uses `--frozen-lockfile`;
+- Node/pnpm versions are explicit;
+- PRs run the full validation gate but never deploy Pages;
+- `main` deploys only after validation succeeds;
+- main release concurrency is isolated from merged-PR cleanup;
 - failures upload Playwright reports.
 
 ## Release evidence
