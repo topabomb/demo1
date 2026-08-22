@@ -5,9 +5,10 @@ import {
   addFinalEvidence,
   agentMarkdownDelta,
   createLiveAssistantStep,
+  createLiveToolCall,
   createLiveToolResult,
   liveToolForStep,
-  setLiveToolCall,
+  updateLiveToolCall,
 } from '../src/demo/live-run-script'
 import { createScenarioTail } from '../src/demo/session-scenarios'
 
@@ -55,13 +56,19 @@ describe('public Demo scenarios', () => {
     expect(specs.map(spec => spec.category)).toEqual(['filesystem', 'search', 'shell'])
     expect(new Set(specs.map(spec => spec.callId)).size).toBe(3)
 
-    let assistant = liveMessage(1)
-    assistant = setLiveToolCall(assistant, specs[0]!, 'running', 25)
-    assistant = setLiveToolCall(assistant, specs[0]!, 'success', 100)
-    const result = createLiveToolResult(assistant, specs[0]!)
+    const assistant = liveMessage(1)
+    const callEntry = createLiveToolCall(assistant, specs[0]!)
+    let callMessage: LogicalMessage = {
+      id: 'demo:m-10', index: 10, turnId: callEntry.turnId, stepId: callEntry.stepId,
+      role: callEntry.role, blocks: callEntry.blocks, live: callEntry.live,
+    }
+    callMessage = updateLiveToolCall(callMessage, specs[0]!, 'success', 100)
+    const result = createLiveToolResult(callMessage, specs[0]!)
     const next = createLiveAssistantStep(assistant.turnId, 2)
-    const call = assistant.blocks.find(contentBlock => contentBlock.type === 'tool-call')
+    const call = callMessage.blocks.find(contentBlock => contentBlock.type === 'tool-call')
+    expect(callEntry).toMatchObject({ turnId: assistant.turnId, stepId: assistant.stepId, role: 'assistant', live: true })
     expect(call?.type === 'tool-call' ? call.data.callId : null).toBe(specs[0]!.callId)
+    expect(call?.type === 'tool-call' ? call.data.status : null).toBe('success')
     expect(result).toMatchObject({ turnId: assistant.turnId, stepId: assistant.stepId, role: 'tool' })
     expect(result.blocks[0]?.type === 'tool-result' ? result.blocks[0].data.callId : null).toBe(specs[0]!.callId)
     expect(next).toMatchObject({ turnId: assistant.turnId, stepId: `${assistant.turnId}:step-2`, role: 'assistant', live: true })
