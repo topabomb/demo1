@@ -101,6 +101,8 @@ test('New session is a real empty resumable conversation and the public sidebar 
   await page.getByTestId('new-session').click()
   await expect(page.getByTestId('active-session-id')).toHaveText('new-1')
   await expect(page.getByTestId('empty-conversation')).toBeVisible()
+  await expect(page.locator('.run-status')).toContainText('Idle')
+  await expect(page.getByTestId('last-turn-reason')).toHaveText('active')
   await send(page, 'implement a fresh agent task')
   await expect(page.getByTestId('logical-count')).toHaveText('2')
   await expect(page.locator('[data-message-index="0"]')).toContainText('implement a fresh agent task')
