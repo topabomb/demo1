@@ -92,11 +92,11 @@ export function normalizeTokenUsage(usage?: Partial<TokenUsage>): TokenUsage {
   }
 }
 
+/** Live status alone never invents a historical Turn outcome. */
 export function defaultTurnReason(status: SessionStatus): TurnEndReasonKind | null {
-  if (status === 'working') return null
   if (status === 'waiting') return 'blocked'
   if (status === 'interrupted') return 'interrupted'
-  return 'completed'
+  return null
 }
 
 function nonNegative(value: number | undefined): number {
