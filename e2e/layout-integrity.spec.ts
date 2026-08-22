@@ -67,7 +67,7 @@ async function anchorDrift(page: Page, anchor: { id: string; top: number }): Pro
   }, anchor)
 }
 
-test('architecture proof exposes layout-agnostic Engine, adapter and Demo responsibilities', async ({ page }) => {
+test('architecture proof exposes layout-agnostic Engine, delegation, adapter and Demo responsibilities', async ({ page }) => {
   await openLab(page)
   await page.getByTestId('architecture-link').click()
   await expect(page.getByTestId('architecture-page')).toBeVisible()
@@ -76,10 +76,10 @@ test('architecture proof exposes layout-agnostic Engine, adapter and Demo respon
   await expect(page.getByRole('heading', { name: /concepts that must not collapse into each other/i })).toBeVisible()
   await expect(page.getByRole('heading', { name: /rich workbench output does not change the scaling law/i })).toBeVisible()
 
-  for (const name of ['Canonical identity', 'Workbench semantics', 'SessionKernel', 'History source', 'Projection', 'Semantic viewport', 'Vue reference adapter']) {
+  for (const name of ['Canonical identity', 'Workbench semantics', 'Delegated child refs', 'SessionKernel', 'History source', 'Projection', 'Semantic viewport', 'Vue reference adapter']) {
     await expect(page.getByText(name, { exact: true })).toBeVisible()
   }
-  for (const name of ['Plan ≠ Step', 'Tool category ≠ presentation intent', 'ResourceRef ≠ host action', 'AgentRunRef ≠ subagent runtime', 'Semantic content ≠ layout surface']) {
+  for (const name of ['Plan ≠ Step', 'Tool category ≠ presentation intent', 'ResourceRef ≠ host action', 'Delegation ≠ subagent runtime', 'Child status ≠ parent status', 'Child reference ≠ child trace', 'Semantic content ≠ layout surface']) {
     await expect(page.getByText(name, { exact: true })).toBeVisible()
   }
   for (const name of ['External adapters', 'Framework-neutral Engine', 'Demo host']) {
@@ -88,7 +88,8 @@ test('architecture proof exposes layout-agnostic Engine, adapter and Demo respon
 
   await expect(page.getByText(/O\(delta \+ mutable tail\)/)).toBeVisible()
   await expect(page.getByText('Streaming terminal', { exact: true })).toBeVisible()
-  await expect(page.getByText(/Host decides panels, navigation and actions/)).toBeVisible()
+  await expect(page.getByText('Delegation status update', { exact: true })).toBeVisible()
+  await expect(page.getByText(/Child traces remain in child sessions/)).toBeVisible()
   await expect(page.getByText(/no core PresentationSurface/)).toBeVisible()
   await expect(page.getByText(/package publishing disabled/i)).toBeVisible()
   await page.getByTestId('launch-lab').click()
