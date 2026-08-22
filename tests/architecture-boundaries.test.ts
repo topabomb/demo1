@@ -94,7 +94,7 @@ describe('engine architecture boundaries', () => {
     expect(adapter).toContain('async DB/network fetching stays')
   })
 
-  it('never infers provider execution or interaction semantics inside SessionKernel', () => {
+  it('never infers provider execution, blocker policy or Turn outcomes inside SessionKernel', () => {
     const contracts = readFileSync(join(engineRoot, 'conversation/contracts.ts'), 'utf8')
     const kernel = readFileSync(join(engineRoot, 'conversation/session-kernel.ts'), 'utf8')
     const runtime = readFileSync(join(engineRoot, 'runtime/session-runtime.ts'), 'utf8')
@@ -103,9 +103,14 @@ describe('engine architecture boundaries', () => {
 
     expect(contracts).toContain("| { kind: 'question'; answer: string | null }")
     expect(contracts).toContain('activeAssistantIndex?: number | null')
+    expect(contracts).not.toMatch(/TurnEndReasonKind[\s\S]*\| 'blocked'/)
     expect(kernel).toContain('descriptor.activeAssistantIndex')
     expect(kernel).not.toMatch(/(?:history|backend)\.count\s*-\s*1/)
+    expect(kernel).toContain('requestInteraction(interaction: PendingInteraction)')
     expect(kernel).toContain('resolveInteraction(resolution: InteractionResolution)')
+    expect(kernel).not.toContain('resolution.approved')
+    expect(kernel).not.toContain('resolution.answer === null')
+    expect(kernel).not.toContain('defaultTurnReason')
     expect(kernel).not.toContain('agent-loop')
     expect(kernel).not.toContain('estimateTokens')
     expect(runtime).not.toMatch(/streamTarget|liveChunkCount|mountedRows|jumpInput/)
@@ -143,7 +148,8 @@ describe('engine architecture boundaries', () => {
     expect(diagnostics).toContain('Demo observability')
     expect(diagnostics).toContain('Demo playback')
     expect(diagnostics).toContain('uiState.activeRenderUnitCount')
-    expect(diagnostics).toContain('Session diagnostics')
+    expect(diagnostics).toContain('last turn outcome')
+    expect(diagnostics).toContain("lastTurnReason ?? 'none'")
   })
 
   it('keeps the public workspace focused and diagnostics explicit', () => {
@@ -217,6 +223,8 @@ describe('engine architecture boundaries', () => {
   it('keeps the architecture page aligned with current repository boundaries', () => {
     const page = readFileSync(join(demoRoot, 'components/ArchitectureOverview.vue'), 'utf8')
     expect(page).toContain('docs/architecture.md')
+    expect(page).toContain('package publishing disabled')
+    expect(page).not.toContain('Private Vite application')
     expect(page).not.toContain('agent-workspace-reference-architecture.md')
     expect(page).not.toContain('DeepSeek Harness')
     expect(page).not.toContain('Session + Workspace Kernel')
