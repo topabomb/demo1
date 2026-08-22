@@ -46,7 +46,6 @@ export interface PendingApproval extends PendingInteractionBase {
 
 export interface PendingQuestion extends PendingInteractionBase {
   kind: 'question'
-  placeholder?: string
 }
 
 export type PendingInteraction = PendingApproval | PendingQuestion
