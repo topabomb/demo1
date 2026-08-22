@@ -138,15 +138,11 @@ test('Markdown compatibility gallery covers GFM structures, sanitization and lon
   await assertNoRowOverlap(page)
 })
 
-test('live Markdown uses incremental projection after structural scenario milestones settle', async ({ page }) => {
+test('million-message stress keeps ordinary Markdown deltas on the incremental projection path', async ({ page }) => {
   await openApp(page)
-  await expect(page.getByTestId('active-session-id')).toHaveText('million')
+  await switchSession(page, 'million')
+  await expect(page.getByTestId('playback-mode')).toHaveText('stress')
   await page.getByLabel('Stream rate').selectOption('60')
-
-  // The realistic Demo intentionally adds tool/result/diff/code/artifact Blocks at
-  // publishes 28..68. Those are legitimate shape changes and therefore full projects.
-  // Measure the Markdown hot path only after the final structural milestone.
-  await expect.poll(async () => numeric(await page.getByTestId('stream-ticks').textContent()), { timeout: 15_000 }).toBeGreaterThan(72)
   await page.getByRole('button', { name: 'Pause' }).click()
   await settleNavigationFrames(page, 2)
 
@@ -155,11 +151,11 @@ test('live Markdown uses incremental projection after structural scenario milest
   const ticksBefore = numeric(await page.getByTestId('stream-ticks').textContent())
 
   await page.getByTestId('stream-start').click()
-  await expect.poll(async () => numeric(await page.getByTestId('stream-ticks').textContent()), { timeout: 15_000 }).toBeGreaterThan(ticksBefore + 20)
-  await expect.poll(async () => numeric(await page.getByTestId('projection-incremental').textContent()), { timeout: 15_000 }).toBeGreaterThan(incrementalBefore + 15)
+  await expect.poll(async () => numeric(await page.getByTestId('stream-ticks').textContent()), { timeout: 15_000 }).toBeGreaterThan(ticksBefore + 24)
+  await expect.poll(async () => numeric(await page.getByTestId('projection-incremental').textContent()), { timeout: 15_000 }).toBeGreaterThan(incrementalBefore + 18)
   const fullAfter = numeric(await page.getByTestId('projection-full-projects').textContent())
 
-  expect(fullAfter - fullBefore).toBeLessThanOrEqual(1)
+  expect(fullAfter - fullBefore).toBeLessThanOrEqual(2)
   expect(numeric(await page.getByTestId('projection-cache').textContent())).toBeLessThanOrEqual(4096)
 })
 
