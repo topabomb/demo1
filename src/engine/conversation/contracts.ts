@@ -1,7 +1,7 @@
 import type { ContentBlockMap, LogicalMessage } from '../model/conversation'
 
-/** Current session execution state. `waiting` is reserved for one pending user interaction. */
-export type SessionStatus = 'idle' | 'working' | 'waiting' | 'interrupted'
+/** Current live session execution state. Settled outcomes such as interruption live in `lastTurnReason`. */
+export type SessionStatus = 'idle' | 'working' | 'waiting'
 
 /** Explicitly settled Turn outcomes. A waiting interaction is live state, not an end reason. */
 export type TurnEndReasonKind =
