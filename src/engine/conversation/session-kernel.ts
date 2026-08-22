@@ -67,13 +67,13 @@ export class ConversationSessionKernel {
     this.title = descriptor.title
     this.history = history
     this.#status = descriptor.status
-    this.#pendingInteraction = descriptor.pendingInteraction ?? null
+    this.#pendingInteraction = clonePendingInteraction(descriptor.pendingInteraction ?? null)
     this.#activePlan = cloneWorkPlan(descriptor.activePlan ?? null)
     if ((this.#status === 'waiting') !== (this.#pendingInteraction !== null)) {
       throw new Error('waiting session state requires exactly one pending interaction')
     }
     this.#lastTurnReason = descriptor.lastTurnReason ?? null
-    this.#lastFailure = descriptor.lastFailure ?? null
+    this.#lastFailure = descriptor.lastFailure ? { ...descriptor.lastFailure } : null
     this.#usage = normalizeTokenUsage(descriptor.usage)
     this.#context = descriptor.context
       ? { ...descriptor.context }
@@ -99,7 +99,7 @@ export class ConversationSessionKernel {
 
   get lastEvent(): SessionKernelEvent { return this.#lastEvent }
   get status(): SessionStatus { return this.#status }
-  get pendingInteraction(): PendingInteraction | null { return this.#pendingInteraction }
+  get pendingInteraction(): PendingInteraction | null { return clonePendingInteraction(this.#pendingInteraction) }
   get activePlan(): WorkPlan | null { return cloneWorkPlan(this.#activePlan) }
   get queuedPrompts(): number { return this.#queuedPrompts.length }
   get currentAssistantIndex(): number | null { return this.#currentAssistantIndex }
@@ -123,10 +123,10 @@ export class ConversationSessionKernel {
       logicalCount: this.count,
       unread: this.#unread,
       queuedPrompts: this.queuedPrompts,
-      pendingInteraction: this.#pendingInteraction,
+      pendingInteraction: clonePendingInteraction(this.#pendingInteraction),
       activePlan: this.activePlan,
       lastTurnReason: this.#lastTurnReason,
-      lastFailure: this.#lastFailure,
+      lastFailure: this.lastFailure,
       usage: this.usage,
       context: this.context,
       turnCount: this.#turnCount,
@@ -227,7 +227,7 @@ export class ConversationSessionKernel {
   }
 
   startExecution(currentAssistantIndex: number | null = null): boolean {
-    if (this.#pendingInteraction) return false
+    if (this.#pendingInteraction || this.#status === 'working') return false
     if (currentAssistantIndex !== null) this.#assertAssistantMessage(currentAssistantIndex)
     this.#currentAssistantIndex = currentAssistantIndex
     this.#status = 'working'
@@ -251,7 +251,7 @@ export class ConversationSessionKernel {
     if (this.#pendingInteraction) throw new Error(`interaction ${this.#pendingInteraction.id} is already pending`)
     if (this.#status !== 'working') throw new Error('cannot request an interaction when execution is not working')
     const index = this.#currentAssistantIndex
-    this.#pendingInteraction = { ...interaction }
+    this.#pendingInteraction = clonePendingInteraction(interaction)
     this.#status = 'waiting'
     this.#lastTurnReason = null
     this.#lastFailure = null
@@ -263,6 +263,7 @@ export class ConversationSessionKernel {
   }
 
   finishExecution(reason: TurnEndReasonKind, failure: LlmFailure | null = null): void {
+    if (this.#pendingInteraction) throw new Error(`cannot finish execution while interaction ${this.#pendingInteraction.id} is pending`)
     const index = this.#currentAssistantIndex
     this.#status = reason === 'aborted' || reason === 'interrupted' ? 'interrupted' : 'idle'
     this.#lastTurnReason = reason
@@ -306,6 +307,9 @@ export class ConversationSessionKernel {
   resolveInteraction(resolution: InteractionResolution): void {
     const pending = this.#pendingInteraction
     if (!pending) return
+    if (pending.id !== resolution.interactionId) {
+      throw new Error(`interaction ${resolution.interactionId} is stale; current interaction is ${pending.id}`)
+    }
     if (pending.kind !== resolution.kind) throw new Error(`interaction ${pending.id} expects ${pending.kind} resolution`)
 
     this.#pendingInteraction = null
@@ -338,6 +342,10 @@ export class ConversationSessionKernel {
     for (const listener of this.#eventListeners) listener(event)
     this.#notifier.markDirty()
   }
+}
+
+function clonePendingInteraction(interaction: PendingInteraction | null): PendingInteraction | null {
+  return interaction ? { ...interaction } : null
 }
 
 function cloneWorkPlan(plan: WorkPlan | null): WorkPlan | null {
