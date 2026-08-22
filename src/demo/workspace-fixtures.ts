@@ -26,6 +26,7 @@ const approval: PendingInteraction = {
   title: 'Approve production config edit',
   detail: 'The agent prepared an exact change to src/runtime/config.ts and is waiting before applying it. This blocker belongs to the session and survives navigation or viewport eviction.',
   toolName: 'edit_file',
+  callId: 'config-edit-approval',
 }
 
 const meetingFollowupApproval: PendingInteraction = {
@@ -34,6 +35,7 @@ const meetingFollowupApproval: PendingInteraction = {
   title: 'Approve follow-up and Friday review',
   detail: 'The agent has staged the exact follow-up message and 30-minute Friday review. Approving lets the external productivity adapter perform the send/schedule action; denying leaves both untouched.',
   toolName: 'send_meeting_followup',
+  callId: 'meeting-followup-approval',
 }
 
 const question: PendingInteraction = {
