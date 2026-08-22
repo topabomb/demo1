@@ -3,6 +3,7 @@ export type BuiltinToolCategory = 'generic' | 'search' | 'filesystem' | 'shell' 
 export type ToolCategory = BuiltinToolCategory | (string & {})
 export type AttachmentKind = 'image' | 'audio' | 'video' | 'file'
 
+/** ResourceRef.kind is exactly: kind: 'file' | 'url' | 'artifact'. The alias is shared by public contracts. */
 export type ResourceKind = 'file' | 'url' | 'artifact'
 export interface ResourceRange {
   startLine: number
