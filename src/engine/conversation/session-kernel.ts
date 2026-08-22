@@ -11,10 +11,11 @@ import type {
   SessionStatus,
   TokenUsage,
   TurnEndReasonKind,
+  WorkPlan,
 } from './contracts'
 import { normalizeTokenUsage } from './session-semantics'
 
-export type SessionKernelEventKind = 'content' | 'append' | 'status' | 'queue' | 'interaction' | 'foreground' | 'usage'
+export type SessionKernelEventKind = 'content' | 'append' | 'status' | 'queue' | 'interaction' | 'foreground' | 'usage' | 'plan'
 export type SessionKernelContentPatch =
   | { kind: 'append-markdown'; blockId: string; delta: string }
   | { kind: 'append-reasoning'; blockId: string; delta: string }
@@ -42,6 +43,7 @@ export class ConversationSessionKernel {
   #overrides = new Map<number, LogicalMessage>()
   #status: SessionStatus
   #pendingInteraction: PendingInteraction | null
+  #activePlan: WorkPlan | null
   #queuedPrompts: string[] = []
   #foreground = false
   #unread = false
@@ -66,6 +68,7 @@ export class ConversationSessionKernel {
     this.history = history
     this.#status = descriptor.status
     this.#pendingInteraction = descriptor.pendingInteraction ?? null
+    this.#activePlan = cloneWorkPlan(descriptor.activePlan ?? null)
     if ((this.#status === 'waiting') !== (this.#pendingInteraction !== null)) {
       throw new Error('waiting session state requires exactly one pending interaction')
     }
@@ -97,6 +100,7 @@ export class ConversationSessionKernel {
   get lastEvent(): SessionKernelEvent { return this.#lastEvent }
   get status(): SessionStatus { return this.#status }
   get pendingInteraction(): PendingInteraction | null { return this.#pendingInteraction }
+  get activePlan(): WorkPlan | null { return cloneWorkPlan(this.#activePlan) }
   get queuedPrompts(): number { return this.#queuedPrompts.length }
   get currentAssistantIndex(): number | null { return this.#currentAssistantIndex }
   get count(): number { return this.history.count + this.#appended.length }
@@ -120,6 +124,7 @@ export class ConversationSessionKernel {
       unread: this.#unread,
       queuedPrompts: this.queuedPrompts,
       pendingInteraction: this.#pendingInteraction,
+      activePlan: this.activePlan,
       lastTurnReason: this.#lastTurnReason,
       lastFailure: this.#lastFailure,
       usage: this.usage,
@@ -135,6 +140,17 @@ export class ConversationSessionKernel {
     this.#foreground = value
     if (value) this.#unread = false
     if (changed) this.#emit({ kind: 'foreground' }, false)
+  }
+
+  /**
+   * Explicit producer/session state. Historical plan blocks are snapshots and this
+   * value is never inferred by scanning message order or rendered DOM.
+   */
+  setActivePlan(plan: WorkPlan | null): void {
+    const next = cloneWorkPlan(plan)
+    if (sameWorkPlan(this.#activePlan, next)) return
+    this.#activePlan = next
+    this.#emit({ kind: 'plan' })
   }
 
   getMessage(index: number): LogicalMessage {
@@ -322,6 +338,19 @@ export class ConversationSessionKernel {
     for (const listener of this.#eventListeners) listener(event)
     this.#notifier.markDirty()
   }
+}
+
+function cloneWorkPlan(plan: WorkPlan | null): WorkPlan | null {
+  return plan ? { title: plan.title, items: plan.items.map(item => ({ ...item })) } : null
+}
+
+function sameWorkPlan(left: WorkPlan | null, right: WorkPlan | null): boolean {
+  if (left === right) return true
+  if (!left || !right || left.title !== right.title || left.items.length !== right.items.length) return false
+  return left.items.every((item, index) => {
+    const other = right.items[index]
+    return other !== undefined && item.id === other.id && item.text === other.text && item.status === other.status
+  })
 }
 
 function now(): number { return typeof performance !== 'undefined' ? performance.now() : Date.now() }
