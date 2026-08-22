@@ -21,6 +21,14 @@ const approval: PendingInteraction = {
   toolName: 'edit_file',
 }
 
+const meetingFollowupApproval: PendingInteraction = {
+  id: 'approval-meeting-followup',
+  kind: 'approval',
+  title: 'Approve follow-up and Friday review',
+  detail: 'The agent has staged the exact follow-up message and 30-minute Friday review. Approving lets the external productivity adapter perform the send/schedule action; denying leaves both untouched.',
+  toolName: 'send_meeting_followup',
+}
+
 const question: PendingInteraction = {
   id: 'question-android-target',
   kind: 'question',
@@ -40,12 +48,22 @@ export const RECENT_SESSIONS: readonly DemoSessionSeed[] = [
     usage: usage(52_000, 7_900, 218_000, 11_000, 2_400), context: { projectedTokens: 68_200, contextWindow: 128_000 }, turnCount: 3_800, stepCount: 7_600,
   },
   {
-    id: 'million', title: 'Million-message streaming stress', age: '2m', status: 'working', logicalCount: 1_000_000,
+    id: 'office-briefing', title: 'Monday executive briefing', age: '3m', status: 'idle', logicalCount: 62_000,
+    seedOffset: 41, scenario: 'executive-briefing', lastTurnReason: 'completed',
+    usage: usage(47_000, 6_800, 192_000, 9_400, 1_900), context: { projectedTokens: 61_300, contextWindow: 128_000 }, turnCount: 2_900, stepCount: 5_600,
+  },
+  {
+    id: 'office-followup', title: 'Launch meeting follow-up', age: '8m', status: 'waiting', logicalCount: 36_000,
+    seedOffset: 67, scenario: 'meeting-followup', pendingInteraction: meetingFollowupApproval,
+    usage: usage(29_000, 4_300, 116_000, 6_100, 1_100), context: { projectedTokens: 44_800, contextWindow: 128_000 }, turnCount: 1_700, stepCount: 3_200,
+  },
+  {
+    id: 'million', title: 'Million-message streaming stress', age: '12m', status: 'working', logicalCount: 1_000_000,
     seedOffset: 0, liveTail: true, scenario: 'release-investigation', playbackMode: 'stress',
     usage: usage(184_000, 12_600, 936_000, 31_000, 3_900), context: { projectedTokens: 103_400, contextWindow: 128_000 }, turnCount: 42_100, stepCount: 81_900,
   },
   {
-    id: 'dsh-transport', title: 'Agent transport refactor', age: '14m', status: 'idle', logicalCount: 180_000,
+    id: 'dsh-transport', title: 'Agent transport refactor', age: '24m', status: 'idle', logicalCount: 180_000,
     seedOffset: 101, scenario: 'transport-refactor', lastTurnReason: 'completed',
     usage: usage(62_000, 8_400, 281_000, 14_000, 2_100), context: { projectedTokens: 74_200, contextWindow: 128_000 }, turnCount: 8_200, stepCount: 15_400,
   },
