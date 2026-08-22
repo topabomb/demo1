@@ -3,7 +3,7 @@ import { block, type AppendCanonicalMessage, type ContentBlock, type LogicalMess
 export const STRESS_REASONING_PUBLISHES = 18
 export const AGENT_REASONING_PUBLISHES = 6
 export const AGENT_TOOL_CALL_PUBLISH = 12
-export const AGENT_TOOL_RESULT_PUBLISH = 18
+export const AGENT_TOOL_RESULT_PUBLISH = 6
 export const AGENT_FINAL_STEP = 4
 export const AGENT_FINAL_DIFF_PUBLISH = 14
 export const AGENT_FINAL_CODE_PUBLISH = 20
@@ -32,20 +32,20 @@ const TOOL_STEPS: Readonly<Record<number, LiveToolSpec>> = {
     callId: 'loop-search-boundaries',
     category: 'search',
     input: { query: 'stepId callId projection fullProjects incrementalPatches', scope: 'src/engine' },
-    output: { matches: 17, files: ['conversation/session-kernel.ts', 'presentation/projection-engine.ts', 'runtime/session-runtime.ts'], finding: 'Turn/Step identity is provider-owned and physical viewport state is independent' },
+    output: { matches: 17, files: ['conversation/session-kernel.ts', 'presentation/projection-engine.ts', 'runtime/session-runtime.ts'], finding: 'Turn/Step identity is producer-owned and physical viewport state is independent' },
   },
   3: {
     name: 'run_tests',
     callId: 'loop-run-tests',
     category: 'shell',
     input: { command: 'pnpm test && pnpm build && pnpm test:e2e', cwd: '/workspace/demo1' },
-    output: { unit: '67+ passed', build: 'passed', chromium: 'running', exitCode: 0 },
+    output: { unit: 'passed', build: 'passed', chromium: 'running', exitCode: 0 },
   },
 }
 
 const STEP_MARKDOWN: Readonly<Record<number, readonly string[]>> = {
   1: [
-    '### Step 2 · Inspect the projection path\n\nThe first CI clue points at the rendering boundary. I am keeping the canonical message untouched while checking how a live Markdown tail becomes keyed `RenderUnit`s. ',
+    '### Step 1 · Inspect the projection path\n\nThe first CI clue points at the rendering boundary. I am keeping the canonical message untouched while checking how a live Markdown tail becomes keyed `RenderUnit`s. ',
     '\n\n| Surface | Owner | Invariant |\n| --- | --- | --- |\n',
     '| canonical history | SessionKernel | stable Message/Turn/Step identity |\n| live projection | ProjectionEngine | patch changed tail only |\n',
     '| physical rows | Vue/Virtua adapter | measurement cannot redefine reader position |\n\n',
@@ -53,7 +53,7 @@ const STEP_MARKDOWN: Readonly<Record<number, readonly string[]>> = {
     '> A virtual row may remount because its height changed; the semantic conversation coordinate must not.\n\n',
   ],
   2: [
-    '### Step 3 · Correlate engine boundaries\n\nThe file read confirms the hot-path behavior, so I am following correlation and lifecycle references before changing anything. ',
+    '### Step 2 · Correlate engine boundaries\n\nThe file read confirms the hot-path behavior, so I am following correlation and lifecycle references before changing anything. ',
     '\n\n1. `turnId` groups the complete user-level run.\n2. `stepId` identifies each model/tool loop iteration.\n',
     '\n   - Tool call and result correlate by producer-owned `callId`.\n   - Artifact provenance points back to the producing call.\n\n',
     '```ts\nconst semanticKey = `${message.turnId}:${message.stepId}`\n',
@@ -61,15 +61,15 @@ const STEP_MARKDOWN: Readonly<Record<number, readonly string[]>> = {
     '| Boundary | May know provider policy? | May know DOM? |\n| --- | ---: | ---: |\n| SessionKernel | no | no |\n| Demo execution adapter | yes | no |\n| Vue viewport adapter | no | yes |\n\n',
   ],
   3: [
-    '### Step 4 · Verify under load\n\nThe architecture is consistent. I am running the release gate while the same Turn stays live and the viewport continues measuring rich content. ',
+    '### Step 3 · Verify under load\n\nThe architecture is consistent. I am running the release gate while the same Turn stays live and the viewport continues measuring rich content. ',
     '\n\n| Verification | Expected | Live state |\n| --- | --- | --- |\n| unit + architecture | deterministic | passing |\n',
     '| strict build | no type drift | passing |\n| Chromium | no row overlap / no page overflow | running |\n\n',
     '```text\nlogical history      -> 1,000,000+\nhot projection      -> bounded window\nmounted DOM          -> visible rows only\n',
     'stream mutation     -> changed message only\n```\n\n',
-    '> Structural tool milestones may rebuild one changed message; ordinary Markdown deltas stay on the incremental path.\n\n',
+    '> Structural tool/message transitions may project new canonical records; ordinary Markdown deltas stay on the incremental path.\n\n',
   ],
   4: [
-    '## Final synthesis\n\nThe loop has now completed three distinct tool phases and returned to a normal assistant synthesis step. The fix stays inside the smallest responsible boundary. ',
+    '## Final synthesis\n\nThe loop has now completed three distinct live tool phases and returned to a normal assistant synthesis step. The fix stays inside the smallest responsible boundary. ',
     '\n\n### What changed\n\n- Engine lifecycle counts one Turn across separately appended Step records.\n- Demo orchestration owns the synthetic multi-step script.\n- Renderer/tool presentation remains provider-neutral.\n\n',
     '| Property | Result |\n| --- | --- |\n| stable Turn identity | yes |\n| multiple Step records | yes |\n| filesystem/search/shell tools | correlated |\n| Markdown streaming | incremental |\n| virtualized DOM | bounded |\n\n',
     '### Release checklist\n\n- [x] canonical tool correlation\n- [x] parser-aligned GFM chunking\n- [x] stable RenderUnit identities\n- [x] responsive containment\n- [ ] deployed Chromium verification\n\n',
@@ -88,7 +88,7 @@ export function parseStepOrdinal(message: LogicalMessage): number {
 
 export function agentReasoningDelta(stepOrdinal: number, tick: number): string {
   const phrases = [
-    `Step ${stepOrdinal + 1}: preserve canonical identity before touching presentation policy. `,
+    `Step ${stepOrdinal}: preserve canonical identity before touching presentation policy. `,
     'Separate producer/tool semantics from viewport measurement and product chrome. ',
     'Inspect only the changed hot state; never scan total history for ordinary UI work. ',
     'Keep tool correlation explicit so a remount cannot change business identity. ',
@@ -103,7 +103,7 @@ export function agentMarkdownDelta(stepOrdinal: number, markdownTick: number): s
   const cycle = markdownTick - scripted.length
   const variants = [
     `### Ongoing verification ${cycle + 1}\n\nThe stream is still growing after the structured blocks above. Only the active Markdown tail is reparsed and republished; settled prefix units keep identity.\n\n`,
-    `| live check | value |\n| --- | --- |\n| step | ${stepOrdinal + 1} |\n| sample | ${cycle + 1} |\n| semantic reader | preserved |\n\n`,
+    `| live check | value |\n| --- | --- |\n| step | ${stepOrdinal} |\n| sample | ${cycle + 1} |\n| semantic reader | preserved |\n\n`,
     '```ts\nconst next = appendMarkdownDelta(current, delta)\n// projector reuses every settled prefix RenderUnit\n```\n\n',
     '- [x] stream continues\n- [x] tool records stay correlated\n- [x] layout remains measurable\n\n',
     '> Rich Markdown can change physical height without changing Turn, Step or reader identity.\n\n',
@@ -143,9 +143,32 @@ export function settleReasoningBlock(message: LogicalMessage): LogicalMessage | 
   return { ...message, blocks }
 }
 
-export function setLiveToolCall(message: LogicalMessage, spec: LiveToolSpec, status: 'running' | 'success', progress: number): LogicalMessage {
+export function createLiveToolCall(message: LogicalMessage, spec: LiveToolSpec): AppendCanonicalMessage {
+  return {
+    turnId: message.turnId,
+    stepId: message.stepId,
+    role: 'assistant',
+    live: true,
+    blocks: [block(`live-tool-call-${spec.callId}`, 'tool-call', {
+      name: spec.name,
+      callId: spec.callId,
+      category: spec.category,
+      model: spec.model,
+      status: 'running',
+      progress: 10,
+      input: spec.input,
+      durationMs: 0,
+      defaultOpen: false,
+    })],
+  }
+}
+
+export function updateLiveToolCall(message: LogicalMessage, spec: LiveToolSpec, status: 'running' | 'success', progress: number): LogicalMessage {
   const id = `live-tool-call-${spec.callId}`
-  const replacement = block(id, 'tool-call', {
+  const blocks = [...message.blocks]
+  const index = blocks.findIndex(entry => entry.id === id && entry.type === 'tool-call')
+  if (index < 0) throw new Error(`tool call ${spec.callId} missing from active assistant record`)
+  blocks[index] = block(id, 'tool-call', {
     name: spec.name,
     callId: spec.callId,
     category: spec.category,
@@ -153,10 +176,10 @@ export function setLiveToolCall(message: LogicalMessage, spec: LiveToolSpec, sta
     status,
     progress,
     input: spec.input,
-    durationMs: status === 'success' ? 180 + progress * 3 : Math.round(progress * 3),
+    durationMs: status === 'success' ? 480 : Math.round(progress * 4.8),
     defaultOpen: false,
-  })
-  return replaceOrInsertBeforeAnswer(message, id, replacement)
+  }, (blocks[index]?.revision ?? 0) + 1)
+  return { ...message, blocks }
 }
 
 export function createLiveToolResult(message: LogicalMessage, spec: LiveToolSpec): AppendCanonicalMessage {
@@ -218,18 +241,6 @@ export function addFinalEvidence(message: LogicalMessage, kind: 'diff' | 'code' 
       { id: 'loop-mobile-proof', name: 'agent-loop-mobile.png', kind: 'image', mimeType: 'image/png', width: 780, height: 1380, sizeBytes: 514_000, seed: 8802 },
     ],
   }))
-}
-
-function replaceOrInsertBeforeAnswer(message: LogicalMessage, id: string, replacement: ContentBlock): LogicalMessage {
-  const blocks = [...message.blocks]
-  const existing = blocks.findIndex(entry => entry.id === id)
-  if (existing >= 0) blocks[existing] = replacement
-  else {
-    const answerIndex = blocks.findIndex(entry => entry.id === 'answer' && entry.type === 'markdown')
-    if (answerIndex < 0) blocks.push(replacement)
-    else blocks.splice(answerIndex + 1, 0, replacement)
-  }
-  return { ...message, blocks }
 }
 
 function addBlockBeforeAnswer(message: LogicalMessage, contentBlock: ContentBlock): LogicalMessage {
