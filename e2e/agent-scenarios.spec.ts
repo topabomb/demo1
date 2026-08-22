@@ -97,10 +97,15 @@ test('default Demo proves coding-workbench rendering semantics through one real 
   await expect(page.locator('[data-message-index="84004"]').getByTestId('tool-block')).toHaveAttribute('data-call-id', 'loop-search-boundaries')
 
   await jump(page, 84_005)
-  const delegated = page.locator('[data-message-index="84005"]').getByTestId('agent-run-block')
-  await expect(delegated).toHaveAttribute('data-run-id', 'review-rendering-contract')
-  await expect(delegated).toContainText('Review rendering contract')
-  await expect(delegated).toContainText('completed')
+  const delegation = page.locator('[data-message-index="84005"]').getByTestId('delegation-block')
+  await expect(delegation).toContainText('Delegated verification')
+  const foreground = delegation.locator('[data-run-id="review-rendering-contract"]')
+  await expect(foreground).toHaveAttribute('data-mode', 'foreground')
+  await expect(foreground).toHaveAttribute('data-status', 'completed')
+  await expect(foreground).toHaveAttribute('data-child-session-id', 'child-review-contract')
+  const background = delegation.locator('[data-mode="background"]')
+  await expect(background).toHaveCount(2)
+  await expect(delegation.locator('[data-mode="background"][data-status="running"]')).toHaveCount(2)
 
   const incrementalBeforeTerminal = numeric(await page.getByTestId('projection-incremental').textContent())
   await page.getByTestId('stream-start').click()
@@ -118,10 +123,19 @@ test('default Demo proves coding-workbench rendering semantics through one real 
   await expect(terminal).toHaveAttribute('data-call-id', 'loop-run-tests')
   await expect(terminal).toContainText('pnpm test')
   await expect(terminal).toContainText('vite build')
-  await expect(terminal).toContainText('29 passed')
+  await expect(terminal).toContainText('Chromium suite passed')
   await expect(terminal).toContainText('success')
   await expect(terminal).toContainText('exit 0')
   expect(numeric(await page.getByTestId('projection-incremental').textContent())).toBeGreaterThan(incrementalBeforeTerminal)
+
+  // Parent execution has advanced through shell while the two background children
+  // independently reached terminal state in the earlier delegation block.
+  await jump(page, 84_005)
+  const settledDelegation = page.locator('[data-message-index="84005"]').getByTestId('delegation-block')
+  await expect(settledDelegation.locator('[data-status="completed"]')).toHaveCount(3)
+  await expect(settledDelegation.locator('[data-mode="background"][data-status="completed"]')).toHaveCount(2)
+  await expect(settledDelegation.locator('[data-run-id="audit-terminal-projection"]')).toContainText('stable RenderUnit')
+  await expect(settledDelegation.locator('[data-run-id="audit-resource-semantics"]')).toContainText('host-owned')
 
   await expect(page.getByTestId('active-turn-id')).toContainText('agent-loop:release-investigation')
   await expect(page.getByTestId('active-step-id')).toContainText(':step-4')
