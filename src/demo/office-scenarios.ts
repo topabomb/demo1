@@ -113,11 +113,11 @@ export function meetingFollowupScenario(scope: string): readonly AppendCanonical
     },
     {
       turnId: turn, stepId: `${turn}:step-2`, role: 'assistant',
-      blocks: [block('send-followup', 'tool-call', { name: 'send_meeting_followup', callId: 'meeting-followup-approval', category: 'productivity', presentation: { kind: 'resources', resources: [thread] }, resources: [thread], status: 'running', input: { recipients: 6, subject: 'Launch readiness — owners and Friday review', calendar: { durationMinutes: 30, when: 'Friday 10:00' }, requiresApproval: true }, durationMs: 0, defaultOpen: false })],
+      blocks: [block('send-followup', 'tool-call', { name: 'send_meeting_followup', callId: 'meeting-followup-approval', category: 'productivity', presentation: { kind: 'resources', resources: [thread] }, resources: [thread], input: { recipients: 6, subject: 'Launch readiness — owners and Friday review', calendar: { durationMinutes: 30, when: 'Friday 10:00' }, requiresApproval: true }, defaultOpen: false })],
     },
     {
       turnId: turn, stepId: `${turn}:step-2`, role: 'assistant',
-      blocks: [block('waiting', 'markdown', { markdown: 'The message and calendar change are ready but have not been sent. Approve or deny the pending action in the composer; the approval state belongs to the session, while the actual mail/calendar side effect belongs to the external adapter.' })],
+      blocks: [block('waiting', 'markdown', { markdown: 'The proposed message/calendar tool call is correlated to the pending approval but has not executed, so it intentionally carries no execution status. Approve or deny the blocker in the composer; the external adapter owns the actual side effect and any provider continuation.' })],
     },
   ]
 }
