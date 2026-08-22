@@ -46,6 +46,7 @@ describe('Agent presentation framework', () => {
       const fences = chunk.text.match(/```/g)?.length ?? 0
       expect(fences % 2).toBe(0)
     }
+    expect(chunks.map(chunk => chunk.text).join('')).toBe(source)
   })
 
   it('keeps tight GFM tables intact instead of splitting at ordinary line breaks', () => {
@@ -57,6 +58,42 @@ describe('Agent presentation framework', () => {
     const chunks = splitMarkdown(source, 180)
     expect(chunks).toHaveLength(1)
     expect(chunks[0]?.text).toBe(source)
+  })
+
+  it('keeps loose GFM lists atomic across internal blank lines', () => {
+    const source = [
+      '- first item',
+      '',
+      `  ${'first continuation '.repeat(24)}`,
+      '',
+      '- second item',
+      '',
+      `  ${'second continuation '.repeat(24)}`,
+    ].join('\n')
+    const chunks = splitMarkdown(source, 120)
+    expect(chunks).toHaveLength(1)
+    expect(chunks[0]?.text).toBe(source)
+  })
+
+  it('splits only between parser-recognized top-level blocks and preserves source bytes', () => {
+    const source = [
+      '## before',
+      '',
+      'A paragraph before the quote.',
+      '',
+      '> quoted paragraph',
+      '>',
+      '> - nested one',
+      '> - nested two',
+      '',
+      '## after',
+      '',
+      'Trailing paragraph.',
+    ].join('\n')
+    const chunks = splitMarkdown(source, 80)
+    expect(chunks.length).toBeGreaterThan(1)
+    expect(chunks.map(chunk => chunk.text).join('')).toBe(source)
+    expect(chunks.filter(chunk => chunk.text.includes('> quoted paragraph'))).toHaveLength(1)
   })
 
   it('supports semantic projector extensions without modifying the default registry', () => {
