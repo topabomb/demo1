@@ -1,6 +1,6 @@
 import type { ContentBlockMap, LogicalMessage } from '../model/conversation'
 
-/** Live execution state. `waiting` is reserved for a pending user interaction. */
+/** Current session execution state. `waiting` is reserved for one pending user interaction. */
 export type SessionStatus = 'idle' | 'working' | 'waiting' | 'interrupted'
 
 /** Explicitly settled Turn outcomes. A waiting interaction is live state, not an end reason. */
@@ -48,6 +48,8 @@ interface PendingInteractionBase {
 export interface PendingApproval extends PendingInteractionBase {
   kind: 'approval'
   toolName?: string
+  /** Optional correlation to the exact canonical tool call being reviewed. */
+  callId?: string
 }
 
 export interface PendingQuestion extends PendingInteractionBase {
@@ -56,10 +58,14 @@ export interface PendingQuestion extends PendingInteractionBase {
 
 export type PendingInteraction = PendingApproval | PendingQuestion
 
-/** Explicit response to a session-owned blocker. Execution adapters interpret the value. */
+/**
+ * Explicit response to one exact session-owned blocker. The stable interaction id
+ * prevents a delayed UI/provider response from resolving a newer blocker of the same kind.
+ * Execution adapters interpret the approval/answer value after Engine validation.
+ */
 export type InteractionResolution =
-  | { kind: 'approval'; approved: boolean }
-  | { kind: 'question'; answer: string | null }
+  | { interactionId: string; kind: 'approval'; approved: boolean }
+  | { interactionId: string; kind: 'question'; answer: string | null }
 
 /** Durable/session semantics only. Relative age, badges and other list chrome belong to products. */
 export interface ConversationDescriptor {
