@@ -21,6 +21,17 @@ function mixed(reasoning: string, markdown: string, revision: number): LogicalMe
   }
 }
 
+function terminal(output: string, revision: number): LogicalMessage {
+  return {
+    id: 's:m-terminal', index: 3, turnId: 't-terminal', stepId: 't-terminal:s0', role: 'tool',
+    revision, live: true,
+    blocks: [
+      block('tool-result', 'tool-result', { name: 'run_tests', callId: 'call-tests', category: 'shell', status: 'running', output: { state: 'streaming' } }, revision),
+      block('terminal', 'terminal', { callId: 'call-tests', command: 'pnpm test', output, status: 'running', defaultOpen: true }, revision),
+    ],
+  }
+}
+
 describe('ProjectionEngine', () => {
   it('memoizes unchanged hot messages instead of re-projecting on refresh', () => {
     const engine = new ProjectionEngine(undefined, 256)
@@ -102,6 +113,37 @@ describe('ProjectionEngine', () => {
     expect(after.find(unit => unit.blockId === 'answer')?.payload.markdown).toContain('continues')
     expect(engine.stats.fullProjects).toBe(1)
     expect(engine.stats.incrementalPatches).toBe(1)
+  })
+
+  it('patches terminal output as one stable render node without invalidating the tool-result sibling', () => {
+    const engine = new ProjectionEngine(undefined, 256)
+    const before = engine.projectMessage(terminal('$ pnpm test\n', 0))
+    const resultBefore = before.find(unit => unit.blockId === 'tool-result')!
+    const terminalBefore = before.find(unit => unit.blockId === 'terminal')!
+    const delta = ' ✓ projection engine\n'
+    const after = engine.appendTerminalDelta(terminal(`$ pnpm test\n${delta}`, 1), 'terminal', delta)
+    const terminalAfter = after.find(unit => unit.blockId === 'terminal')!
+
+    expect(after.find(unit => unit.blockId === 'tool-result')).toBe(resultBefore)
+    expect(terminalAfter.id).toBe(terminalBefore.id)
+    expect(terminalAfter).not.toBe(terminalBefore)
+    expect(terminalAfter.payload.output).toContain('projection engine')
+    expect(engine.stats.fullProjects).toBe(1)
+    expect(engine.stats.incrementalPatches).toBe(1)
+  })
+
+  it('projects Plan and AgentRun as semantic render kinds without layout metadata', () => {
+    const engine = new ProjectionEngine(undefined, 256)
+    const message: LogicalMessage = {
+      id: 's:m-workbench', index: 4, turnId: 't-workbench', stepId: 't-workbench:s1', role: 'assistant', revision: 0,
+      blocks: [
+        block('plan', 'plan', { items: [{ id: 'inspect', text: 'Inspect renderer', status: 'in-progress' }] }),
+        block('delegated', 'agent-run', { runId: 'review-1', title: 'Review contract', agent: 'reviewer', status: 'completed', summary: 'No layout dependency.' }),
+      ],
+    }
+    const units = engine.projectMessage(message)
+    expect(units.map(unit => unit.kind)).toEqual(['plan', 'agent-run'])
+    expect(units.every(unit => !('panel' in unit.payload) && !('placement' in unit.payload))).toBe(true)
   })
 
   it('keeps its rebuildable cache bounded independently of total history', () => {
