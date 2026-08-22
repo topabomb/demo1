@@ -80,8 +80,47 @@ describe('engine architecture boundaries', () => {
     expect(source).not.toMatch(/(?:demo|\.\/vue\/)/)
     expect(source).toContain('ConversationHistorySource')
     expect(source).toContain('InteractionResolution')
+    expect(source).toContain('ResourceRef')
+    expect(source).toContain('PlanItem')
+    expect(source).toContain('ToolPresentationIntent')
+    expect(source).toContain('AgentRunRef')
     expect(source).not.toMatch(/ConversationBackend|ConversationHistoryAdapter/)
     expect(source).not.toMatch(/SessionUiSnapshot|ShiftPlan|WINDOW_MESSAGES|SHIFT_MESSAGES/)
+    expect(source).not.toContain('PresentationSurface')
+  })
+
+  it('keeps workbench rendering semantics layout-, style- and policy-agnostic', () => {
+    const model = readFileSync(join(engineRoot, 'model/conversation.ts'), 'utf8')
+    const renderUnit = readFileSync(join(engineRoot, 'presentation/render-unit.ts'), 'utf8')
+    const projector = readFileSync(join(engineRoot, 'presentation/projector-registry.ts'), 'utf8')
+    const combined = `${model}\n${renderUnit}`
+
+    expect(model).toContain('export interface ResourceRef')
+    expect(model).toContain("kind: 'file' | 'url' | 'artifact'")
+    expect(model).toContain("| { kind: 'terminal'; command?: string; cwd?: ResourceRef }")
+    expect(model).toContain("plan: { title?: string; items: readonly PlanItem[] }")
+    expect(model).toContain("'agent-run': AgentRunRef")
+    expect(model).toContain("terminal: { callId?: string")
+    expect(model).toContain('diff: { resource: ResourceRef;')
+    expect(model).not.toMatch(/diff:\s*\{[^}]*file:/s)
+    expect(combined).not.toMatch(/PresentationSurface|panelPlacement|panelSide|sidebar|drawer|cssClass|className|color:/)
+    expect(projector).toContain(".register('plan'")
+    expect(projector).toContain(".register('terminal'")
+    expect(projector).toContain(".register('agent-run'")
+  })
+
+  it('keeps terminal streaming incremental without turning Engine into a process manager', () => {
+    const mutations = readFileSync(join(engineRoot, 'model/message-mutations.ts'), 'utf8')
+    const kernel = readFileSync(join(engineRoot, 'conversation/session-kernel.ts'), 'utf8')
+    const projection = readFileSync(join(engineRoot, 'presentation/projection-engine.ts'), 'utf8')
+    const runtime = readFileSync(join(engineRoot, 'runtime/session-runtime.ts'), 'utf8')
+
+    expect(mutations).toContain('appendTerminalOutput')
+    expect(mutations).toContain('settleTerminal')
+    expect(kernel).toContain("kind: 'append-terminal'")
+    expect(projection).toContain('appendTerminalDelta')
+    expect(runtime).toContain("event.contentPatch?.kind === 'append-terminal'")
+    expect(`${kernel}\n${projection}\n${runtime}`).not.toMatch(/spawn\(|child_process|exec\(|pty|processManager|killProcess/)
   })
 
   it('keeps the synchronous history contract honest about async IO ownership', () => {
@@ -100,10 +139,7 @@ describe('engine architecture boundaries', () => {
     const runtime = readFileSync(join(engineRoot, 'runtime/session-runtime.ts'), 'utf8')
     const demoStream = readFileSync(join(demoRoot, 'stream-controller.ts'), 'utf8')
     const workspace = readFileSync(join(demoRoot, 'workspace-runtime.ts'), 'utf8')
-    const turnReasonDeclaration = contracts.slice(
-      contracts.indexOf('export type TurnEndReasonKind'),
-      contracts.indexOf('export interface LlmFailure'),
-    )
+    const turnReasonDeclaration = contracts.slice(contracts.indexOf('export type TurnEndReasonKind'), contracts.indexOf('export interface LlmFailure'))
 
     expect(contracts).toContain("| { kind: 'question'; answer: string | null }")
     expect(contracts).toContain('activeAssistantIndex?: number | null')
@@ -122,7 +158,7 @@ describe('engine architecture boundaries', () => {
     expect(workspace).toContain('activeAssistantIndex: descriptor.logicalCount - 1')
   })
 
-  it('keeps synthetic playback and Agent-loop policy in Demo', () => {
+  it('keeps synthetic playback, Agent-loop, plan timing and delegated-run policy in Demo', () => {
     const demoStream = readFileSync(join(demoRoot, 'stream-controller.ts'), 'utf8')
     const liveScript = readFileSync(join(demoRoot, 'live-run-script.ts'), 'utf8')
     expect(demoStream).toMatch(/\brate\s*=\s*20/)
@@ -131,10 +167,13 @@ describe('engine architecture boundaries', () => {
     expect(demoStream).toContain('estimateTokens')
     expect(demoStream).toContain("DemoPlaybackMode = 'standard' | 'stress' | 'agent-loop'")
     expect(demoStream).toContain('continueExecutionAt')
-    expect(liveScript).toContain('createLiveToolResult')
+    expect(demoStream).toContain('#updatePlan')
+    expect(liveScript).toContain('review-rendering-contract')
+    expect(liveScript).toContain('terminalChunks')
     expect(liveScript).toContain("category: 'filesystem'")
     expect(liveScript).toContain("category: 'search'")
     expect(liveScript).toContain("category: 'shell'")
+    expect(liveScript).toContain("presentation: { kind: 'terminal'")
   })
 
   it('keeps Vue adapter generic while Demo diagnostics owns playback controls', () => {
@@ -183,6 +222,9 @@ describe('engine architecture boundaries', () => {
     expect(publicVue).not.toMatch(/ConversationNodeSeat|defaultRendererRegistry|registerRenderer|resolveRenderer|registeredRendererIds/)
     expect(registry).toContain('export class RendererRegistry')
     expect(registry).toContain('clone(): RendererRegistry')
+    expect(registry).toContain("['plan', PlanBlock]")
+    expect(registry).toContain("['terminal', TerminalBlock]")
+    expect(registry).toContain("['agent-run', AgentRunBlock]")
     expect(viewport).toContain('renderers?: RendererResolver')
   })
 
@@ -202,21 +244,24 @@ describe('engine architecture boundaries', () => {
     expect(scenarios).toContain("block('request', 'markdown'")
     expect(scenarios).toContain("'tool-call'")
     expect(scenarios).toContain("'tool-result'")
+    expect(scenarios).toContain("'plan'")
     expect(scenarios).toContain("'code'")
     expect(scenarios).toContain("'diff'")
     expect(scenarios).toContain("'attachments'")
+    expect(scenarios).toContain("kind: 'file'")
     expect(adapter).toContain('ReadonlyMap<number, LogicalMessage>')
     expect(adapter).toContain('this.#source.getRange')
   })
 
-  it('keeps Demo and Engine CSS ownership compact, scoped and separate', () => {
+  it('keeps Demo and Engine Vue CSS ownership compact, scoped and separate', () => {
     const main = readFileSync(join(demoRoot, 'main.ts'), 'utf8')
     const demoCss = readFileSync(join(demoRoot, 'styles/demo.css'), 'utf8')
     expect(main).toContain("./styles/demo.css")
     expect(main).toContain("../engine/vue/engine.css")
+    expect(main).toContain("../engine/vue/workbench-renderers.css")
     expect(main).toContain("./styles/architecture.css")
     expect(demoCss).not.toMatch(/\.session-search|\.scenario-button|\.workspace-context|\.demo-context-(?:chip|copy)|\.sidebar-version|\.session-empty/)
-    for (const name of ['engine.css', 'renderers.css']) {
+    for (const name of ['engine.css', 'renderers.css', 'workbench-renderers.css']) {
       const css = readFileSync(join(engineRoot, `vue/${name}`), 'utf8')
       expect(css).toContain('[data-conversation-engine].conversation-shell')
       expect(css).not.toMatch(/(^|\n)\s*:root\s*\{/)
@@ -227,10 +272,11 @@ describe('engine architecture boundaries', () => {
   it('keeps the architecture page aligned with current repository boundaries', () => {
     const page = readFileSync(join(demoRoot, 'components/ArchitectureOverview.vue'), 'utf8')
     expect(page).toContain('docs/architecture.md')
+    expect(page).toContain('Agent Workbench Rendering Engine')
+    expect(page).toContain('Semantic renderability is Engine responsibility')
+    expect(page).toContain('no core PresentationSurface')
     expect(page).toContain('package publishing disabled')
     expect(page).not.toContain('Private Vite application')
-    expect(page).not.toContain('agent-workspace-reference-architecture.md')
-    expect(page).not.toContain('DeepSeek Harness')
     expect(page).not.toContain('Session + Workspace Kernel')
   })
 
